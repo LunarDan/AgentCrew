@@ -268,7 +268,9 @@ function renderBullets(
   const w = centered ? 7.4 : 8.5
   let nextY = y
 
-  for (const [index, item] of items.slice(0, 8).entries()) {
+  // 不设条数上限：放不下由 maxY 边界决定，且与预览保持一致（历史上这里切 8、预览切 7，
+  // 导致第 8 条在 .pptx 里有、预览里没有）。溢出由预览侧的提示告知用户。
+  for (const [index, item] of items.entries()) {
     if (nextY + rowH > maxY) break
     const tone = detectBulletTone(item)
     const color = tone === 'positive' ? theme.accentPositive : tone === 'negative' ? theme.accentNegative : theme.primary
@@ -317,7 +319,7 @@ function renderMetricGrid(
   const cols = metrics.length <= 2 ? metrics.length : 2
   const cardW = cols === 1 ? 8.5 : 4.15
   const cardH = 0.9
-  metrics.slice(0, 6).forEach((metric, index) => {
+  metrics.forEach((metric, index) => {
     const col = index % cols
     const row = Math.floor(index / cols)
     const cardY = y + row * (cardH + 0.18)
@@ -438,7 +440,7 @@ function renderTimeline(
   y: number,
   maxY: number,
 ): number {
-  const items = timeline.items.slice(0, 6)
+  const items = timeline.items
   const rowH = 0.72
   let nextY = y
   for (const [index, item] of items.entries()) {
@@ -489,10 +491,11 @@ function renderColumns(
   y: number,
   maxY: number,
 ): number {
-  const items = columns.columns.slice(0, 3)
+  const items = columns.columns
   const gap = 0.18
   const x = 0.75
-  const w = (8.5 - gap * (items.length - 1)) / Math.max(1, items.length)
+  // 列数不设上限后，列宽必须留地板：否则列数一多，gap 总和超过可用宽度会算出负数宽度、生成非法 XML。
+  const w = Math.max(0.5, (8.5 - gap * (items.length - 1)) / Math.max(1, items.length))
   const h = Math.max(0.9, Math.min(2.6, maxY - y))
   items.forEach((column, index) => {
     const colX = x + index * (w + gap)
@@ -520,7 +523,7 @@ function renderColumns(
       })
       colY += 0.3
     }
-    for (const block of (column.blocks ?? []).slice(0, 4)) {
+    for (const block of column.blocks ?? []) {
       if (colY > y + h - 0.2) break
       colY = renderColumnBlock(slide, shapeTypes, block, theme, colX + 0.15, colY, w - 0.3, y + h - 0.12) + 0.06
     }
@@ -555,7 +558,7 @@ function renderColumnBlock(
   }
   if (block.type === 'bullets') {
     let nextY = y
-    for (const item of block.items.slice(0, 4)) {
+    for (const item of block.items) {
       if (nextY + 0.18 > maxY) break
       slide.addText(`• ${item}`, {
         x,

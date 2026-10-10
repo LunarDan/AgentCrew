@@ -151,7 +151,9 @@ function normalizeBlock(raw: unknown): PptBlock | null {
 function normalizeColumns(rawColumns: unknown): PptColumn[] {
   if (!Array.isArray(rawColumns)) return []
   const out: PptColumn[] = []
-  for (const raw of rawColumns.slice(0, 3)) {
+  // 不截断列数：这里的数据还会被写回可编辑 JSON，切掉第 4 列等于用户一保存就永久丢内容。
+  // 排不下由渲染侧给出溢出提示，而不是在这里静默吞掉。
+  for (const raw of rawColumns) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
     const obj = raw as Record<string, unknown>
     const title = cleanText(obj.title)

@@ -1,9 +1,9 @@
 'use client'
 
-import { AlertCircle, Check, ChevronLeft, ChevronRight, Clock, Copy, Download, ExternalLink, Eye, FileCode, FileText, FolderGit2, FolderTree, GitCompare, History, Image as ImageIcon, Layers, Loader2, Maximize, Pencil, Presentation, RefreshCw, RotateCcw, Save, X, ZoomIn, ZoomOut } from 'lucide-react'
+import { AlertCircle, Check, ChevronLeft, ChevronRight, Clock, Copy, Download, ExternalLink, Eye, FileCode, FileText, FolderGit2, FolderTree, GitCompare, History, Image as ImageIcon, Layers, Loader2, Maximize, Minimize, Pencil, Presentation, RefreshCw, RotateCcw, Save, X, ZoomIn, ZoomOut } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import { useTheme } from 'next-themes'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import ReactDiffViewer, { DiffMethod } from 'react-diff-viewer-continued'
 
 import { buildDiffStyles } from '@/components/diff-viewer-styles'
@@ -694,6 +694,7 @@ function SlideDeckView({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const [isFullscreen, setIsFullscreen] = useState(false)
 
   useEffect(() => {
     setIdx(0)
@@ -702,6 +703,13 @@ function SlideDeckView({
     setSaving(false)
     setError(null)
   }, [serialized])
+
+  // 全屏元素是整个 deck（工具栏 + 舞台），否则翻页/退出按钮会留在全屏之外点不到。
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(document.fullscreenElement === containerRef.current)
+    document.addEventListener('fullscreenchange', onChange)
+    return () => document.removeEventListener('fullscreenchange', onChange)
+  }, [])
 
   const total = deck.slides.length
   const safeIdx = Math.min(idx, Math.max(0, total - 1))
@@ -719,13 +727,20 @@ function SlideDeckView({
     }
   }
 
-  const enterFullscreen = () => {
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {})
+      return
+    }
     const el = containerRef.current
     if (el?.requestFullscreen) el.requestFullscreen().catch(() => {})
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div
+      ref={containerRef}
+      className={cn('flex min-h-0 flex-1 flex-col', isFullscreen && 'bg-background')}
+    >
       <div className="flex shrink-0 items-center border-b px-2">
         <ViewTab active={view === 'render'} onClick={() => setView('render')}>
           <Eye className="size-3.5" />
@@ -764,23 +779,23 @@ function SlideDeckView({
               variant="ghost"
               size="icon"
               className="size-7"
-              onClick={enterFullscreen}
-              title="全屏"
+              onClick={toggleFullscreen}
+              title={isFullscreen ? '退出全屏' : '全屏'}
             >
-              <Maximize className="size-4" />
+              {isFullscreen ? <Minimize className="size-4" /> : <Maximize className="size-4" />}
             </Button>
           </div>
         )}
       </div>
       <div className="min-h-0 flex-1">
         {view === 'render' ? (
-          <div ref={containerRef} className="size-full bg-zinc-100 dark:bg-zinc-900">
-            {current ? (
-              <SlideView slide={current} theme={deck.theme} />
-            ) : (
+          current ? (
+            <SlideStage slide={current} theme={deck.theme} />
+          ) : (
+            <div className="flex size-full items-center justify-center bg-zinc-100 dark:bg-zinc-900">
               <Empty>没有幻灯片</Empty>
-            )}
-          </div>
+            </div>
+          )
         ) : (
           <ArtifactCodeEditor value={draft} onChange={setDraft} filename="slides.json" type="ppt" />
         )}
@@ -801,12 +816,94 @@ function SlideDeckView({
   )
 }
 
+// 幻灯片按固定的逻辑画布排版，再整体 scale 适配面板。
+// 版式因此与面板宽度解耦（任何窗口宽度下换行位置一致），全屏是真的等比放大而非换一套字号。
+// 尺寸取 768×432 而不是 1280×720：它就是原先 max-w-3xl + aspect-video 的实际设计尺寸，
+// 现有的 text-* 字号无需重新调参；缩放是矢量变换，放多大都不糊。
+const PPT_STAGE_W = 768
+const PPT_STAGE_H = 432
+
+function SlideStage({ slide, theme }: { slide: NormalizedPptSlide; theme?: PptTheme }) {
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const scale = useFitScale(viewportRef, PPT_STAGE_W, PPT_STAGE_H)
+  const [overflowing, setOverflowing] = useState(false)
+
+  // scale 变化说明画布刚挂载；slide 变化说明翻页。两者都要重新量一次。
+  useLayoutEffect(() => {
+    const el = contentRef.current
+    // 无 blocks 的页不会挂载测量节点：必须清掉上一页的结论，否则角标会跟着翻页残留。
+    if (!el) {
+      setOverflowing(false)
+      return
+    }
+    // scrollHeight / clientHeight 是布局值，不受外层 transform: scale 影响，可直接比较。
+    // +1 是容差：亚像素内容会让 scrollHeight 取整后多出 1px 的假溢出。
+    setOverflowing(el.scrollHeight > el.clientHeight + 1)
+  }, [scale, slide])
+
+  return (
+    <div
+      ref={viewportRef}
+      className="relative size-full overflow-hidden bg-zinc-100 p-6 dark:bg-zinc-900"
+    >
+      {scale !== null && (
+        <div
+          className="absolute inset-0 m-auto"
+          style={{ width: PPT_STAGE_W * scale, height: PPT_STAGE_H * scale }}
+        >
+          <div
+            style={{
+              width: PPT_STAGE_W,
+              height: PPT_STAGE_H,
+              transform: `scale(${scale})`,
+              transformOrigin: 'top left',
+            }}
+          >
+            <SlideView slide={slide} theme={theme} contentRef={contentRef} />
+          </div>
+        </div>
+      )}
+      {overflowing && (
+        <div className="pointer-events-none absolute bottom-3 right-4 flex items-center gap-1.5 rounded-md bg-amber-500/95 px-2 py-1 text-[11px] font-medium text-white shadow-sm">
+          <AlertCircle className="size-3.5" />
+          本页内容超出画布，导出会被截断
+        </div>
+      )}
+    </div>
+  )
+}
+
+// 用 ResizeObserver 的 contentRect 量可用区（已排除 p-6 内边距），因而无需手工减 padding。
+// 初始返回 null：先量再渲染，避免首帧按 1:1 闪一下。
+function useFitScale(
+  ref: React.RefObject<HTMLElement | null>,
+  w: number,
+  h: number,
+): number | null {
+  const [scale, setScale] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect
+      if (!rect || rect.width <= 0 || rect.height <= 0) return
+      setScale(Math.min(rect.width / w, rect.height / h))
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [ref, w, h])
+  return scale
+}
+
 function SlideView({
   slide,
   theme,
+  contentRef,
 }: {
   slide: NormalizedPptSlide
   theme?: PptTheme
+  contentRef?: React.Ref<HTMLDivElement>
 }) {
   const t = resolvePptTheme(theme)
   const centered = slide.layout === 'title' || slide.layout === 'section'
@@ -815,65 +912,58 @@ function SlideView({
 
   return (
     <div
-      className="flex size-full items-center justify-center p-6"
-      style={{ background: hx(t.background) }}
+      className="flex size-full flex-col overflow-hidden rounded-lg shadow-md"
+      style={{
+        border: `1px solid ${hx(t.divider)}`,
+        background: hx(centered ? t.primary : t.surface),
+        fontFamily: `${t.fontBody}, system-ui, sans-serif`,
+      }}
     >
-      <div
-        className="aspect-video w-full max-w-3xl overflow-hidden rounded-lg shadow-md"
-        style={{
-          border: `1px solid ${hx(t.divider)}`,
-          fontFamily: `${t.fontBody}, system-ui, sans-serif`,
-        }}
-      >
-        {centered ? (
-          <div
-            className="flex size-full flex-col items-center justify-center gap-5 overflow-hidden p-12 text-center"
-            style={{ background: hx(t.primary) }}
-          >
-            {heading && (
-              <h2
-                className="line-clamp-3 max-w-full break-words text-3xl font-bold leading-tight [overflow-wrap:anywhere]"
-                style={{ color: '#FFFFFF', fontFamily: `${t.fontHeading}, system-ui, sans-serif` }}
-              >
-                {heading}
-              </h2>
-            )}
-            {slide.subtitle && (
-              <div className="line-clamp-2 max-w-2xl break-words text-base [overflow-wrap:anywhere]" style={{ color: 'rgba(255,255,255,0.82)' }}>
-                {slide.subtitle}
+      {centered ? (
+        <div className="flex size-full flex-col items-center justify-center gap-5 overflow-hidden p-12 text-center">
+          {heading && (
+            <h2
+              className="line-clamp-3 max-w-full break-words text-3xl font-bold leading-tight [overflow-wrap:anywhere]"
+              style={{ color: '#FFFFFF', fontFamily: `${t.fontHeading}, system-ui, sans-serif` }}
+            >
+              {heading}
+            </h2>
+          )}
+          {slide.subtitle && (
+            <div className="line-clamp-2 max-w-2xl break-words text-base [overflow-wrap:anywhere]" style={{ color: 'rgba(255,255,255,0.82)' }}>
+              {slide.subtitle}
+            </div>
+          )}
+          <SlideBlocks blocks={slide.blocks} theme={t} layout={slide.layout} centered contentRef={contentRef} />
+        </div>
+      ) : (
+        <>
+          <div className="h-1.5 shrink-0" style={{ background: hx(t.primary) }} />
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-10">
+            {(heading || slide.subtitle) && (
+              <div className="min-w-0 border-b pb-3" style={{ borderColor: hx(t.divider) }}>
+                {heading && (
+                  <h2
+                    className="line-clamp-2 break-words text-2xl font-bold leading-tight [overflow-wrap:anywhere]"
+                    style={{
+                      color: hx(t.primary),
+                      fontFamily: `${t.fontHeading}, system-ui, sans-serif`,
+                    }}
+                  >
+                    {heading}
+                  </h2>
+                )}
+                {slide.subtitle && (
+                  <div className="mt-1 line-clamp-1 break-words text-sm [overflow-wrap:anywhere]" style={{ color: hx(t.textMuted) }}>
+                    {slide.subtitle}
+                  </div>
+                )}
               </div>
             )}
-            <SlideBlocks blocks={slide.blocks} theme={t} layout={slide.layout} centered />
+            <SlideBlocks blocks={slide.blocks} theme={t} layout={slide.layout} contentRef={contentRef} />
           </div>
-        ) : (
-          <div className="flex size-full flex-col" style={{ background: hx(t.surface) }}>
-            <div className="h-1.5 shrink-0" style={{ background: hx(t.primary) }} />
-            <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-10">
-              {(heading || slide.subtitle) && (
-                <div className="min-w-0 border-b pb-3" style={{ borderColor: hx(t.divider) }}>
-                  {heading && (
-                    <h2
-                      className="line-clamp-2 break-words text-2xl font-bold leading-tight [overflow-wrap:anywhere]"
-                      style={{
-                        color: hx(t.primary),
-                        fontFamily: `${t.fontHeading}, system-ui, sans-serif`,
-                      }}
-                    >
-                      {heading}
-                    </h2>
-                  )}
-                  {slide.subtitle && (
-                    <div className="mt-1 line-clamp-1 break-words text-sm [overflow-wrap:anywhere]" style={{ color: hx(t.textMuted) }}>
-                      {slide.subtitle}
-                    </div>
-                  )}
-                </div>
-              )}
-              <SlideBlocks blocks={slide.blocks} theme={t} layout={slide.layout} />
-            </div>
-          </div>
-        )}
-      </div>
+        </>
+      )}
     </div>
   )
 }
@@ -885,18 +975,20 @@ function SlideBlocks({
   theme,
   layout,
   centered = false,
+  contentRef,
 }: {
   blocks: PptBlock[]
   theme: ResolvedPptTheme
   layout: NormalizedPptSlide['layout']
   centered?: boolean
+  contentRef?: React.Ref<HTMLDivElement>
 }) {
   if (blocks.length === 0) return null
 
   const metricOnly = layout === 'metrics' && blocks.every((block) => block.type === 'metric')
   if (metricOnly) {
     return (
-      <div className="grid min-h-0 w-full grid-cols-2 gap-3 overflow-hidden">
+      <div ref={contentRef} className="grid min-h-0 w-full grid-cols-2 gap-3 overflow-hidden">
         {blocks.map((block, index) =>
           block.type === 'metric' ? <MetricBlock key={index} block={block} theme={theme} /> : null,
         )}
@@ -905,7 +997,10 @@ function SlideBlocks({
   }
 
   return (
-    <div className={cn('min-h-0 min-w-0 space-y-2 overflow-hidden', centered && 'max-w-2xl text-left')}>
+    <div
+      ref={contentRef}
+      className={cn('min-h-0 min-w-0 space-y-2 overflow-hidden', centered && 'max-w-2xl text-left')}
+    >
       {blocks.map((block, index) => (
         <SlideBlock key={index} block={block} theme={theme} centered={centered} />
       ))}
@@ -979,7 +1074,7 @@ function BulletsBlock({
   const Tag = ordered ? 'ol' : 'ul'
   return (
     <Tag className="min-w-0 space-y-1.5 overflow-hidden">
-      {items.slice(0, 7).map((text, index) => {
+      {items.map((text, index) => {
         const tone = detectBulletTone(text)
         const color = tone === 'positive' ? hx(theme.accentPositive) : tone === 'negative' ? hx(theme.accentNegative) : hx(theme.primary)
         const icon = ordered ? `${index + 1}.` : tone === 'positive' ? '▲' : tone === 'negative' ? '▼' : '▪'
@@ -1073,7 +1168,7 @@ function TimelineBlock({
   const hx = (c: string) => `#${c}`
   return (
     <div className="grid min-w-0 grid-cols-2 gap-2 overflow-hidden">
-      {block.items.slice(0, 6).map((item, index) => (
+      {block.items.map((item, index) => (
         <div key={`${item.label}-${index}`} className="min-w-0 rounded-md border px-3 py-2" style={{ background: hx(theme.background), borderColor: hx(theme.divider) }}>
           <div className="line-clamp-1 text-[11px] font-semibold" style={{ color: hx(theme.primary) }}>{item.label}</div>
           {item.title && <div className="line-clamp-1 text-sm font-medium" style={{ color: hx(theme.textBody) }}>{item.title}</div>}
@@ -1101,7 +1196,7 @@ function ColumnsBlock({
         <div key={index} className="min-w-0 rounded-lg border p-3" style={{ background: hx(theme.background), borderColor: hx(theme.divider) }}>
           {column.title && <div className="mb-2 line-clamp-1 text-sm font-semibold" style={{ color: hx(theme.primary) }}>{column.title}</div>}
           <div className="space-y-1.5 overflow-hidden">
-            {(column.blocks ?? []).slice(0, 4).map((child, childIndex) => (
+            {(column.blocks ?? []).map((child, childIndex) => (
               <ColumnBlock key={childIndex} block={child} theme={theme} />
             ))}
           </div>
@@ -1117,7 +1212,7 @@ function ColumnBlock({ block, theme }: { block: PptColumnBlock; theme: ResolvedP
     return <div className="line-clamp-3 break-words text-xs leading-relaxed [overflow-wrap:anywhere]" style={{ color: hx(theme.textBody) }}>{block.text}</div>
   }
   if (block.type === 'bullets') {
-    return <BulletsBlock items={block.items.slice(0, 4)} ordered={block.ordered} theme={theme} />
+    return <BulletsBlock items={block.items} ordered={block.ordered} theme={theme} />
   }
   if (block.type === 'metric') {
     return <MetricBlock block={block} theme={theme} />

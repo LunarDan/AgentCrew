@@ -79,6 +79,37 @@ describe('normalizePptDeck', () => {
     })
   })
 
+  it('keeps every column instead of truncating at three', () => {
+    const deck = {
+      type: 'ppt',
+      slides: [
+        {
+          title: 'Four pillars',
+          layout: 'two-column',
+          blocks: [
+            {
+              type: 'columns',
+              columns: ['Alpha', 'Beta', 'Gamma', 'Delta'].map((title) => ({
+                title,
+                blocks: [{ type: 'paragraph', text: `${title} detail` }],
+              })),
+            },
+          ],
+        },
+      ],
+    } as unknown as Extract<ArtifactContent, { type: 'ppt' }>
+
+    // 归一化结果会被写回可编辑 JSON：这里吞掉第 4 列等于用户一保存就永久丢内容。
+    const columns = normalizePptDeck(deck).slides[0].blocks[0]
+    expect(columns).toEqual({
+      type: 'columns',
+      columns: ['Alpha', 'Beta', 'Gamma', 'Delta'].map((title) => ({
+        title,
+        blocks: [{ type: 'paragraph', text: `${title} detail` }],
+      })),
+    })
+  })
+
   it('serializes legacy decks into editable block-based PPT content', () => {
     const deck: Extract<ArtifactContent, { type: 'ppt' }> = {
       type: 'ppt',
