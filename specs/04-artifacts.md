@@ -253,7 +253,11 @@ AgentRunner 在普通 run 完成或 dispatch 子任务完成后读取 `dispatch-
 
 ### ppt
 
-`SlideDeckView`（`artifact-preview-panel.tsx`）：先调用 `normalizePptDeck`，再从 canonical slides 渲染分页幻灯片（◀▶ 翻页 + 页码 + 全屏）。旧版 `title/bullets/layout` 仍显示为原有「标题 + 卡片化要点」风格；新版 `blocks` 支持 heading、paragraph、bullets、metric、quote、timeline、columns、callout、divider、spacer。所有文本容器用固定 slide 边界内的 line clamp / overflow hidden / anywhere wrap，避免长文本撑破预览或全屏画布。**预览与 pptx 导出同源消费 `resolvePptTheme`**（`src/shared/ppt-theme.ts`：把完整视觉 token 填默认后用于背景/主色/正文/字体/字号），反映设计的整套配色而非单一主色。要点纯文本（非 markdown，与导出一致）。「编辑 JSON」视图展示 `toEditablePptContent` 生成的 block-based JSON，保存后提交新版本。
+`SlideDeckView`（`artifact-preview-panel.tsx`）：先调用 `normalizePptDeck`，再从 canonical slides 渲染分页幻灯片（◀▶ 翻页 + 页码 + 全屏）。旧版 `title/bullets/layout` 仍显示为原有「标题 + 卡片化要点」风格；新版 `blocks` 支持 heading、paragraph、bullets、metric、quote、timeline、columns、callout、divider、spacer。**预览与 pptx 导出同源消费 `resolvePptTheme`**（`src/shared/ppt-theme.ts`：把完整视觉 token 填默认后用于背景/主色/正文/字体/字号），反映设计的整套配色而非单一主色。要点纯文本（非 markdown，与导出一致）。「编辑 JSON」视图展示 `toEditablePptContent` 生成的 block-based JSON，保存后提交新版本。
+
+**固定逻辑画布（`SlideStage`）**：幻灯片恒按 `PPT_STAGE_W × PPT_STAGE_H` = 768×432 逻辑像素排版，再由 `useFitScale`（`ResizeObserver` 的 `contentRect`，已排除内边距）算出比例，对整块画布施加 `transform: scale()`，外层套一个尺寸为 `W*scale × H*scale` 的定位盒子做居中。因此：版式与面板宽度解耦（任何窗口宽度下换行位置一致，不再出现「面板越窄压得越扁」），全屏是真正的等比放大而非另一套字号；`scrollHeight/clientHeight` 是布局值、不受 `transform` 影响，所以溢出判定仍在布局空间成立。初始 `scale` 为 `null`，量到尺寸后才渲染画布，避免首帧按 1:1 闪一下。全屏元素是整个 deck（工具栏 + 画布），经 `fullscreenchange` 维护 `isFullscreen` 状态，按钮据此在「全屏 / 退出全屏」间切换 —— 否则翻页与退出按钮会落在全屏元素之外而点不到。
+
+**不静默截断条数**：预览与导出都不再对 items 数量施加写死的上限（历史上预览切 7、导出切 8，导致同一条要点只在其中一侧出现；`normalizeColumns` 也曾切掉第 4 列，而那批数据会写回可编辑 JSON，等于保存即永久丢内容）。放不下的部分由导出侧的 `maxY` 边界、预览侧的高度边界决定；预览若真的排不下，在画布外的视口右下角显示「本页内容超出画布，导出会被截断」角标（角标不随画布缩放，任何比例下都清晰）。文本容器仍保留固定边界内的 line clamp / overflow hidden / anywhere wrap，避免长文本撑破画布。
 
 **导出真 .pptx**：`GET /api/artifacts/:id/export` 的 ppt 分支默认等价于 `?mode=editable`，调 `src/server/ppt-export.ts` 的 `slidesToPptxBuffer`，用 `pptxgenjs`（动态 import；next.config `serverExternalPackages` 已登记）把 canonical blocks 转成 Office 可打开、可继续编辑的 .pptx 二进制。预览近似、导出为交付物（浏览器难像素级预览 pptx）。
 
