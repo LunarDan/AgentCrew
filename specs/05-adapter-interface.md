@@ -80,6 +80,11 @@ interface AdapterInput {
   // Claude Code / Codex adapter 忽略此字段（用 SDK 内置工具集）
   toolNames: string[]
 
+  // 本 run 启用的外部 MCP server（详见 Spec 15）。已由 AgentRunner 在 L3 完成
+  // DB 读取 + enabled 过滤 + ${ENV} 展开 —— adapter 只做形状翻译，不读 DB、不展开占位符。
+  // 只有 Claude Code / Codex 两个 SDK adapter 消费；custom / mock 不支持（P1）。
+  mcpServers?: ResolvedMcpServer[]
+
   // 附件（用户上传的文件/图片）— 用于 multimodal 投递
   attachments?: Array<{
     id: string                  // att_<nanoid>
@@ -114,6 +119,7 @@ interface AdapterInput {
 - 新增 `customConfig.apiKey`：per-agent API key（优先级高于 env，见 Spec 08）
 - 新增 `customConfig.supportsVision`：决定是否把图片以 multimodal 投递
 - 新增 `parentRunId`：Orchestrator 子 run 的父引用
+- 新增 `mcpServers`：外部 MCP server（run 内已解析的 `ResolvedMcpServer[]`，详见 Spec 15 与下方「外部 MCP server 接线」一节）
 
 ---
 
@@ -466,6 +472,48 @@ CodexAdapter 当前必须走 `@openai/codex-sdk`。如果后续 SDK 缺少实现
 
 ---
 
+## 外部 MCP server 接线（Spec 15）
+
+用户登记的外部 MCP server 与 adapter 自己的 `agenthub` MCP bridge 并列接入。**分层**（CLAUDE.md §3.1，adapter 不写 / 不读 DB）：
+
+```
+mcp_servers（DB，L1）
+  → mcp-server-service.resolveMcpServersForAgent()   // L3：纯 DB 读 + enabled 过滤
+  → agent-runner.buildAdapterInput()                 // L3：展开 ${ENV}、按 adapter 过滤 transport、记警告
+  → AdapterInput.mcpServers（ResolvedMcpServer[]）    // L2 边界：plain config
+  → ClaudeCodeAdapter / CodexAdapter                 // L2：只翻译成 SDK 配置
+```
+
+`buildAdapterInput` 里的解析失败（server 被删、`${ENV}` 缺变量、transport 不兼容）**只丢弃该 server 并记一条警告，不 fail 整个 run**（`ResolvedMcpServer` 的 warning 语义，Spec 15 §6.4）。占位符在 **run 启动时**展开、不在写入时，因此 DB 只存占位文本。
+
+**两个 adapter 的形状映射**：
+
+| transport | Claude Code（`mcpServers` option） | Codex（`config.mcp_servers.<name>`） |
+|---|---|---|
+| `stdio` | `{ type:'stdio', command, args, env? }` | `{ command, args, env? }` |
+| `sse` | `{ type:'sse', url, headers? }` | ❌ 不支持的 transport，L3 已过滤 |
+| `http` | `{ type:'http', url, headers? }` | `{ url, http_headers? }` |
+
+- **Claude Code**：`mcpServers: { agenthub: <in-process bridge>, ...<每个外部 server> }`，与现有 `agenthub` 并列传入 `query()`；stdio 子进程由 SDK 自管。
+- **Codex**：写进 `config.mcp_servers`，与 `agenthub` 并列。Codex **靠 `command` / `url` 的存在推断传输方式，没有 `type` 字段**；可选字段（`env` / `headers`）必须**缺省而不是传 `null`** —— SDK 的 TOML 序列化器遇 `null` 会抛。Codex 侧只接受 `stdio` / `http`（无 SSE）。
+- **Codex 的 `config.mcp_servers` 写入的是 AgentHub 隔离的 `CODEX_HOME`**，不碰用户本机 `~/.codex/config.toml`（见本 spec「接入原则 3」与 CLAUDE.md §5.4）。
+
+**transport 支持矩阵**（前后端共用 `src/shared/mcp.ts` 一份）：
+
+| transport | Claude Code | Codex |
+|---|---|---|
+| `stdio` | ✅ | ✅ |
+| `http`（streamable） | ✅ | ✅ |
+| `sse` | ✅ | ❌ |
+
+不支持的 pairing 在 **L3 过滤时就打个警告并跳过**，绝不会带病传给 SDK。
+
+**审批（仅 Claude Code）**：外部工具名 `mcp__<server>__<tool>` 在 `bridgePermission` 里排在默认放行之前（见「ClaudeCodeAdapter / canUseTool 桥」第 5 步）：`trust='always'` 或本会话已批准过该工具 → 直接 allow；否则弹审批（`mcp_tool.pending` / `mcp_tool.resolved`），批准后按 per-tool-per-conversation 记忆（`src/server/mcp-approvals.ts`）。Codex 有自己的一套审批策略与沙箱，AgentHub 拦截不到它的工具决策，故 `trust` 对 Codex 只是**建议性**的。
+
+`custom` adapter 目前**不接**外部 MCP（需新建 MCP 客户端层，P1 未实现）；`mock` 同样不支持。
+
+---
+
 ## AgentRegistry：根据 Agent 路由到 Adapter
 
 源文件：`src/server/adapters/registry.ts`
@@ -514,3 +562,4 @@ class AgentRegistry {
 - Spec 06：Orchestrator 给子 agent 拼 prompt 时也走 CustomAgentAdapter（Orchestrator 本身也是一个 custom agent）
 - Spec 07：toolNames 引用的工具定义
 - Spec 08：agents.api_key / api_base_url 字段；app_settings 表（全局 key 兜底）
+- Spec 15：外部 MCP server 的解析与接入（`AdapterInput.mcpServers`、transport 矩阵、`trust` 审批门）

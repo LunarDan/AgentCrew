@@ -38,6 +38,7 @@
 | `apiKey` | string | — | `''` | 命名 provider 留空走 env var；`openai-compatible` 必填 per-agent key |
 | `apiBaseUrl` | string | — | `''` | Claude Code 可填 Anthropic 兼容 endpoint；Codex 仅可填 Codex/Responses 兼容 endpoint；Custom `openai-compatible` 必填 Chat Completions 兼容 endpoint |
 | `toolNames` | string[] | — | 全栈通用预设 | 当前可勾选：`write_artifact` / `deploy_artifact` / `deploy_workspace` / `read_artifact` / `read_attachment` / `ask_user` / `fs_read` / `fs_write` / `bash` |
+| `mcpServerIds` | string[] | — | `[]` | 该 agent 启用的外部 MCP server id；在「工具集」tab 的多选里勾选，只列出当前 adapter 能跑的 server（矩阵见 `src/shared/mcp.ts`）。与 `toolNames` 独立，SDK adapter 也不清空（Spec 15） |
 | `supportsVision` | boolean | — | `true` | 决定是否把图片 base64 注入 messages |
 | `avatar` | string | — | `'🤖'` | service 层默认（UI 当前不暴露） |
 | `isBuiltin` | boolean | — | `false` | service 写死，UI 不可改 |
@@ -123,6 +124,15 @@ UI 当前允许勾选产物、附件和 workspace 相关常用工具。`plan_tas
 
 **新增工具时**：除了在 `src/server/tools/registry.ts` 注册，还要在 `src/shared/agent-builder-config.ts` 的 `AVAILABLE_AGENT_TOOLS` 加上、并在 `AGENT_TOOL_META` 补一条文案，才能在 UI 正常勾选（详见 Spec 07 「新增工具步骤」）。
 
+### 外部 MCP server 多选（`McpServerPicker`）
+
+用户登记的外部 MCP server 不是 `AVAILABLE_AGENT_TOOLS` 里的工具，而是单独的多选（`McpServerPicker`），存进 `agents.mcp_server_ids`：
+
+- **位置**：创建 / 编辑表单的「工具集」tab 内，**在 `adapterKind === 'custom'` 分支之外** —— P0 的目标是 Claude Code / Codex，`custom` 的 MCP 客户端是 P1。
+- **只列出当前 adapter 能跑的 server**：例如 `sse` server 不会出现在 `codex` agent 上；矩阵是 `src/shared/mcp.ts` 的 `ADAPTER_TRANSPORTS` 一份，前后端共用。
+- **与 `toolNames` 相互独立**：SDK adapter 下 `toolNames` 会被强制清空，`mcpServerIds` 必须保留（这是 SDK agent 拿到用户自选工具的途径，详见 Spec 15）。
+- **提交**：`POST /api/agents` 与 `PATCH /api/agents/[id]` 的 body 都带 `mcpServerIds`；**AI 对话创建（`POST /api/agents/draft`）不带** —— draft schema 没有 MCP 概念，落库走 DB 默认 `[]`。
+
 ---
 
 ## 内置 Agent vs 自建 Agent
@@ -171,7 +181,7 @@ CreateAgentDialog (open, agent=undefined)
        │
        │ 填表 → submit
        ▼
-POST /api/agents { name, description, ..., modelProvider, modelId, apiKey?, apiBaseUrl? }
+POST /api/agents { name, description, ..., modelProvider, modelId, apiKey?, apiBaseUrl?, mcpServerIds? }
        │
        ▼
 createCustomAgent: avatar='🤖' 默认，adapterName='custom'，isBuiltin=false, isOrchestrator=false
@@ -186,6 +196,7 @@ createCustomAgent: avatar='🤖' 默认，adapterName='custom'，isBuiltin=false
 - 工具权限来自 `src/shared/agent-builder-config.ts` 中的确定性预设推断，review 页逐项展示权限说明
 - 默认生成普通自建 Agent，不包含 `plan_tasks` 等 Orchestrator 专用工具
 - 用户可从 review 页切到详细配置继续调整 provider / model / toolNames / systemPrompt
+- draft **不含** `mcpServerIds`：AI 对话创建路径没有 MCP 概念，外部 MCP server 只能在详细配置的「工具集」里勾选；落库时走 `agents.mcp_server_ids` 的 DB 默认 `[]`
 
 ### 编辑
 
@@ -198,7 +209,7 @@ CreateAgentDialog (open, agent=existingRow)
        │ 初始化表单 useEffect 回填字段
        │ 提交 → submit
        ▼
-PATCH /api/agents/:id { ...patch, adapterName? }  // 编辑弹窗会提交当前 adapterName
+PATCH /api/agents/:id { ...patch, adapterName?, mcpServerIds? }  // 编辑弹窗会提交当前 adapterName 与 mcpServerIds
        │
        ▼
 updateCustomAgent: 部分更新；切到 SDK adapter 时 modelProvider=null、toolNames=[]；apiKey null 显式清空
@@ -253,4 +264,5 @@ zod 校验 body 在每个 route 文件内。
 - Spec 01：Agent 实体字段定义
 - Spec 05：CustomAgentAdapter 是自建 agent 的运行时
 - Spec 07：toolNames 引用的工具系统
-- Spec 08：agents 表的 `api_key` / `supports_vision` 等列
+- Spec 08：agents 表的 `api_key` / `supports_vision` / `mcp_server_ids` 等列
+- Spec 15：外部 MCP server 的登记与 per-agent 勾选（`mcpServerIds`）

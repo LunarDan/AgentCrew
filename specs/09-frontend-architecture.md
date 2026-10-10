@@ -102,12 +102,18 @@ interface AppState {
 | `fs_write.resolved` | 从 `pendingWritesByConv[convId]` 移除 `pendingId`；ChatPanel 的清理 effect 会同步关掉对应 `diff:<pwId>` tab |
 | `bash_command.pending` | `pendingBashCommandsByConv[convId].push(pendingCommand)`（已存在的 id 不重复 push） |
 | `bash_command.resolved` | 从 `pendingBashCommandsByConv[convId]` 移除 `pendingId` |
+| `mcp_tool.pending` | `pendingMcpToolCallsByConv[convId].push(pendingCall)`（已存在的 id 不重复 push） |
+| `mcp_tool.resolved` | 从 `pendingMcpToolCallsByConv[convId]` 移除 `pendingId` |
 
 **幂等性**：`message.start` / `run.start` 在 id 已存在时仍 idempotent（覆盖写）；`messageIdsByConv` 用 `includes` 检查防重复。这样支持事件重放（未来重连补发）。
 
 **部署卡片**：`DeployStatusPart` 根据 `DeployStatusRecord.deploymentType` 区分本地静态部署与外部静态发布，根据 `sourceType` 区分 artifact 版本与 workspace 目录来源。`external_static` 时，`previewPath` 是公开 URL，卡片必须继续提供打开 / 复制操作，并在 `localPreviewPath` 存在时显示本地回退路径。源码包 / 容器包下载仍来自本地 deployment id。
 
 **bash 审批卡片**：`PendingBashCommandsPanel` 渲染当前会话 `pendingBashCommandsByConv`。卡片显示发起 Agent、命令、cwd 和审批原因，用户点击执行 / 拒绝后调用 `POST /api/conversations/:id/pending-bash-commands/:commandId`，最终通过 `bash_command.resolved` 清理 UI。
+
+**外部 MCP 审批卡片**：`PendingMcpToolsPanel` 渲染当前会话 `pendingMcpToolCallsByConv`，显示发起 Agent、`mcp__<server>__<tool>` 全名、server 名与入参摘要。用户批准后服务端把该工具记入本会话的已批准集合（`src/server/mcp-approvals.ts`），**本会话内同一工具不再询问**；新会话重新询问。详见 Spec 15。
+
+**MCP 设置区**：`McpServersSettings`（设置面板第 4 个 tab）自管列表状态与增删改查 + 「测试连接」，不复用设置对话框的单一保存 footer。`CreateAgentDialog` 的「工具集」tab 内含 `McpServerPicker`，只列出当前 adapter 能跑的 server（矩阵见 `src/shared/mcp.ts`）。
 
 **部署候选卡片**：`DeployCandidatesPart` 渲染 `deploy_candidates` message part。卡片列出当前会话多个 `web_app` 候选，每项显示标题、版本、创建 Agent、时间与 artifact id。点击候选的部署按钮调用 `POST /api/conversations/:id/deploy`，成功后把返回的 system message upsert 到 store；不通过 SSE，也不启动 AgentRun。
 

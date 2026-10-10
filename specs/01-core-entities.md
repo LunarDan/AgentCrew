@@ -26,6 +26,7 @@ interface Agent {
   apiBaseUrl?: string           // per-agent 自定义 API endpoint；openai-compatible 必填；NULL 时 Claude Code 可走 app_settings.anthropicBaseUrl，Codex 走隔离 CODEX_HOME + SDK 默认 endpoint
 
   toolNames: string[]           // 该 Agent 可调用的工具，引用 Spec 07
+  mcpServerIds: string[]        // 该 Agent 启用的外部 MCP server id（引用 mcp_servers 表），默认 []，详见 Spec 15
 
   isBuiltin: boolean            // 内置（不可删；可改）
   isOrchestrator: boolean       // 标记为协调者；同会话最多 1 个
@@ -44,6 +45,7 @@ type ModelProvider = 'anthropic' | 'openai' | 'deepseek' | 'volcano-ark' | 'open
 - `modelProvider === 'openai-compatible'` 时 `apiKey` 与 `apiBaseUrl` 必填；`apiBaseUrl` 必须是 OpenAI Chat Completions 兼容 endpoint（例如通义千问 compatible-mode、智谱、MiniMax、OpenRouter、SiliconFlow 等兼容地址）
 - `adapterName === 'claude-code'` 时 `modelProvider` 忽略；`modelId` 可选（默认走 SDK 默认模型 `claude-opus-4-7`）；`toolNames` 强制 `[]`（Claude Code 用 SDK 内置工具集，详见 Spec 07）
 - `adapterName === 'codex'` 时 `modelProvider` 忽略；`modelId` 可选（默认 `gpt-5-codex`）；`toolNames` 强制 `[]`（Codex 用 SDK 内置工具集，详见 Spec 05）；`apiBaseUrl` 必须是 Codex/Responses 兼容 endpoint
+- `mcpServerIds` 与 `toolNames` 规则不同：`adapterName` 为 `claude-code` / `codex` 时 `toolNames` 强制 `[]`，但 `mcpServerIds` **保留** —— 这是 SDK agent 拿到用户自选外部工具的途径；默认 `[]`，当前只在 `claude-code` / `codex` 上生效（`custom` 的 MCP 客户端为 P1，见 Spec 15）
 - `apiKey` / `apiBaseUrl` 是 per-agent 凭据：`apiBaseUrl` 非空时，`apiKey` 作为对应 SDK / endpoint 的 token；Claude Code、Codex、Custom openai-compatible 的 Base URL 协议不相同，Chat Completions-only provider 走 Custom adapter
 - `isBuiltin: true` 的 Agent 不可删除但可修改配置（详见 Spec 10）
 - 删除 Agent 不级联删除使用它的 Conversation；前端应展示「已停用 Agent」灰态

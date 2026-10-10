@@ -1,8 +1,8 @@
 # Spec 08 — 数据库 Schema
 
-> Drizzle ORM + SQLite。本 spec 描述 9 张表的字段、索引、外键级联策略，是 Spec 01 实体的物理映射。**修改字段需先讨论。**
+> Drizzle ORM + SQLite。本 spec 描述 10 张表的字段、索引、外键级联策略，是 Spec 01 实体的物理映射。**修改字段需先讨论。**
 >
-> 7 张「业务表」（agents / conversations / messages / artifacts / workspaces / attachments / agent_runs）映射 Spec 01 的 7 个实体；`conversation_context_summaries` 是上下文压缩基础设施表；`app_settings` 是单行配置表，不对应实体。
+> 7 张「业务表」（agents / conversations / messages / artifacts / workspaces / attachments / agent_runs）映射 Spec 01 的 7 个实体；`conversation_context_summaries` 是上下文压缩基础设施表；`app_settings` 是单行配置表；`mcp_servers` 是外部 MCP server 登记表，均不对应实体。
 
 源文件：`src/db/schema.ts`
 
@@ -35,6 +35,7 @@ agents {
   api_key         text              // 该 agent 单独的 key；NULL 走 env
   api_base_url    text              // 该 agent 单独的 endpoint；NULL 走 SDK 默认
   tool_names      text JSON         // string[]，引用 Spec 07
+  mcp_server_ids  text JSON NOT NULL default '[]'  // string[]，引用的外部 MCP server id（Spec 15）
   is_builtin      int  bool default 0
   is_orchestrator int  bool default 0
   supports_vision int  bool default 0
@@ -49,6 +50,7 @@ agents {
 - `api_base_url` 非空时（Claude Code adapter），`api_key` 作为 `ANTHROPIC_AUTH_TOKEN` 传 SDK；`ANTHROPIC_BASE_URL` 设为 `api_base_url`；同时清空 `ANTHROPIC_API_KEY` 防覆盖（详见 Spec 05 ClaudeCodeAdapter）
 - `api_base_url` 非空时（Codex adapter），作为 `@openai/codex-sdk` 的 `baseUrl` 传入；`api_key` 作为 SDK `apiKey`（内部 `CODEX_API_KEY`）传入；endpoint 必须支持 Codex/Responses，DeepSeek 等 Chat Completions-only endpoint 走 Custom adapter
 - `model_provider='openai-compatible'` 时（Custom adapter），`api_key` 与 `api_base_url` 必填；`api_base_url` 作为 OpenAI SDK `baseURL` 传入，endpoint 必须支持 Chat Completions
+- `mcp_server_ids` 与 `tool_names` 规则不同：`adapter_name='claude-code' | 'codex'` 时 `tool_names` 被强制清空（内置工具集才是它们的工具来源），但 `mcp_server_ids` **必须保留** —— 那正是 SDK agent 拿到用户自选外部工具的途径（Spec 15）。该字段默认 `'[]'`，与 `tool_names` 无关
 
 **索引**：无（agent 数量小，全表扫描可接受）
 
@@ -271,6 +273,40 @@ app_settings {
 
 ---
 
+## 10. mcp_servers
+
+用户登记的外部 MCP server。全局一张表，Agent 通过 `agents.mcp_server_ids` 引用（不内联到 agent）。字段与 `design.md §2` 一致。
+
+```ts
+mcp_servers {
+  id          text PK               // mcp_<nanoid>
+  name        text NOT NULL UNIQUE  // ^[a-z0-9_]+$，禁止含 '__'，保留名 agenthub；工具命名空间用
+  transport   text NOT NULL         // 'stdio'|'sse'|'http'
+  command     text                  // stdio：可执行命令
+  args        text JSON NOT NULL default '[]'  // stdio：string[]
+  env         text JSON             // stdio：Record<string,string> 附加环境变量，可含 ${ENV_NAME} 占位
+  url         text                  // sse / http：端点
+  headers     text JSON             // sse / http：Record<string,string> 静态请求头，可含 ${ENV_NAME} 占位
+  trust       text NOT NULL default 'ask'     // 'always'|'ask'，仅 Claude Code adapter 实际拦
+  enabled     int  bool NOT NULL default 0    // 全局开关，默认 false
+  created_at  int  NOT NULL
+}
+```
+
+**约束**：
+- `name` 唯一，匹配 `^[a-z0-9_]+$`，且**不得包含 `__`**（`__` 是工具名 `mcp__<server>__<tool>` 的分隔符）；`agenthub` 为保留名，登记时拒绝（`src/server/mcp-server-service.ts`）
+- transport 与字段互斥：`stdio` 必须有 `command`、不得有 `url`；`sse` / `http` 必须有 `url`、不得有 `command`
+- `enabled` 默认 **false** —— 生效要两道 opt-in：登记 + 启用（再加上 agent 勾选，见 Spec 15 §6.1）
+- `env` / `headers` 里的密钥按 `app_settings` 同样的本地存储模型存**明文**（不引 keychain，CLAUDE.md §5.4），但**任何读接口只返回脱敏预览**（`{ masked }` 或 `{ placeholder }`），更新走**合并**语义（省略=不动，字面=覆盖，`null`=清除），详见 Spec 15 §12
+- `env` / `headers` 值里的 `${ENV_NAME}` 占位在 **run 启动时**从进程环境展开，DB 只存占位文本
+- 本表**不与任何业务表建外键**；`agents.mcp_server_ids` 是弱引用（与 `messages.agent_id` 同理），解析时找不到 / 已禁用的 id 直接跳过
+
+**索引**：无（server 数量小，全表扫描可接受；`name` 的唯一约束自带索引）。
+
+**迁移（spec 12 桌面版契约）**：`specs/12-desktop-electron.md` 要求新表 / 新列同时镜像到打包版运行的 `src/db/bootstrap.ts`：`DDL` 里加 `CREATE TABLE IF NOT EXISTS mcp_servers (...)`，老库上加 `safeAlter('ALTER TABLE agents ADD COLUMN mcp_server_ids TEXT NOT NULL DEFAULT \'[]\'')`。一次性补数据脚本为 `src/db/migrate-add-mcp-servers.ts`（沿用 `migrate-add-app-settings.ts` + `migrate-add-bookmarks.ts` 的 `IF NOT EXISTS` 可重入模式）。
+
+---
+
 ## Cascade 关系图
 
 ```
@@ -286,6 +322,7 @@ agents ──(no cascade)──── messages.agent_id
                           agent_runs.agent_id
 
 app_settings ──(独立，无外键)── 单行表，与任何业务表都无 FK 关系
+mcp_servers  ──(独立，无外键)── 全局登记表；agents.mcp_server_ids 以 id 弱引用它（找不到 / 未启用即跳过）
 ```
 
 **为什么 agents 不 cascade**：删除 agent 不应抹掉历史消息/产物（用户期望「已停用 agent」的灰态保留记录）。前端展示时检测 `agentId` 找不到 → 渲染 stub。
@@ -300,11 +337,15 @@ app_settings ──(独立，无外键)── 单行表，与任何业务表都�
 |---|---|---|
 | `agents.capabilities` | `string[]` | 能力标签 |
 | `agents.tool_names` | `string[]` | 引用 Spec 07 的工具名 |
+| `agents.mcp_server_ids` | `string[]` | 该 agent 启用的外部 MCP server id（默认 `'[]'`，见 Spec 15） |
 | `conversations.agent_ids` | `string[]` | 参与的 agent |
 | `conversations.pinned_message_ids` | `string[]` | 用户 pin 的消息 |
 | `messages.parts` | `MessagePart[]` | 见 Spec 03 |
 | `messages.mentioned_agent_ids` | `string[]` | @ 的 agent |
 | `artifacts.content` | `ArtifactContent` | 见 Spec 04，按 type 分发的可辨联合 |
+| `mcp_servers.args` | `string[]` | stdio 参数 |
+| `mcp_servers.env` | `Record<string,string>` | stdio 附加环境变量 |
+| `mcp_servers.headers` | `Record<string,string>` | sse / http 静态请求头 |
 
 **修改 JSON 列结构时**：旧数据按旧 schema 解析仍合法（向后兼容），否则需要写 migration 脚本（见下节）。
 
@@ -313,6 +354,8 @@ app_settings ──(独立，无外键)── 单行表，与任何业务表都�
 ## 迁移规范
 
 **开发期**：直接 `pnpm db:push` 让 drizzle-kit 推 schema 到 SQLite。**注意**：drizzle-kit 对带 FK 的列类型变更有时会失败（SQLite 限制），此时写一次性 ALTER TABLE 脚本，命名格式 `src/db/migrate-<topic>.ts`（如 `migrate-add-read-attachment.ts`），用 `tsx src/db/migrate-xxx.ts` 跑。这些脚本跑完不删除（留作历史 + 用 `IF NOT EXISTS` 可重入）。
+
+> **实测（2026-10-09，排查外部 MCP 时）**：当前开发库上 `pnpm db:push` **跑不通，且与具体改动无关**。对数据库副本做 push 会：① 重建 `app_settings`（列序 / NOT NULL 表示差异）；② 重建 `mcp_servers`（表级 `UNIQUE` vs drizzle 的独立唯一索引，两者等价但 drizzle 认作差异）；③ 同一索引重复生成两次 `CREATE INDEX`；最后死在 `SqliteError: index idx_conv_updated already exists`。所以**本项目实际的 schema 落地路径是 `bootstrap.ts` DDL + `safeAlter` + 一次性 migrate 脚本**（也正是 spec 12 对打包版的硬要求），而不是 db:push。新增表 / 列时按这个路径走，不要去动 db:push 也不要对真实库直接 `push --force`（它会在重建表之后中途失败，留下半迁移的库）。
 
 **生产期**：暂无（项目为本地运行）。如未来要 ship 给用户，应改用 drizzle-kit 的 generate + journal 模式。
 
@@ -332,5 +375,6 @@ app_settings ──(独立，无外键)── 单行表，与任何业务表都�
 | ContextSummary | `ctx_` | `ctx_mN4p...` |
 | ToolCall (内存中) | `call_` | `call_aBc...` |
 | AppSettings | `'singleton'` | 不用 nanoid，固定字面量 |
+| McpServer | `mcp_` | `mcp_xY3w...` |
 
 ID 生成器统一在 `src/server/ids.ts`，nanoid 长度 12，URL-safe alphabet。`app_settings.id` 不走 nanoid，由 `settings-service.SINGLETON_ID` 直接写入。

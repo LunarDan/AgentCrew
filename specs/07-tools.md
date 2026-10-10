@@ -531,8 +531,24 @@ AgentHub 额外给 Codex 注入一个 stdio MCP bridge，只暴露 allowlist：`
 
 ---
 
+## 外部 MCP 工具（不走 AgentHub 工具表）
+
+用户在「设置」里登记的外部 MCP server 提供的工具，对模型暴露为 `mcp__<serverName>__<toolName>`（对齐 claude-code / codex SDK 既有约定，如 `mcp__agenthub__write_artifact`）。**它们不进 `toolRegistry`**：连接、`listTools`、工具暴露都由 SDK adapter 自带的 MCP client 负责；AgentHub 只在事件层复用现有的 `tool.call` / `tool.result`，`toolName` 用命名空间名。
+
+因此：
+
+- `toolNames` / `AVAILABLE_AGENT_TOOLS` 里**不列**这些名字。一个 agent「能调到哪些外部工具」由 `agents.mcp_server_ids`（引用 `mcp_servers` 表）决定，与内置工具表相互独立（详见 Spec 08 / 10 / 15）。
+- **命名规则**：`__` 是 server 名与 tool 名的分隔符，故 server 名校验禁止包含 `__`，并保留 `agenthub` 不可占用（`src/server/mcp-server-service.ts`）。
+- **审批门**：`trust='ask'`（默认）的外部工具，在支持 AgentHub 侧审批的 adapter（当前仅 Claude Code）里，调用前必须过 `bridgePermission` 的 `mcp__*` 分支 —— per-tool-per-conversation 记忆，事件走 `mcp_tool.pending` / `mcp_tool.resolved`；`trust='always'` 直接放行。Codex 有自身的审批策略与沙箱，AgentHub 拦不到它的工具决策，故 `trust` 对 Codex 只是建议性的（UI 不得把它显示成生效的保护）。调用失败 / 被用户拒绝 → 返回 `isError` tool result，**run 继续**。
+- 外部 MCP server **不在 workspace 沙箱内运行**，stdio 子进程还继承完整进程环境（可读到 provider key）——这是本特性的安全前提，详见 Spec 15 §6 与 Spec 11。
+
+详见 Spec 15。
+
+---
+
 ## 与 Spec 01 / 05 / 06 的关系
 
 - Spec 01：定义了 `Agent.toolNames`（引用本 spec 的工具名；Claude Code / Codex agent 强制 `[]`）
-- Spec 05：定义了 `AdapterInput.toolNames`（同上）；说明 Custom / Claude Code / Codex 路径如何分别使用工具
+- Spec 05：定义了 `AdapterInput.toolNames`（同上）；说明 Custom / Claude Code / Codex 路径如何分别使用工具；外部 MCP 的 `AdapterInput.mcpServers` 也在那里
 - Spec 06：`plan_tasks` 工具是 Orchestrator 三阶段工作流的核心
+- Spec 15：外部 MCP 工具的命名空间、审批门与沙箱边界

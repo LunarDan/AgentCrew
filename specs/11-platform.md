@@ -151,6 +151,19 @@ function killProcessTree(child: ChildProcess, platform: Platform, signal = 'SIGT
 
 `taskkill /F /T /PID` 强制递归杀进程树；不存在的 PID 静默忽略。
 
+**共享实现**：该函数已从 `src/server/tools/bash.ts` 提到 **`src/server/child-process.ts`**，由 `bash` 工具与**外部 MCP stdio server 的 teardown**（Spec 15）**共用同一份**，避免两处各写一份、总有一处漏杀。
+
+---
+
+## 外部 MCP stdio 子进程（Spec 15）
+
+用户登记的外部 MCP server 的 stdio 形态会在 run 期间以子进程运行。两个跨平台要点：
+
+1. **清理**：run 结束 / abort 时用上面共享的 `killProcessTree` 杀**进程树**（Windows `taskkill /F /T`，POSIX 进程组），与 bash 工具同一实现 —— 否则 `stdio server → 它拉起的子命令` 会留下孤儿进程。
+2. **环境：完整继承，不是白名单**：stdio MCP 子进程用 `buildChildProcessEnv` 启动，把 `process.env` **整体透传**（唯一变换是 Windows 上补 `HOME ← USERPROFILE`）。这**不是**白名单、也**不构成隔离** —— 因此该 server **能读到 AgentHub 自己存的 provider API Key 与内部 token**。设置面板的「测试连接」探测进程（`testMcpServerConnection`）同样如此。这是明确接受的安全取舍（本地单用户，登记 = 知情同意，CLAUDE.md §5.4），但文档与 UI 都**只能**描述为「完整环境继承」，**不得**称其为白名单或隔离（详见 Spec 15 §6.3）。
+
+**Codex 的 MCP 配置落在隔离的 `CODEX_HOME`**：codex adapter 把外部 server 写进 `config.mcp_servers`，而 Codex 子进程的 `CODEX_HOME` / `CODEX_SQLITE_HOME` 指向 AgentHub dataDir 下的隔离目录，所以**不碰用户本机 `~/.codex/config.toml`**（见「SDK 子进程的 HOME 兼容」与 Spec 05）。
+
 ---
 
 ## SDK 子进程的 HOME 兼容

@@ -65,6 +65,10 @@ type StreamEvent = BaseEvent & (
   | { type: 'bash_command.pending',  pendingCommand: PendingBashCommand }
   | { type: 'bash_command.resolved', pendingId: string, approved: boolean }
 
+  // —— 外部 MCP 工具调用审批（trust='ask'；详见 Spec 15） ——
+  | { type: 'mcp_tool.pending',  pendingCall: PendingMcpToolCall }
+  | { type: 'mcp_tool.resolved', pendingId: string, approved: boolean }
+
   // —— Token usage 计量（adapter 在 run 结束前 emit）——
   | { type: 'run.usage', runId: string, usage: RunUsageEvent }
 
@@ -242,6 +246,8 @@ dispatch.end      (parentRunId=r1, taskId=t3, status='skipped', error='Upstream 
 | `fs_write.resolved` | ❌ 透传 | applied=true/false 由前端 store 用来移除对应 pending |
 | `bash_command.pending` | ❌ 透传 | pending 队列存于内存单例（`src/server/pending-bash-commands.ts`）；前端 mount 时拉一次兜底 |
 | `bash_command.resolved` | ❌ 透传 | approved=true/false 由前端 store 用来移除对应 pending |
+| `mcp_tool.pending` | ❌ 透传 | pending 队列存于内存单例（`src/server/pending-mcp-tools.ts`）；前端 mount 时拉一次兜底 |
+| `mcp_tool.resolved` | ❌ 透传 | approved=true/false 由前端 store 用来移除对应 pending；批准后该工具在本会话内不再询问 |
 | `run.usage` | ✅ 落到 `agent_runs.usage` JSON 列 | adapter 在 run 结束前 emit；前端 store 同步更新该 run 行 |
 | `heartbeat` | ❌ 透传 | |
 
