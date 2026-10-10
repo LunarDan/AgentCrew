@@ -133,16 +133,18 @@ const SHARED_BANNED: RegExp[] = [
 
 ## 进程清理
 
-**POSIX**：`child.kill('SIGTERM')`，5 秒未退升级到 `SIGKILL`（现状未实现升级，Phase 3 再补）。
+**POSIX**：优先按进程组杀 —— `process.kill(-child.pid, signal)`（要求子进程以 `detached: true` 启动），拿不到 pid 时回退 `child.kill(signal)`。5 秒未退升级 `SIGKILL`（现状未实现升级，Phase 3 再补）。
 
-**Windows**：Node 的 `child.kill('SIGTERM')` 在 Windows 下等价于 `TerminateProcess`，**杀不到孙子进程**（如 `powershell → npm → node`，npm 退了但 node 留下）。Phase 1 改为：
+**Windows**：Node 的 `child.kill('SIGTERM')` 在 Windows 下等价于 `TerminateProcess`，**杀不到孙子进程**（如 `powershell → npm → node`，npm 退了但 node 留下）。因此走：
 
 ```typescript
-function killProcessTree(child: ChildProcess, platform: Platform) {
-  if (platform === 'windows' && child.pid) {
+function killProcessTree(child: ChildProcess, platform: Platform, signal = 'SIGTERM') {
+  if (platform === 'windows' && typeof child.pid === 'number') {
     spawn('taskkill', ['/F', '/T', '/PID', String(child.pid)], { windowsHide: true })
+  } else if (typeof child.pid === 'number') {
+    process.kill(-child.pid, signal)   // 进程组；ESRCH 等失败时回退 child.kill(signal)
   } else {
-    child.kill('SIGTERM')
+    child.kill(signal)
   }
 }
 ```

@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { existsSync, statSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { basename } from 'node:path'
@@ -8,6 +8,7 @@ import { z } from 'zod'
 
 import { db, schema } from '@/db/client'
 import { classifyBashApproval, waitForBashApproval } from '@/server/bash-command-approval'
+import { killProcessTree } from '@/server/child-process'
 import { recordRunCommand } from '@/server/dispatch-run-evidence'
 import { currentPlatform, type Platform } from '@/server/platform'
 import { findBannedPattern } from '@/server/security'
@@ -82,31 +83,6 @@ function buildShellInvocation(command: string, platform: Platform): ShellInvocat
     }
   }
   return buildPosixShellInvocation(command)
-}
-
-function killProcessTree(
-  child: ChildProcess,
-  platform: Platform,
-  signal: NodeJS.Signals = 'SIGTERM',
-) {
-  if (platform === 'windows' && typeof child.pid === 'number') {
-    const killer = spawn('taskkill', ['/F', '/T', '/PID', String(child.pid)], { windowsHide: true })
-    killer.on('error', () => {})
-    return
-  }
-  if (typeof child.pid === 'number') {
-    try {
-      process.kill(-child.pid, signal)
-      return
-    } catch (error) {
-      const code = error instanceof Error && 'code' in error ? (error as { code?: unknown }).code : null
-      if (code !== 'ESRCH') {
-        child.kill(signal)
-      }
-      return
-    }
-  }
-  child.kill(signal)
 }
 
 const PLATFORM = currentPlatform()
