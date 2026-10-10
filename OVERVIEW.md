@@ -59,8 +59,9 @@ L1 Persistence                          src/db/**（Drizzle+SQLite） + workspac
 | 自建 Agent | ✅ | 表单/对话式创建,自定义 prompt + 工具集 |
 | Orchestrator 编排 | ✅ | 三阶段规划 + DAG 调度 + 级联中止 + 可视化卡 + 同波次代码冲突检测（检测+上报，不自动合并） |
 | 工具系统 | ✅ | write/deploy/read_artifact · read_attachment · fs_read/fs_write/bash · plan_tasks · ask_user |
-| Artifact 预览/编辑 | ✅ | web_app(iframe + preview URL + 本地静态发布/源码包/容器包) / document(md) / image / 版本对比 diff（历史 diff 只读兼容） / **ppt(幻灯片分页预览 + 完整 theme token + 导出真 .pptx)** · code_file workspace 预览/编辑 · 版本链 v1↔v2 · 选区改写 · 面板内编辑(CodeMirror)→提交新版本 · 导出 |
+| Artifact 预览/编辑 | ✅ | web_app(iframe + preview URL + 本地静态发布/源码包/容器包) / document(md) / image / 版本对比 diff（历史 diff 只读兼容） / **ppt(幻灯片分页预览 + 固定逻辑画布缩放 + 溢出角标 + 完整 theme token + 导出真 .pptx)** · code_file workspace 预览/编辑 · 版本链 v1↔v2 · 选区改写 · 面板内编辑(CodeMirror)→提交新版本 · 导出 |
 | Workspace 沙箱 | ✅ | sandbox/local 双模式 · fs_write 审批(Review/Auto) · 双平台 Bash 黑名单 |
+| 外部 MCP server | ✅ | P0：设置面板登记（stdio/sse/http + 测试连接）+ Agent 勾选 · claude-code/codex 接线 · `ask` 审批门（仅 Claude Code）· ⚠️ **在沙箱与命令黑名单之外运行**（见「关键约定」） |
 | Token 计量 | ✅ | per-run/per-message · cache 命中率 · 全局分析 Tab |
 | 跨 run 对话记忆 | ✅ | 历史序列化注入 · token 预算 · 群聊跨 agent 可见 · 手动压缩 |
 | 平台抽象（Win/POSIX） | ✅ | shell 选择 · 多盘符 DirPicker · 子进程清理 |
@@ -126,7 +127,8 @@ L1 Persistence                          src/db/**（Drizzle+SQLite） + workspac
 | 事件总线 | `event-bus.ts` | HMR-safe globalThis 单例,推 SSE |
 | 产物服务 | `artifact-service.ts` · `deployment-service.ts` · `ppt-export.ts` | 产物 CRUD + 版本链（parentArtifactId）· 本地静态发布与下载包 · slides JSON → 真 .pptx（pptxgenjs） |
 | Agent / 附件 / 文件 | `agent-service.ts` · `attachment-service.ts` · `fs-service.ts` | |
-| 审批中转 store | `pending-writes.ts` · `pending-questions.ts` | fs_write 审批 / ask_user 的内存中转 |
+| 审批中转 store | `pending-writes.ts` · `pending-questions.ts` · `pending-mcp-tools.ts` | fs_write 审批 / ask_user / 外部 MCP 工具审批的内存中转 |
+| 外部 MCP server | `mcp-server-service.ts` · `mcp-approvals.ts` | 登记/校验/脱敏 + 按 agent 解析（`${ENV}` 展开）· `trust='ask'` 审批门（`specs/15`） |
 | 设置 / Key | `settings-service.ts` | 三层 key 优先级解析 |
 | 安全 / 平台 / 沙箱 | `security.ts`（黑名单 `getBannedPatterns`） · `platform.ts`（shell 选择） · `workspace-utils.ts`（路径校验/配额） | `specs/11` |
 | ID 生成 | `ids.ts` | |
@@ -147,7 +149,7 @@ L1 Persistence                          src/db/**（Drizzle+SQLite） + workspac
 ### L1 持久化（`src/db/`）
 | 文件 | 说明 |
 |---|---|
-| `schema.ts` | **9 张表**：`agents` · `conversations` · `messages` · `artifacts` · `workspaces` · `attachments` · `agent_runs` · `context_summaries` · `app_settings`（`specs/08`） |
+| `schema.ts` | **10 张表**：`agents` · `conversations` · `messages` · `artifacts` · `workspaces` · `attachments` · `agent_runs` · `context_summaries` · `app_settings` · `mcp_servers`（`specs/08`） |
 | `client.ts` | better-sqlite3 + Drizzle 实例 |
 | `bootstrap.ts` | 首次启动自动建表 + seed |
 | `builtin-agents.ts` · `seed.ts` | 5 个内置 Agent（Orchestrator / PM 小灰 / UI 设计师 / 前端工程师 / Reviewer） |
@@ -156,7 +158,7 @@ L1 Persistence                          src/db/**（Drizzle+SQLite） + workspac
 DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/<conv_xxx>/`（sandbox 模式）。
 
 ### 共享类型（`src/shared/`）
-`types.ts`（**`StreamEvent` / `MessagePart` 等跨层类型,改动牵一发动全身**） · `constants.ts` · `model-registry.ts`（模型清单） · `ppt-theme.ts`（`PptTheme` 解析 + 专业默认,预览/导出共用）。
+`types.ts`（**`StreamEvent` / `MessagePart` 等跨层类型,改动牵一发动全身**） · `constants.ts` · `model-registry.ts`（模型清单） · `ppt-theme.ts`（`PptTheme` 解析 + 专业默认,预览/导出共用） · `mcp.ts`（adapter × transport 支持矩阵,前后端唯一数据源）。
 
 ### 桌面（`electron/`）& 移动（`apps/mobile/`）
 - Electron：`main.ts`（主进程） · `paths.ts`（userData 路径迁移） · `server-bootstrap.ts`（拉起 Next standalone）。`specs/12`。
@@ -173,6 +175,8 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 ## 附 · 当前现状（易过时,以代码为准）
 
 ### ✅ 近期完成（最新一批）
+- **PPT 预览/导出一致性修复**：预览改为固定逻辑画布（768×432）+ `transform: scale()` 适配面板，版式不再随面板宽度变形、全屏是真放大；去掉预览侧 7/6/4 与导出侧 8/6/3/4 的条数硬上限（不再静默吃内容），排不下时预览显示「本页内容超出画布，导出会被截断」角标；全屏元素改为整个 deck（翻页/退出按钮随之进入全屏）
+- **外部 MCP 工具接入 P0**（`specs/15`）：`mcp_servers` 表 + `agents.mcpServerIds` · 设置面板登记（stdio/sse/http + 测试连接 + 密钥脱敏）· Agent builder 勾选 · claude-code / codex 接线 · `trust='ask'` 审批门（仅 Claude Code）
 - **Playwright E2E 第二批**：MockAdapter 扩成确定性假 agent（普通脚本 + **真调 write_artifact 的产物场景** + Orchestrator 三阶段 + **产物交接**），新增 `artifacts.spec.ts`（产物卡片 → 预览分页 → 真 .pptx 导出）与 `dispatch.spec.ts`（群聊拆任务 → 审批 → 子任务 → 聚合；含 `expectedOutputs`/`inputs` 交接链）
 - 会话归档（service / API / sidebar，`archived` 字段早有，本批接通 UI）
 - Orchestrator **同波次代码冲突检测**（fs_write 写入追踪 + 聚合阶段上报；盲区 bash / SDK adapter，`specs/06`）
@@ -181,6 +185,8 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 - 斜杠命令菜单（`/` 浮层）
 
 ### 📋 待办
+- 外部 MCP P1：custom adapter 的 MCP 客户端层（连接 / listTools / loop 路由 / 清理）
+- 外部 MCP P2：Codex 的审批门、OAuth 鉴权的远程 server、per-conversation 连接池；`settingSources: ['project']` 让 workspace `.claude/settings.json` 可预放行 `mcp__*` 的边界
 - PPT 深化：辅色语义着色（正面↑ / 警示↓）+ 数据页卡片化
 - 冲突检测盲区：bash / SDK adapter 写入（可加波次快照补全）
 - Codex 写盘审批 hook（当前 Review 模式用 read-only sandbox）
@@ -189,10 +195,11 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 - E2E 可观测性：本机 Playwright 浏览器版本与 `@playwright/test` 不匹配时需 `pnpm exec playwright install chromium`
 
 ### ⚠️ 关键约定（动手前必看）
-- 改实体字段 → 同步 `specs/01`;改事件 → `specs/02`;改 Bash 黑名单 → 同步 `specs/11` + `src/server/security.ts`（单一数据源）。
+- 改实体字段 → 同步 `specs/01`;改事件 → 同步 `specs/02`;改 Bash 黑名单 → 同步 `specs/11` + `src/server/security.ts`（单一数据源）;改 MCP 支持矩阵 → `src/shared/mcp.ts`。
 - 所有 LLM 调用必带 `AbortSignal`;跨进程输入（API body / LLM 输出）必经 zod 校验;fs/bash 必过 Workspace 沙箱。
+- ⚠️ **外部 MCP server 不在上述沙箱保证内**:它们在 workspace 沙箱与命令黑名单之外运行(stdio 直接 spawn 任意命令);stdio 子进程**继承完整进程环境**,因此能读到 AgentHub 已存的 provider API Key 与内部 token。`trust='ask'` 审批门**只对 Claude Code 生效**。详见 `CLAUDE.md §5.5` 与 `specs/15`。
 - 完整协作规则见 `CLAUDE.md`。
 
 ---
 
-*最后更新：2026-10-07 · 同步 E2E 第二批（MockAdapter 确定性假 agent + 产物/编排 E2E）到功能矩阵、代码地图、当前现状三节。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*
+*最后更新：2026-10-09 · 同步外部 MCP 工具接入 P0（`specs/15`）到功能矩阵、代码地图、当前现状三节，并在「关键约定」写明它落在沙箱保证之外。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*
