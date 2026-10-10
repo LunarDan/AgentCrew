@@ -30,6 +30,7 @@ Instead of treating every agent run as an isolated terminal transcript, AgentHub
   - [IM-style agent workspace](#im-style-agent-workspace)
   - [Multi-agent support](#multi-agent-support)
   - [Orchestrator and task dispatch](#orchestrator-and-task-dispatch)
+  - [External MCP servers](#external-mcp-servers)
   - [Artifacts and deployment previews](#artifacts-and-deployment-previews)
 - [Tech Stack](#tech-stack)
 - [Requirements](#requirements)
@@ -98,6 +99,18 @@ The Orchestrator is a normal agent with extra tools. It can:
 - `fs_read`, `fs_write`, and `bash` are constrained to the effective workspace directory.
 - Review mode can require approval before file writes.
 - High-risk bash commands can require approval before execution.
+
+### External MCP servers
+
+Register third-party MCP servers in Settings and opt individual agents into them, so an agent's toolset is no longer limited to the built-in tools.
+
+- Transports: `stdio` (spawn a command), `sse`, and streamable `http`. The Claude Code adapter supports all three; the Codex adapter supports `stdio` and `http` only — no SSE.
+- Two explicit opt-ins: a server is created disabled, and each agent must select it. Nothing external runs by default.
+- `trust: 'ask'` (the default) asks before the first call to a given tool in a conversation, then remembers it for that conversation. `trust: 'always'` skips the prompt.
+- A test-connection action connects, lists the server's tools, and reports failures at registration time.
+- Secrets in `env`/`headers` are masked on read and merge-on-write; a value may be written as `${ENV_NAME}` to reference `.env.local` instead of storing the literal.
+
+> ⚠️ **External MCP servers run outside AgentHub's sandbox guarantee.** See [Security Model](#security-model).
 
 ### Artifacts and deployment previews
 
@@ -355,6 +368,13 @@ AgentHub assumes LLM output is untrusted.
 - Generated web app artifacts render in sandboxed iframes.
 - API keys are local settings or environment variables; there is no hosted key service.
 
+External MCP servers are the one deliberate exception to the list above:
+
+- They run **outside** the workspace sandbox and the command blacklist. A `stdio` server is an arbitrary command AgentHub spawns on your behalf.
+- `stdio` servers **inherit the full process environment**. That is not a whitelist or an isolation boundary: a third-party server can read AgentHub's stored provider API keys and its internal token. Only register servers you trust with that access.
+- The `trust: 'ask'` approval gate is enforced **for the Claude Code adapter only**. Codex applies its own approval policy and sandbox, which AgentHub does not intercept, so `trust` is advisory there and the UI says so. The custom adapter has no MCP client yet.
+- MCP secrets are stored plaintext in the local SQLite file, on the same reasoning as provider keys; reads are masked, but there is no encryption layer.
+
 This is a local single-user app, not a multi-tenant hosted service.
 
 ---
@@ -365,6 +385,7 @@ This is a local single-user app, not a multi-tenant hosted service.
 - Cross-platform Electron builds with native modules should be handled through target-platform machines or CI.
 - Claude Code SDK can write files through its own tool layer; sandbox quota enforcement only applies to AgentHub-managed file tools.
 - Some SDK-level command/file approval bridges depend on what the underlying adapter exposes.
+- The Claude Code adapter loads project settings, so a `.claude/settings.json` inside a workspace can pre-allow tool patterns (including external MCP tools) and bypass the `ask` prompt for that workspace.
 - The mobile app is a companion client, not a standalone agent runtime.
 
 ---

@@ -183,6 +183,17 @@ Codex adapter 额外约束：运行时 `CODEX_HOME` / `CODEX_SQLITE_HOME` 指向
 - 桌面版（Electron，详见 Spec 12）也用这套机制；只是 DB 文件位置改为 `app.getPath('userData')`
 - 缺失 key 时，由 adapter 在 `buildClient()` / SDK 内抛错（不要在启动时拒绝服务，因为用户可能只用其中某些 provider）
 
+### 5.5 外部 MCP server（明确落在沙箱保证之外）
+
+用户可在「设置 → MCP」登记第三方 MCP server，并在 Agent 上勾选启用（详见 `specs/15-external-mcp.md`）。这是**用户主动授予的信任**，不在 §5.2 / §5.3 的保护范围内 —— 必须这样描述，不要暗示它受沙箱约束。
+
+- **运行位置**：stdio server 是一个独立子进程，远程 server 是外部端点。二者都**不经过** workspace 路径沙箱，也**不经过** Bash 命令黑名单。
+- **环境继承**：stdio server 继承 AgentHub 进程的**完整环境**（`buildChildProcessEnv`）。这**不是白名单** —— 它因此能读到 AgentHub 自己存的 provider API Key 与其他内部 token（如 `AGENTHUB_INTERNAL_TOKEN`）。任何文档 / 注释 / UI 文案都不得把它写成白名单或隔离。
+- **两道 opt-in**：登记（`mcp_servers.enabled` 默认 `false`）与 per-agent 勾选（`agents.mcp_server_ids`）都是用户的手动动作。默认不启用任何外部 MCP。
+- **审批门**：`trust='ask'`（默认）时，Claude Code 下的外部工具调用走审批卡片，粒度 per-tool-per-conversation（内存态，不落库，见 `src/server/mcp-approvals.ts`）。`trust='always'` 直接放行。**Codex 不受此门约束**（Codex 自管的审批策略与沙箱在 AgentHub 之外），UI 必须如实标注该级别对 Codex 不生效。
+- **密钥**：`env` / `headers` 明文存 `mcp_servers` 表（同 §5.4 的取向，不引 keychain）；值里可写 `${ENV_NAME}` 占位，在 run 启动时展开，从而不必把密钥落库。**读接口一律脱敏**（只回后 4 位或占位符名），更新走合并语义。
+- **改动本节（新增约束 / 收紧或放松）必须经过讨论**（§6.2），且同步 `specs/15-external-mcp.md`、`specs/11-platform.md`。
+
 ---
 
 ## 6. AI 协作规则（核心）
@@ -281,6 +292,7 @@ Codex adapter 额外约束：运行时 `CODEX_HOME` / `CODEX_SQLITE_HOME` 指向
 - `specs/desktop-electron/spec.md` — Electron 桌面版
 - `specs/conversation-context/spec.md` — 跨 run 上下文
 - `specs/mobile-companion/spec.md` — 移动伴随 App
+- `specs/external-mcp/spec.md` — 外部 MCP server 接入（详见 `specs/15-external-mcp.md` 与 §5.5）
 
 ### `specs/`（编号版详细规格）
 
@@ -298,7 +310,7 @@ Codex adapter 额外约束：运行时 `CODEX_HOME` / `CODEX_SQLITE_HOME` 指向
 - `12-desktop-electron.md` — 桌面版（Electron 打包 DMG / EXE，进程模型 / 路径迁移）
 - `13-conversation-context.md` — 跨 run 对话历史序列化（MessagePart → OpenAI ChatMessage、pinned 注入、agent 视角）
 - `14-mobile-remote.md` — 移动端伴随 App（Capacitor / Tailscale / 远程审批）
-- `15-external-mcp.md` — 外部 MCP 工具接入（设计提案,未实现;统一三 adapter 接入用户配置的 MCP server）
+- `15-external-mcp.md` — 外部 MCP server 接入（P0 已实现：数据模型 + 设置面板 + Agent builder + claude-code/codex 接线 + `ask` 审批门；custom 的 MCP 客户端与 Codex 审批门为 P1/P2）
 
 ### `skills/`（可复用开发任务模板）
 
