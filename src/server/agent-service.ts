@@ -29,6 +29,11 @@ export interface CreateAgentArgs {
   modelId?: string
   /** SDK adapter 忽略此字段（SDK 内置工具集，不走 toolRegistry）*/
   toolNames: string[]
+  /**
+   * 外部 MCP server id（引用 mcp_servers.id）。
+   * 与 toolNames 不同：SDK adapter 下**保留** —— 那正是 SDK agent 拿用户自选工具的途径。
+   */
+  mcpServerIds?: string[]
   supportsVision?: boolean
   apiKey?: string | null
   /** 自定义 API base URL。Claude/Codex 对 endpoint 协议兼容性要求不同；NULL 走默认 */
@@ -64,6 +69,8 @@ export async function createCustomAgent(args: CreateAgentArgs) {
     apiBaseUrl: args.apiBaseUrl?.trim() || null,
     // SDK adapter 走各自内置工具集，不消费 toolNames；强制空数组避免 UI 残留
     toolNames: adapterName === 'custom' ? args.toolNames : [],
+    // 外部 MCP 不套用上面的规则：SDK adapter 才需要它（custom 的 MCP 客户端是 P1）
+    mcpServerIds: args.mcpServerIds ?? [],
     isBuiltin: false,
     isOrchestrator: false,
     supportsVision: args.supportsVision ?? false,
@@ -101,6 +108,8 @@ export interface UpdateAgentPatch {
   modelProvider?: ModelProvider
   modelId?: string | null
   toolNames?: string[]
+  /** 与 toolNames 不同：SDK adapter 下不会被清空。 */
+  mcpServerIds?: string[]
   supportsVision?: boolean
   /** 传 null 显式清除自定义 key（fallback 回 env）；undefined 表示不动 */
   apiKey?: string | null
@@ -160,6 +169,10 @@ export async function updateCustomAgent(agentId: string, patch: UpdateAgentPatch
       updates.toolNames = []
     }
   }
+
+  // 外部 MCP 选择与 toolNames 无关：上面 SDK adapter 分支清空的是内置工具集，
+  // 这里的勾选必须在两个分支之外处理，否则 SDK agent 永远选不上 MCP server。
+  if (patch.mcpServerIds !== undefined) updates.mcpServerIds = patch.mcpServerIds
 
   if (Object.keys(updates).length === 0) return agent
 

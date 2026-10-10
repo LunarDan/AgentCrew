@@ -10,6 +10,7 @@ import { PIN_LIMIT_PER_CONVERSATION } from '@/shared/constants'
 import type { MessagePart } from '@/shared/types'
 
 import { clearClaudeCodeSession, clearCodexSession } from './adapters/session-store'
+import { forgetConversation } from './mcp-approvals'
 import {
   handleDeployCommand,
   parseDeployCommand,
@@ -292,6 +293,8 @@ export async function deleteConversation(conversationId: string): Promise<void> 
   // 清掉 SDK session 缓存
   clearClaudeCodeSession(conversationId)
   clearCodexSession(conversationId)
+  // 外部 MCP 工具审批记忆跟随会话生命周期
+  forgetConversation(conversationId)
 }
 
 // ─── 清空会话历史 ────────────────────────────────────────

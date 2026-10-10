@@ -12,6 +12,7 @@ import {
   Loader2,
   Monitor,
   Network,
+  Plug,
   Power,
   RotateCw,
   Settings as SettingsIcon,
@@ -19,6 +20,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
+import { McpServersSettings } from '@/components/mcp-servers-settings'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -270,6 +272,10 @@ export function SettingsDialog({
                   <FolderUp className="size-3.5" />
                   发布
                 </TabsTrigger>
+                <TabsTrigger value="mcp">
+                  <Plug className="size-3.5" />
+                  MCP
+                </TabsTrigger>
               </TabsList>
               {tab === 'keys' && (
                 <TooltipProvider>
@@ -366,6 +372,10 @@ export function SettingsDialog({
                     setForm((f) => ({ ...f, deploymentPublicBaseUrl }))
                   }
                 />
+              </TabsContent>
+
+              <TabsContent value="mcp" className="mt-0 py-1">
+                <McpServersSettings />
               </TabsContent>
             </div>
           </Tabs>

@@ -11,6 +11,7 @@ import type {
   MessagePart,
   PendingBashCommand,
   PendingDispatchPlan,
+  PendingMcpToolCall,
   PendingQuestion,
   PendingWrite,
   StreamEvent,
@@ -80,6 +81,9 @@ interface AppState {
   // ─── Agent bash 关键命令审批等待队列（按 conversationId 分桶）─
   pendingBashCommandsByConv: Record<string, PendingBashCommand[]>
 
+  // ─── 外部 MCP 工具调用审批等待队列（按 conversationId 分桶）─
+  pendingMcpToolCallsByConv: Record<string, PendingMcpToolCall[]>
+
   // ─── Agent ask_user 结构化问答等待队列（按 conversationId 分桶）─
   pendingQuestionsByConv: Record<string, PendingQuestion[]>
 
@@ -144,6 +148,11 @@ interface AppState {
     list: PendingBashCommand[],
   ): void
 
+  setPendingMcpToolCallsForConversation(
+    conversationId: string,
+    list: PendingMcpToolCall[],
+  ): void
+
   setPendingQuestionsForConversation(conversationId: string, list: PendingQuestion[]): void
 
   setPendingDispatchPlansForConversation(
@@ -186,6 +195,7 @@ export const useAppStore = create<AppState>()(
     pendingAttachmentsByConv: {},
     pendingWritesByConv: {},
     pendingBashCommandsByConv: {},
+    pendingMcpToolCallsByConv: {},
     pendingQuestionsByConv: {},
     unreadByConv: {},
     mobileSidebarOpen: false,
@@ -218,6 +228,7 @@ export const useAppStore = create<AppState>()(
         delete s.runsByConv[id]
         delete s.pendingWritesByConv[id]
         delete s.pendingBashCommandsByConv[id]
+        delete s.pendingMcpToolCallsByConv[id]
         delete s.pendingQuestionsByConv[id]
         if (s.activeConversationId === id) s.activeConversationId = null
       }),
@@ -380,6 +391,7 @@ export const useAppStore = create<AppState>()(
         delete s.replyTargetByConv[conversationId]
         delete s.pendingWritesByConv[conversationId]
         delete s.pendingBashCommandsByConv[conversationId]
+        delete s.pendingMcpToolCallsByConv[conversationId]
         delete s.pendingQuestionsByConv[conversationId]
         delete s.unreadByConv[conversationId]
         if (s.highlightedMessageId && messageIds.has(s.highlightedMessageId)) {
@@ -437,6 +449,12 @@ export const useAppStore = create<AppState>()(
       set((s) => {
         if (list.length === 0) delete s.pendingBashCommandsByConv[conversationId]
         else s.pendingBashCommandsByConv[conversationId] = list
+      }),
+
+    setPendingMcpToolCallsForConversation: (conversationId, list) =>
+      set((s) => {
+        if (list.length === 0) delete s.pendingMcpToolCallsByConv[conversationId]
+        else s.pendingMcpToolCallsByConv[conversationId] = list
       }),
 
     setPendingQuestionsForConversation: (conversationId, list) =>
@@ -836,6 +854,22 @@ export const useAppStore = create<AppState>()(
             return
           }
 
+          case 'mcp_tool.pending': {
+            const list = s.pendingMcpToolCallsByConv[event.conversationId] ?? []
+            if (list.some((p) => p.id === event.pendingCall.id)) return
+            s.pendingMcpToolCallsByConv[event.conversationId] = [...list, event.pendingCall]
+            return
+          }
+
+          case 'mcp_tool.resolved': {
+            const list = s.pendingMcpToolCallsByConv[event.conversationId]
+            if (!list) return
+            const next = list.filter((p) => p.id !== event.pendingId)
+            if (next.length === 0) delete s.pendingMcpToolCallsByConv[event.conversationId]
+            else s.pendingMcpToolCallsByConv[event.conversationId] = next
+            return
+          }
+
           case 'ask_user.pending': {
             const list = s.pendingQuestionsByConv[event.conversationId] ?? []
             if (list.some((q) => q.id === event.pendingQuestion.id)) return
@@ -1154,6 +1188,14 @@ export const usePendingBashCommands = (conversationId: string | null): PendingBa
   useAppStore(
     useShallow((s) =>
       conversationId ? s.pendingBashCommandsByConv[conversationId] ?? [] : [],
+    ),
+  )
+
+/** 该会话当前所有待审批的外部 MCP 工具调用（`trust: 'ask'`）。 */
+export const usePendingMcpToolCalls = (conversationId: string | null): PendingMcpToolCall[] =>
+  useAppStore(
+    useShallow((s) =>
+      conversationId ? s.pendingMcpToolCallsByConv[conversationId] ?? [] : [],
     ),
   )
 

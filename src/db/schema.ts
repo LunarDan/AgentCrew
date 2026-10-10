@@ -6,7 +6,15 @@
 
 import { sql } from 'drizzle-orm'
 import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
-import type { ArtifactContent, ArtifactType, AdapterName, MessagePart, ModelProvider } from '@/shared/types'
+import type {
+  ArtifactContent,
+  ArtifactType,
+  AdapterName,
+  McpTransport,
+  McpTrust,
+  MessagePart,
+  ModelProvider,
+} from '@/shared/types'
 
 // ─── Agents ──────────────────────────────────────────────────
 export const agents = sqliteTable('agents', {
@@ -36,6 +44,16 @@ export const agents = sqliteTable('agents', {
   apiBaseUrl: text('api_base_url'),
 
   toolNames: text('tool_names', { mode: 'json' }).$type<string[]>().notNull(),
+
+  /**
+   * 本 Agent 启用的外部 MCP server id 列表（引用 mcp_servers.id）。
+   * 与 toolNames 不同：SDK adapter（claude-code/codex）不会被清空 —— 外部 MCP
+   * 正是 SDK agent 获得用户自选工具的途径。
+   */
+  mcpServerIds: text('mcp_server_ids', { mode: 'json' })
+    .$type<string[]>()
+    .notNull()
+    .default(sql`'[]'`),
 
   isBuiltin: integer('is_builtin', { mode: 'boolean' }).notNull().default(false),
   isOrchestrator: integer('is_orchestrator', { mode: 'boolean' }).notNull().default(false),
@@ -269,6 +287,41 @@ export const appSettings = sqliteTable('app_settings', {
 
 export type AppSettingsRow = typeof appSettings.$inferSelect
 export type AppSettingsInsert = typeof appSettings.$inferInsert
+
+// ─── External MCP servers (specs/15-external-mcp.md) ────────
+/**
+ * 用户登记的外部 MCP server。全局一张表，Agent 通过 `agents.mcp_server_ids` 引用。
+ *
+ * 安全提醒：这类 server 在 AgentHub 的 workspace 沙箱 + Bash 黑名单**之外**运行，
+ * 且 stdio server 继承本进程环境（可读到 provider key）。见 CLAUDE.md §5。
+ *
+ * env / headers 里的 `${ENV_NAME}` 占位在 run 启动时展开，DB 只存占位符文本。
+ */
+export const mcpServers = sqliteTable('mcp_servers', {
+  id: text('id').primaryKey(),
+  /** 工具命名空间用：`mcp__<name>__<tool>`；`^[a-z0-9_]+$`，唯一。 */
+  name: text('name').notNull().unique(),
+  transport: text('transport', { enum: ['stdio', 'sse', 'http'] }).$type<McpTransport>().notNull(),
+
+  /** stdio 传输 */
+  command: text('command'),
+  args: text('args', { mode: 'json' }).$type<string[]>().notNull().default(sql`'[]'`),
+  env: text('env', { mode: 'json' }).$type<Record<string, string>>(),
+
+  /** sse / http 传输 */
+  url: text('url'),
+  headers: text('headers', { mode: 'json' }).$type<Record<string, string>>(),
+
+  /** 'always' 直接放行；'ask'（默认）per-tool-per-conversation 审批。 */
+  trust: text('trust', { enum: ['always', 'ask'] }).$type<McpTrust>().notNull().default('ask'),
+  /** 默认不启用 —— 登记 + 启用 + agent 勾选 三道才生效。 */
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
+
+  createdAt: integer('created_at').notNull(),
+})
+
+export type McpServerRow = typeof mcpServers.$inferSelect
+export type McpServerInsert = typeof mcpServers.$inferInsert
 
 // ─── 类型导出（推断行类型）─────────────────────────────────
 export type AgentRow = typeof agents.$inferSelect

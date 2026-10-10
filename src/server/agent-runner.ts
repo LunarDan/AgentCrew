@@ -14,6 +14,7 @@ import type {
   DispatchTaskInput,
   DispatchTaskEndStatus,
   MessagePart,
+  ResolvedMcpServer,
   StreamEvent,
   TaskResultReport,
 } from '@/shared/types'
@@ -56,6 +57,7 @@ import {
 } from './dispatch-plan'
 import { eventBus } from './event-bus'
 import { newArtifactId, newRunId } from './ids'
+import { resolveMcpServersForAgent } from './mcp-server-service'
 import { pendingDispatchPlans, type PlanReviewOutcome } from './pending-dispatch-plans'
 import { buildProjectFiles } from './project-artifact'
 import { getAppSettings } from './settings-service'
@@ -2027,6 +2029,17 @@ async function buildAdapterInput(
     })
   }
 
+  // 外部 MCP server（specs/15-external-mcp.md）。custom / mock adapter 不支持，服务层直接返回空。
+  // 单个 server 解析失败只降级为警告（spec 15 §「失败隔离」），不让整个 run 崩 —— 与上面 history 同一套路。
+  let mcpServers: ResolvedMcpServer[] = []
+  try {
+    const resolved = await resolveMcpServersForAgent(agent.mcpServerIds, agent.adapterName)
+    mcpServers = resolved.servers
+    for (const w of resolved.warnings) console.warn('[mcp]', w)
+  } catch (err) {
+    console.warn('[agent-runner] resolveMcpServersForAgent failed; continuing without MCP servers', err)
+  }
+
   return {
     agentId: agent.id,
     conversationId: args.conversationId,
@@ -2038,6 +2051,7 @@ async function buildAdapterInput(
     apiBaseUrl: effectiveApiBaseUrl,
     modelId: agent.modelId,
     toolNames,
+    mcpServers: mcpServers.length > 0 ? mcpServers : undefined,
     attachments: attachments.length > 0 ? attachments : undefined,
     history: history.length > 0 ? history : undefined,
     customConfig:

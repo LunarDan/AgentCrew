@@ -3,6 +3,7 @@ import {
   createSdkMcpServer,
   query,
   tool,
+  type McpServerConfigForProcessTransport,
   type Options,
 } from '@anthropic-ai/claude-agent-sdk'
 import { eq } from 'drizzle-orm'
@@ -15,6 +16,12 @@ import type { WorkspaceRow } from '@/db/schema'
 import { recordRunFileWrite } from '@/server/dispatch-run-evidence'
 import { readIfExists } from '@/server/fs-service'
 import { newMessageId, newToolCallId } from '@/server/ids'
+import {
+  isExternalMcpTool,
+  isToolApproved,
+  parseMcpToolName,
+  waitForMcpToolApproval,
+} from '@/server/mcp-approvals'
 import { pendingWrites } from '@/server/pending-writes'
 import { currentPlatform } from '@/server/platform'
 import { findBannedPattern } from '@/server/security'
@@ -22,7 +29,11 @@ import { REPORT_TASK_RESULT_TOOL_NAME } from '@/server/task-result-report'
 import { toolRegistry } from '@/server/tools/registry'
 import type { ToolContext } from '@/server/tools/types'
 import { assertPathWithinWorkspace, getEffectiveCwd } from '@/server/workspace-utils'
-import type { DeployStatusRecord, StreamEvent } from '@/shared/types'
+import type {
+  DeployStatusRecord,
+  ResolvedMcpServer,
+  StreamEvent,
+} from '@/shared/types'
 
 import { buildChildProcessEnv, createAdapterEvent } from './adapter-utils'
 import { claudeCodeSessions } from './session-store'
@@ -432,7 +443,7 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
       tools: isPlanStage ? CLAUDE_PLAN_STAGE_BUILTIN_TOOLS : { type: 'preset', preset: 'claude_code' },
       // 禁用 SDK 内置 AskUserQuestion —— 我们用统一的 mcp__agenthub__ask_user 提供等价 UI
       disallowedTools: ['AskUserQuestion'],
-      mcpServers: { agenthub: agenthubMcpServer },
+      mcpServers: { agenthub: agenthubMcpServer, ...toSdkMcpServers(input.mcpServers) },
       includePartialMessages: true,
       // 'project' = 只读绑定目录里的 CLAUDE.md（项目级上下文），不读用户全局 ~/.claude 设定（避免污染）
       settingSources: ['project'],
@@ -794,6 +805,34 @@ function buildSdkEnv(
   return base
 }
 
+/**
+ * 外部 MCP server → SDK 的 `mcpServers` 条目（specs/15-external-mcp.md）。
+ * 纯形状翻译：DB 读取、`enabled` 过滤、`${ENV}` 展开都已在 L3 完成，adapter 不碰 DB。
+ * stdio 的 `env` 不传时子进程继承 CLI 的环境（即 buildSdkEnv 的结果）。
+ */
+function toSdkMcpServers(
+  servers: ResolvedMcpServer[] | undefined,
+): Record<string, McpServerConfigForProcessTransport> {
+  const map: Record<string, McpServerConfigForProcessTransport> = {}
+  for (const s of servers ?? []) {
+    if (s.transport === 'stdio') {
+      map[s.name] = {
+        type: 'stdio',
+        command: s.command,
+        args: s.args,
+        ...(s.env ? { env: s.env } : {}),
+      }
+    } else {
+      map[s.name] = {
+        type: s.transport,
+        url: s.url,
+        ...(s.headers ? { headers: s.headers } : {}),
+      }
+    }
+  }
+  return map
+}
+
 interface PermissionCtx {
   workspace: WorkspaceRow
   approvalMode: 'auto' | 'review'
@@ -910,7 +949,34 @@ async function bridgePermission(
     return deny('NotebookEdit approval not yet supported in Review mode; switch to Auto mode.')
   }
 
-  // 5. 默认放行（Read / Grep / Glob / WebFetch / WebSearch / Task / TodoWrite / ...）
+  // 5. 外部 MCP 工具审批（specs/15-external-mcp.md，决策 §11.2）
+  // 必须排在默认放行之前：`mcp__<server>__<tool>` 不匹配 1–4 任何一类，否则会静默执行第三方代码。
+  if (isExternalMcpTool(toolName)) {
+    const parsed = parseMcpToolName(toolName)
+    // 解析不出 server 名 = 名字不来自已注册的 server（server 名校验禁止 `__`）。拒绝比放行安全。
+    if (!parsed) return deny(`Unrecognized external MCP tool name: ${toolName}`)
+    const trust = ctx.input.mcpServers?.find((s) => s.name === parsed.serverName)?.trust
+    // trust='always' 显式放行；trust='ask' 且本会话已批准过同一工具则不再打扰。
+    if (trust === 'always' || isToolApproved(ctx.input.conversationId, toolName)) return allow()
+    const approved = await waitForMcpToolApproval({
+      conversationId: ctx.input.conversationId,
+      agentId: ctx.input.agentId,
+      runId: ctx.input.runId,
+      serverName: parsed.serverName,
+      toolName,
+      toolArgs: toolInput,
+      signal: ctx.signal,
+    })
+    if (!approved) {
+      return deny(
+        `User rejected the external MCP tool call "${toolName}" (server "${parsed.serverName}"). ` +
+          'Do not retry it; continue without it or ask the user how to proceed.',
+      )
+    }
+    return allow()
+  }
+
+  // 6. 默认放行（Read / Grep / Glob / WebFetch / WebSearch / Task / TodoWrite / ...）
   return allow()
 }
 

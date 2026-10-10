@@ -1,7 +1,7 @@
 'use client'
 
-import { Eye, Pencil, ShieldCheck, Sparkles, Wrench } from 'lucide-react'
-import { useState } from 'react'
+import { Eye, Pencil, Plug, ShieldCheck, Sparkles, Wrench } from 'lucide-react'
+import { useEffect, useState } from 'react'
 
 import { AgentAvatar } from '@/components/agent-avatar'
 import { CreateAgentDialog } from '@/components/create-agent-dialog'
@@ -11,6 +11,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import type { AgentRow } from '@/db/schema'
+import { fetchMcpServers } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 type Size = 'xs' | 'sm' | 'md' | 'lg'
@@ -33,6 +34,24 @@ export function AgentInfoPopover({
   avatarClassName?: string
 }) {
   const [editOpen, setEditOpen] = useState(false)
+
+  // 只在真的要展示 MCP 名字时才拉列表（大多数 agent 没选任何 server）。
+  const [mcpNameById, setMcpNameById] = useState<Record<string, string>>({})
+  useEffect(() => {
+    if (agent.mcpServerIds.length === 0) return
+    let cancelled = false
+    fetchMcpServers()
+      .then((list) => {
+        if (cancelled) return
+        setMcpNameById(Object.fromEntries(list.map((s) => [s.id, s.name])))
+      })
+      .catch((err) => {
+        if (!cancelled) console.warn('[AgentInfoPopover] fetchMcpServers failed', err)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [agent.mcpServerIds.length])
 
   const providerLabel = providerName(agent.modelProvider)
 
@@ -111,6 +130,21 @@ export function AgentInfoPopover({
                       className="rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground"
                     >
                       {t}
+                    </code>
+                  ))}
+                </div>
+              </div>
+            )}
+            {agent.mcpServerIds.length > 0 && (
+              <div className="flex items-start gap-1.5">
+                <Plug className="mt-0.5 size-3 shrink-0" />
+                <div className="flex flex-wrap gap-1">
+                  {agent.mcpServerIds.map((id) => (
+                    <code
+                      key={id}
+                      className="rounded bg-violet-500/10 px-1 py-0.5 font-mono text-[10px] text-violet-700 dark:text-violet-300"
+                    >
+                      {mcpNameById[id] ?? id}
                     </code>
                   ))}
                 </div>

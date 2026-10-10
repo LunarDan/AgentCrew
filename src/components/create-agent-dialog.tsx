@@ -19,6 +19,7 @@ import { Textarea } from '@/components/ui/textarea'
 import type { AgentRow } from '@/db/schema'
 import {
   createAgent,
+  fetchMcpServers,
   updateAgent,
   type CreateAgentBody,
   type UpdateAgentBody,
@@ -38,10 +39,12 @@ import {
   type AgentToolName as ToolName,
 } from '@/shared/agent-builder-config'
 import { validateCodexBaseUrl } from '@/shared/codex-compat'
+import { adapterSupportsTransport } from '@/shared/mcp'
 import {
   validateOpenAICompatibleApiKey,
   validateOpenAICompatibleBaseUrl,
 } from '@/shared/openai-compatible'
+import type { McpServerView } from '@/shared/types'
 import { useAppStore } from '@/stores/app-store'
 
 type AgentTab = 'basic' | 'model' | 'toolsPrompt'
@@ -83,6 +86,8 @@ export function CreateAgentDialog({
   const [provider, setProvider] = useState<Provider>('deepseek')
   const [modelId, setModelId] = useState(PROVIDER_DEFAULTS.deepseek.defaultModel)
   const [toolNames, setToolNames] = useState<Set<string>>(new Set(DEFAULT_CUSTOM_AGENT_TOOLS))
+  const [mcpServerIds, setMcpServerIds] = useState<Set<string>>(new Set())
+  const [availableMcpServers, setAvailableMcpServers] = useState<McpServerView[]>([])
   const [supportsVision, setSupportsVision] = useState(true)
   const [apiKey, setApiKey] = useState('')
   const [apiBaseUrl, setApiBaseUrl] = useState('')
@@ -118,6 +123,7 @@ export function CreateAgentDialog({
               : PROVIDER_DEFAULTS[p].defaultModel),
       )
       setToolNames(new Set(agent.toolNames))
+      setMcpServerIds(new Set(agent.mcpServerIds))
       setSupportsVision(agent.supportsVision)
       setApiKey(agent.apiKey ?? '')
       setApiBaseUrl(agent.apiBaseUrl ?? '')
@@ -130,6 +136,7 @@ export function CreateAgentDialog({
       setProvider('deepseek')
       setModelId(PROVIDER_DEFAULTS.deepseek.defaultModel)
       setToolNames(new Set(DEFAULT_CUSTOM_AGENT_TOOLS))
+      setMcpServerIds(new Set())
       setSupportsVision(true)
       setApiKey('')
       setApiBaseUrl('')
@@ -140,6 +147,23 @@ export function CreateAgentDialog({
     setError(null)
     setActiveTab('basic')
   }, [open, agent])
+
+  // 外部 MCP server 列表（设置面板里注册的）。失败就静默留空——这个区块不是必填项，
+  // 不该因为它拿不到数据而挡住整个 agent 表单。
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    fetchMcpServers()
+      .then((list) => {
+        if (!cancelled) setAvailableMcpServers(list)
+      })
+      .catch((err) => {
+        if (!cancelled) console.warn('[CreateAgentDialog] fetchMcpServers failed', err)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open])
 
   const handleAdapterKindChange = (kind: AdapterKind) => {
     setAdapterKind(kind)
@@ -283,6 +307,7 @@ export function CreateAgentDialog({
           modelProvider: isSdkAgent ? undefined : provider,
           modelId: isSdkAgent ? modelId.trim() || null : modelId.trim(),
           toolNames: isSdkAgent ? [] : Array.from(toolNames),
+          mcpServerIds: Array.from(mcpServerIds),
           supportsVision,
           apiKey: trimmedApiKey || null,
           apiBaseUrl: trimmedApiBaseUrl || null,
@@ -300,6 +325,7 @@ export function CreateAgentDialog({
           modelProvider: isSdkAgent ? undefined : provider,
           modelId: modelId.trim() || undefined,
           toolNames: isSdkAgent ? [] : Array.from(toolNames),
+          mcpServerIds: Array.from(mcpServerIds),
           supportsVision,
           apiKey: trimmedApiKey || undefined,
           apiBaseUrl: trimmedApiBaseUrl || undefined,
@@ -723,6 +749,20 @@ export function CreateAgentDialog({
                   </div>
                 )}
 
+                {adapterKind !== 'custom' && <McpServerPicker
+                  adapterKind={adapterKind}
+                  servers={availableMcpServers}
+                  selected={mcpServerIds}
+                  onToggle={(id) =>
+                    setMcpServerIds((prev) => {
+                      const next = new Set(prev)
+                      if (next.has(id)) next.delete(id)
+                      else next.add(id)
+                      return next
+                    })
+                  }
+                />}
+
                 <div className="grid grid-cols-[80px_1fr] items-start gap-3">
                   <Label required>System Prompt</Label>
                   <Textarea
@@ -832,6 +872,78 @@ function Label({ children, required }: { children: React.ReactNode; required?: b
     <div className="pt-2 text-xs text-muted-foreground">
       {children}
       {required && <span className="ml-0.5 text-red-500">*</span>}
+    </div>
+  )
+}
+
+/**
+ * 外部 MCP server 多选。只列出当前 adapter 真的能跑的 server（transport 矩阵见
+ * `@/shared/mcp`），避免用户勾了 Codex 跑不了的 SSE server 再在运行时被静默跳过。
+ */
+function McpServerPicker({
+  adapterKind,
+  servers,
+  selected,
+  onToggle,
+}: {
+  adapterKind: AdapterKind
+  servers: McpServerView[]
+  selected: Set<string>
+  onToggle: (id: string) => void
+}) {
+  const usable = servers.filter(
+    (s) => adapterSupportsTransport(adapterKind, s.transport) && s.enabled,
+  )
+  const skipped = servers.filter((s) => !usable.includes(s))
+
+  return (
+    <div className="grid grid-cols-[80px_1fr] items-start gap-3">
+      <Label>外部 MCP</Label>
+      <div className="space-y-1.5">
+        {usable.length === 0 && (
+          <div className="rounded-md border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+            还没有可用的外部 MCP server。到「设置 → MCP」注册并启用后，这里才会出现。
+          </div>
+        )}
+        {usable.map((server) => (
+          <label
+            key={server.id}
+            className={cn(
+              'flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 transition hover:border-foreground/30',
+              selected.has(server.id) && 'border-primary bg-primary/5',
+            )}
+          >
+            <input
+              type="checkbox"
+              checked={selected.has(server.id)}
+              onChange={() => onToggle(server.id)}
+              className="mt-0.5 accent-primary"
+            />
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium">{server.name}</span>
+                <code className="font-mono text-[10px] text-muted-foreground">{server.transport}</code>
+                {server.trust === 'always' && (
+                  <span className="rounded bg-rose-100 px-1.5 py-0.5 text-[10px] text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
+                    免审批
+                  </span>
+                )}
+              </div>
+              <div className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
+                {server.transport === 'stdio' ? server.command : server.url}
+              </div>
+            </div>
+          </label>
+        ))}
+        {skipped.length > 0 && (
+          <div className="px-1 text-[10px] text-muted-foreground">
+            未列出：
+            {skipped
+              .map((s) => `${s.name}（${s.enabled ? `该 adapter 不支持 ${s.transport}` : '已停用'}）`)
+              .join('、')}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

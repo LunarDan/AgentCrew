@@ -24,7 +24,12 @@ import {
   isCodexResponsesMissingErrorMessage,
   validateCodexBaseUrl,
 } from '@/shared/codex-compat'
-import type { ArtifactRecord, DeployStatusRecord, StreamEvent } from '@/shared/types'
+import type {
+  ArtifactRecord,
+  DeployStatusRecord,
+  ResolvedMcpServer,
+  StreamEvent,
+} from '@/shared/types'
 
 import {
   buildCodexChildProcessEnv,
@@ -33,6 +38,34 @@ import {
 } from './adapter-utils'
 import { adapterSessionKey, codexSessions } from './session-store'
 import type { AdapterInput, AgentPlatformAdapter } from './types'
+
+/**
+ * 外部 MCP server → Codex `mcp_servers.<name>` 配置表（specs/15-external-mcp.md）。
+ *
+ * Codex 靠 `command` / `url` 的存在推断传输方式，没有 `type` 字段。`sse` 到不了这里
+ * —— `mcp-server-service` 的 adapter/transport 矩阵已按 adapter 过滤并记警告。
+ * 可选字段一律缺省而非传 null：SDK 的 TOML 序列化器遇 null 会抛（`codex-sdk/dist/index.js:300-380`）。
+ */
+function toCodexMcpServers(
+  mcpServers: ResolvedMcpServer[] | undefined,
+): Record<string, Record<string, string | string[] | Record<string, string>>> {
+  const entries: Record<string, Record<string, string | string[] | Record<string, string>>> = {}
+  for (const s of mcpServers ?? []) {
+    if (s.transport === 'stdio') {
+      entries[s.name] = {
+        command: s.command,
+        args: s.args,
+        ...(s.env && Object.keys(s.env).length > 0 ? { env: s.env } : {}),
+      }
+    } else {
+      entries[s.name] = {
+        url: s.url,
+        ...(s.headers && Object.keys(s.headers).length > 0 ? { http_headers: s.headers } : {}),
+      }
+    }
+  }
+  return entries
+}
 
 const DEFAULT_MODEL = 'gpt-5-codex'
 const PLAN_TASKS_TOOL_NAME = 'plan_tasks'
@@ -83,6 +116,7 @@ export class CodexAdapter implements AgentPlatformAdapter {
             args: [getCodexMcpBridgePath()],
             env: buildCodexMcpEnv(input, codexEnv),
           },
+          ...toCodexMcpServers(input.mcpServers),
         },
       },
     })

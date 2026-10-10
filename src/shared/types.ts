@@ -194,6 +194,47 @@ export type ModelProvider =
   | 'volcano-ark'
   | 'openai-compatible'
 
+// ─── 外部 MCP server ───────────────────────────────────────
+/** stdio / sse / http。支持矩阵：stdio+http 两个 SDK adapter 都支持；sse 仅 claude-code。 */
+export type McpTransport = 'stdio' | 'sse' | 'http'
+export type McpTrust = 'always' | 'ask'
+
+/** 外部 MCP 工具名前缀：`mcp__<serverName>__<toolName>`。 */
+export const MCP_TOOL_PREFIX = 'mcp__'
+/** AgentHub 自己的 MCP bridge 名，不属于外部 server。 */
+export const AGENTHUB_MCP_SERVER_NAME = 'agenthub'
+
+/** 对齐两个 SDK：`McpServerConfig = McpStdioServerConfig | McpSSEServerConfig | McpHttpServerConfig` 的 AgentHub 侧子集。 */
+export type ResolvedMcpServer = {
+  name: string
+  trust: McpTrust
+} & (
+  | { transport: 'stdio'; command: string; args: string[]; env?: Record<string, string> }
+  | { transport: 'sse'; url: string; headers?: Record<string, string> }
+  | { transport: 'http'; url: string; headers?: Record<string, string> }
+)
+
+/** 读接口返回的密钥摘要：只给「是不是占位符」和「后 4 位」，明文永不出服务端。 */
+export type MaskedSecret = { masked: string } | { placeholder: string }
+
+/**
+ * `mcp_servers` 行 + 脱敏后的 env/headers（镜像自 db/schema.ts，同 RunUsageEvent 的理由：
+ * 避开 client → server 的 import）。
+ */
+export interface McpServerView {
+  id: string
+  name: string
+  transport: McpTransport
+  command: string | null
+  args: string[]
+  env: Record<string, MaskedSecret> | null
+  url: string | null
+  headers: Record<string, MaskedSecret> | null
+  trust: McpTrust
+  enabled: boolean
+  createdAt: number
+}
+
 // ─── 调度 plan ────────────────────────────────────────────
 export interface DispatchPlanItem {
   id: string
@@ -349,6 +390,21 @@ export interface PendingBashCommand {
   createdAt: number
 }
 
+/** 外部 MCP server 的工具调用审批（`trust: 'ask'` 时的门）。规格见 specs/15-external-mcp.md。 */
+export interface PendingMcpToolCall {
+  id: string
+  conversationId: string
+  agentId: string
+  runId: string
+  /** 外部 server 名（`mcpServers.name`），用于在卡片上显示来源。 */
+  serverName: string
+  /** 带命名空间的完整工具名：`mcp__<serverName>__<toolName>`。 */
+  toolName: string
+  /** 模型传给该工具的入参，折叠展示用。 */
+  args: unknown
+  createdAt: number
+}
+
 export interface DeployStatusRecord {
   id: string
   artifactId: string
@@ -424,6 +480,8 @@ export type StreamEvent = BaseEvent &
     | { type: 'fs_write.resolved'; pendingId: string; applied: boolean }
     | { type: 'bash_command.pending'; pendingCommand: PendingBashCommand }
     | { type: 'bash_command.resolved'; pendingId: string; approved: boolean }
+    | { type: 'mcp_tool.pending'; pendingCall: PendingMcpToolCall }
+    | { type: 'mcp_tool.resolved'; pendingId: string; approved: boolean }
     | { type: 'ask_user.pending'; pendingQuestion: PendingQuestion }
     | { type: 'ask_user.resolved'; pendingId: string; answered: boolean }
     | { type: 'heartbeat' }

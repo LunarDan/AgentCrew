@@ -1,6 +1,6 @@
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions'
 
-import type { AdapterName, ModelProvider, StreamEvent } from '@/shared/types'
+import type { AdapterName, ModelProvider, ResolvedMcpServer, StreamEvent } from '@/shared/types'
 
 /**
  * AgentPlatformAdapter — 屏蔽不同 Agent 平台（Claude Code / Codex / Custom / Mock）
@@ -44,6 +44,13 @@ export interface AdapterInput {
   /** 当前 run 可用的工具名列表。AgentRunner 已经做完 override 选择，adapter 直接用。
    *  SDK adapters use this to scope AgentHub MCP tools and Orchestrator plan-stage restrictions. */
   toolNames: string[]
+
+  /**
+   * 本 run 启用的外部 MCP server（specs/15-external-mcp.md）。
+   * AgentRunner 已完成 DB 读取、`enabled` 过滤与 `${ENV}` 展开，adapter 只做 SDK 配置翻译。
+   * 空数组 / undefined 表示该 agent 没选任何外部 server，行为与加入此特性前一致。
+   */
+  mcpServers?: ResolvedMcpServer[]
 
   /** 触发消息的附件（图片 / 文件），adapter 决定是否注入到 LLM content */
   attachments?: AdapterAttachment[]

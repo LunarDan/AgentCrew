@@ -45,6 +45,7 @@ const DDL: string[] = [
     api_key TEXT,
     api_base_url TEXT,
     tool_names TEXT NOT NULL,
+    mcp_server_ids TEXT NOT NULL DEFAULT '[]',
     is_builtin INTEGER NOT NULL DEFAULT 0,
     is_orchestrator INTEGER NOT NULL DEFAULT 0,
     supports_vision INTEGER NOT NULL DEFAULT 0,
@@ -165,6 +166,21 @@ const DDL: string[] = [
     deployment_public_base_url TEXT,
     updated_at INTEGER NOT NULL
   )`,
+
+  // ─── mcp_servers (specs/15-external-mcp.md) ─────
+  `CREATE TABLE IF NOT EXISTS mcp_servers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    transport TEXT NOT NULL,
+    command TEXT,
+    args TEXT NOT NULL DEFAULT '[]',
+    env TEXT,
+    url TEXT,
+    headers TEXT,
+    trust TEXT NOT NULL DEFAULT 'ask',
+    enabled INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  )`,
 ]
 
 /** 建表 / 建索引（幂等）。 */
@@ -177,6 +193,7 @@ function ensureSchema(sqlite: Database.Database): void {
   safeAlter(sqlite, `ALTER TABLE app_settings ADD COLUMN deployment_publish_enabled INTEGER NOT NULL DEFAULT 0`)
   safeAlter(sqlite, `ALTER TABLE app_settings ADD COLUMN deployment_publish_dir TEXT`)
   safeAlter(sqlite, `ALTER TABLE app_settings ADD COLUMN deployment_public_base_url TEXT`)
+  safeAlter(sqlite, `ALTER TABLE agents ADD COLUMN mcp_server_ids TEXT NOT NULL DEFAULT '[]'`)
 }
 
 function safeAlter(sqlite: Database.Database, stmt: string): void {

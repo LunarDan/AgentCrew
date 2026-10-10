@@ -11,8 +11,12 @@ import type {
   AskUserAnswer,
   DeployCandidateRecord,
   DeployStatusRecord,
+  McpServerView,
+  McpTransport,
+  McpTrust,
   PendingBashCommand,
   PendingDispatchPlan,
+  PendingMcpToolCall,
   PendingQuestion,
   PendingWrite,
 } from '@/shared/types'
@@ -58,6 +62,8 @@ export interface CreateAgentBody {
   /** custom: required；SDK adapter: 可选，默认 SDK 默认模型 */
   modelId?: string
   toolNames: string[]
+  /** 外部 MCP server id（引用 mcp_servers.id）。SDK adapter 下**不会**像 toolNames 那样被清空 */
+  mcpServerIds?: string[]
   supportsVision?: boolean
   apiKey?: string
   /** 自定义 API base URL。Claude/Codex 对 endpoint 协议兼容性要求不同；空走默认 */
@@ -110,6 +116,64 @@ export async function updateAgent(agentId: string, patch: UpdateAgentBody): Prom
 
 export async function deleteAgent(agentId: string): Promise<void> {
   await json<{ ok: true }>(fetch(`/api/agents/${agentId}`, { method: 'DELETE' }))
+}
+
+// ─── External MCP servers ───────────────────────
+export interface McpServerBody {
+  name: string
+  transport: McpTransport
+  command?: string | null
+  args?: string[]
+  /** 只提交用户本次真正编辑过的 key；不要回传脱敏预览，否则会覆盖已存密钥。 */
+  env?: Record<string, string | null> | null
+  url?: string | null
+  headers?: Record<string, string | null> | null
+  trust: McpTrust
+  enabled: boolean
+}
+
+export async function fetchMcpServers(): Promise<McpServerView[]> {
+  const { servers } = await json<{ servers: McpServerView[] }>(fetch('/api/mcp-servers'))
+  return servers
+}
+
+export async function createMcpServer(body: McpServerBody): Promise<McpServerView> {
+  const { server } = await json<{ server: McpServerView }>(
+    fetch('/api/mcp-servers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  )
+  return server
+}
+
+export async function updateMcpServer(
+  id: string,
+  patch: Partial<McpServerBody>,
+): Promise<McpServerView> {
+  const { server } = await json<{ server: McpServerView }>(
+    fetch(`/api/mcp-servers/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }),
+  )
+  return server
+}
+
+export async function deleteMcpServer(id: string): Promise<void> {
+  await json<{ ok: true }>(fetch(`/api/mcp-servers/${id}`, { method: 'DELETE' }))
+}
+
+export interface McpTestResult {
+  ok: boolean
+  toolNames?: string[]
+  error?: string
+}
+
+export async function testMcpServer(id: string): Promise<McpTestResult> {
+  return json<McpTestResult>(fetch(`/api/mcp-servers/${id}/test`, { method: 'POST' }))
 }
 
 // ─── Conversations ──────────────────────────────
@@ -273,6 +337,42 @@ export async function rejectPendingBashCommand(
 ): Promise<void> {
   await json<{ ok: true }>(
     fetch(`/api/conversations/${conversationId}/pending-bash-commands/${pendingId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'reject' }),
+    }),
+  )
+}
+
+// ─── Pending external MCP tool calls ─────
+export async function fetchPendingMcpToolCalls(
+  conversationId: string,
+): Promise<PendingMcpToolCall[]> {
+  const { pendingCalls } = await json<{ pendingCalls: PendingMcpToolCall[] }>(
+    fetch(`/api/conversations/${conversationId}/pending-mcp-tools`),
+  )
+  return pendingCalls
+}
+
+export async function approvePendingMcpToolCall(
+  conversationId: string,
+  pendingId: string,
+): Promise<void> {
+  await json<{ ok: true }>(
+    fetch(`/api/conversations/${conversationId}/pending-mcp-tools/${pendingId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'approve' }),
+    }),
+  )
+}
+
+export async function rejectPendingMcpToolCall(
+  conversationId: string,
+  pendingId: string,
+): Promise<void> {
+  await json<{ ok: true }>(
+    fetch(`/api/conversations/${conversationId}/pending-mcp-tools/${pendingId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'reject' }),
