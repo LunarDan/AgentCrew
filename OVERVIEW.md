@@ -60,7 +60,7 @@ L1 Persistence                          src/db/**（Drizzle+SQLite） + workspac
 | Orchestrator 编排 | ✅ | 三阶段规划 + DAG 调度 + 级联中止 + 可视化卡 + 同波次代码冲突检测（检测+上报，不自动合并） |
 | 工具系统 | ✅ | write/deploy/read_artifact · read_attachment · fs_read/fs_write/bash · plan_tasks · ask_user |
 | Artifact 预览/编辑 | ✅ | web_app(iframe + preview URL + 本地静态发布/源码包/容器包) / document(md) / image / 版本对比 diff（历史 diff 只读兼容） / **ppt(幻灯片分页预览 + 固定逻辑画布缩放 + 溢出角标 + 完整 theme token + 导出真 .pptx)** · code_file workspace 预览/编辑 · 版本链 v1↔v2 · 选区改写 · 面板内编辑(CodeMirror)→提交新版本 · 导出 |
-| Workspace 沙箱 | ✅ | sandbox/local 双模式 · fs_write 审批(Review/Auto) · 双平台 Bash 黑名单 |
+| Workspace 沙箱 | ✅ | sandbox/local 双模式 · fs_write 审批(Review/Auto) · 双平台 Bash 黑名单 · SDK 隔离启动（workspace 的项目设置 / hooks / `.mcp.json` 不参与 run） |
 | 外部 MCP server | ✅ | P0：设置面板登记（stdio/sse/http + 测试连接）+ Agent 勾选 · claude-code/codex 接线 · `ask` 审批门（仅 Claude Code）· ⚠️ **在沙箱与命令黑名单之外运行**（见「关键约定」） |
 | Token 计量 | ✅ | per-run/per-message · cache 命中率 · 全局分析 Tab |
 | 跨 run 对话记忆 | ✅ | 历史序列化注入 · token 预算 · 群聊跨 agent 可见 · 手动压缩 |
@@ -186,7 +186,7 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 
 ### 📋 待办
 - 外部 MCP P1：custom adapter 的 MCP 客户端层（连接 / listTools / loop 路由 / 清理）
-- 外部 MCP P2：Codex 的审批门、OAuth 鉴权的远程 server、per-conversation 连接池；`settingSources: ['project']` 让 workspace `.claude/settings.json` 可预放行 `mcp__*` 的边界
+- 外部 MCP P2：Codex 的审批门、OAuth 鉴权的远程 server、per-conversation 连接池
 - PPT 深化：辅色语义着色（正面↑ / 警示↓）+ 数据页卡片化
 - 冲突检测盲区：bash / SDK adapter 写入（可加波次快照补全）
 - Codex 写盘审批 hook（当前 Review 模式用 read-only sandbox）
@@ -197,9 +197,10 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 ### ⚠️ 关键约定（动手前必看）
 - 改实体字段 → 同步 `specs/01`;改事件 → 同步 `specs/02`;改 Bash 黑名单 → 同步 `specs/11` + `src/server/security.ts`（单一数据源）;改 MCP 支持矩阵 → `src/shared/mcp.ts`。
 - 所有 LLM 调用必带 `AbortSignal`;跨进程输入（API body / LLM 输出）必经 zod 校验;fs/bash 必过 Workspace 沙箱。
+- ⚠️ **SDK adapter 以隔离模式启动**（`settingSources: []` + `strictMcpConfig: true`）：workspace 里的 `.claude/settings.json`、项目 hooks（在宿主执行命令）、`.mcp.json` 都不参与本次 run —— 这是「审批门 + Bash 黑名单」真正生效的前提，少了它一个 JSON 文件就能替 AgentHub 放行工具。代价：项目记忆只剩 `<effectiveCwd>/CLAUDE.md`（上限 50 000 字符）。详见 `CLAUDE.md §5.5`、`specs/11-platform.md`。
 - ⚠️ **外部 MCP server 不在上述沙箱保证内**:它们在 workspace 沙箱与命令黑名单之外运行(stdio 直接 spawn 任意命令);stdio 子进程**继承完整进程环境**,因此能读到 AgentHub 已存的 provider API Key 与内部 token。`trust='ask'` 审批门**只对 Claude Code 生效**。详见 `CLAUDE.md §5.5` 与 `specs/15`。
 - 完整协作规则见 `CLAUDE.md`。
 
 ---
 
-*最后更新：2026-10-09 · 同步外部 MCP 工具接入 P0（`specs/15`）到功能矩阵、代码地图、当前现状三节，并在「关键约定」写明它落在沙箱保证之外。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*
+*最后更新：2026-10-13 · 记录 Claude Code adapter 的隔离启动（`settingSources: []` + `strictMcpConfig: true`）：功能矩阵「Workspace 沙箱」补上它，「关键约定」写明它是审批门与黑名单生效的前提，待办里的边界条目随之删除。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*

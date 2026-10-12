@@ -342,11 +342,20 @@ class ClaudeCodeAdapter implements AgentPlatformAdapter {
       cwd: getEffectiveCwd(workspace),
       abortController: controller,
       model: input.customConfig?.modelId ?? 'claude-opus-4-7',
-      systemPrompt: { type: 'preset', preset: 'claude_code', append: input.systemPrompt },
+      systemPrompt: {
+        type: 'preset',
+        preset: 'claude_code',
+        append: composeSystemPrompt(input.systemPrompt, memory), // ← 见「项目记忆」
+      },
       tools: { type: 'preset', preset: 'claude_code' },
+      mcpServers: { agenthub: agenthubMcpServer, ...toSdkMcpServers(input.mcpServers) },
       includePartialMessages: true,
-      settingSources: [],           // 隔离 mode，不读用户 ~/.claude 设定
-      permissionMode: 'default',    // 自己 canUseTool 接管
+      settingSources: [],        // 隔离 mode：不读任何**文件系统**设置源 —— workspace 的
+                                 // .claude/settings.json（permissions.allow 会先于 canUseTool
+                                 // 求值）、项目 hooks、plugins / skills / 自定义命令。
+                                 // managed / policy 层仍读盘，企业 deny 规则保留
+      strictMcpConfig: true,     // MCP server 只来自上面的 mcpServers，忽略 workspace 的 .mcp.json
+      permissionMode: 'default', // 自己 canUseTool 接管
       env: input.apiKey ? { ...process.env, ANTHROPIC_API_KEY: input.apiKey } : process.env,
       canUseTool: bridgePermission, // ↓ 见下方
     }
@@ -377,6 +386,8 @@ class ClaudeCodeAdapter implements AgentPlatformAdapter {
 
 SDK 提供 `canUseTool(toolName, toolInput, options) => PermissionResult` 钩子，每次工具调用前回调。AgentHub 在这里集中处理所有安全策略：
 
+> ⚠️ **这条桥成立的前提是上面的 `settingSources: []`。** CLI 先求值项目设置里的 `permissions.allow`，命中就不再回调 `canUseTool` —— 把 `'project'` 加回去，下面每一条策略都能被 workspace 里一个 JSON 文件绕过（Bash 审批门、外部 MCP 的 `trust='ask'` 门都在其中）。改动本行必须同时改「项目记忆」一节与 `specs/11-platform.md`「SDK 子进程不加载项目设置」。
+
 1. **路径沙箱**（Read / Write / Edit / NotebookEdit）：`assertPathWithinWorkspace(workspace, toolInput.file_path)`，越界 `{ behavior: 'deny', message }`
 2. **Bash 黑名单与关键命令审批**（Bash）：`findBannedPattern(toolInput.command)` 命中 deny；未命中但 `classifyBashApproval(toolInput.command)` 命中时，注册 `PendingBashCommand` 并等待用户批准；通过后 allow（cwd 已限定）
 3. **fs_write 审批**（Write / Edit；Auto 模式直接 allow）：
@@ -387,6 +398,21 @@ SDK 提供 `canUseTool(toolName, toolInput, options) => PermissionResult` 钩子
    - applied → `{ behavior: 'allow' }`；rejected → `{ behavior: 'deny', message: 'User rejected the file change' }`
 4. **NotebookEdit**：MVP 不做 diff 审批，Review 模式直接 deny；Auto 模式 allow
 5. **其它工具**（Read / Grep / Glob / WebFetch / WebSearch / Task / TodoWrite / ...）：默认 allow
+
+### 项目记忆（CLAUDE.md）
+
+`settingSources: []` 同时也放弃了 SDK 自带的项目记忆加载 —— 在这个 SDK 里「不加载项目设置」与「不加载项目 `CLAUDE.md`」是同一个开关，没有只关一半的选项。所以 adapter 自己读（`src/server/adapters/project-memory.ts`）：
+
+| 方面 | 约定 |
+|---|---|
+| 路径 | 只读 `getEffectiveCwd(workspace)` 下的 `CLAUDE.md` |
+| 上限 | `MAX_PROJECT_MEMORY_CHARS = 50_000`（对齐 `fs-service.ts` 的 `MAX_READ_CHARS`，同为「文件内容进上下文」），超限在最后一个换行处截断并带可见标记 |
+| 失败 | 不存在 / 读失败 / 是目录 / 去空白后为空 → `null`，system prompt 就是 agent 自己的 prompt，**run 不因此 fail** |
+| 标注 | 注入块带标题与文件绝对路径，并写明这是 workspace 内容而非用户指令（workspace 是不可信输入） |
+
+**不加载**：父目录的 `CLAUDE.md`、`CLAUDE.local.md`、`.claude/rules/`、`@import`，以及 workspace 的 plugins / skills / 自定义命令、`.claude/settings.json`、`.mcp.json`、项目 hooks。
+
+隔离是**安全边界**，项目记忆只是**功能对齐**：读不到不影响任何安全性质。
 
 ### 工具集
 
@@ -417,7 +443,7 @@ signal.addEventListener('abort', () => controller.abort(), { once: true })
 
 - Subagent 独立 child run（MVP 同流够用）
 - MCP server 配置 UI
-- Skills / Plugins / Worktree SDK 高级特性
+- Skills / Plugins：**不是推迟，是强制不加载**（`settingSources: []`，见「项目记忆」）；Worktree SDK 高级特性仍推迟
 - `write_artifact` 给 Claude Code agent（绑本地项目时文件就是产物）
 - NotebookEdit 审批 diff
 - Thinking 块翻译（需要开 Anthropic betas）
@@ -494,7 +520,7 @@ mcp_servers（DB，L1）
 | `sse` | `{ type:'sse', url, headers? }` | ❌ 不支持的 transport，L3 已过滤 |
 | `http` | `{ type:'http', url, headers? }` | `{ url, http_headers? }` |
 
-- **Claude Code**：`mcpServers: { agenthub: <in-process bridge>, ...<每个外部 server> }`，与现有 `agenthub` 并列传入 `query()`；stdio 子进程由 SDK 自管。
+- **Claude Code**：`mcpServers: { agenthub: <in-process bridge>, ...<每个外部 server> }`，与现有 `agenthub` 并列传入 `query()`；stdio 子进程由 SDK 自管。同一次 `query()` 还带 `strictMcpConfig: true`，因此 MCP server **只**来自这个 map —— workspace 里的 `.mcp.json` 不会被加载（见「ClaudeCodeAdapter / 项目记忆」）。
 - **Codex**：写进 `config.mcp_servers`，与 `agenthub` 并列。Codex **靠 `command` / `url` 的存在推断传输方式，没有 `type` 字段**；可选字段（`env` / `headers`）必须**缺省而不是传 `null`** —— SDK 的 TOML 序列化器遇 `null` 会抛。Codex 侧只接受 `stdio` / `http`（无 SSE）。
 - **Codex 的 `config.mcp_servers` 写入的是 AgentHub 隔离的 `CODEX_HOME`**，不碰用户本机 `~/.codex/config.toml`（见本 spec「接入原则 3」与 CLAUDE.md §5.4）。
 
@@ -508,7 +534,7 @@ mcp_servers（DB，L1）
 
 不支持的 pairing 在 **L3 过滤时就打个警告并跳过**，绝不会带病传给 SDK。
 
-**审批（仅 Claude Code）**：外部工具名 `mcp__<server>__<tool>` 在 `bridgePermission` 里排在默认放行之前（见「ClaudeCodeAdapter / canUseTool 桥」第 5 步）：`trust='always'` 或本会话已批准过该工具 → 直接 allow；否则弹审批（`mcp_tool.pending` / `mcp_tool.resolved`），批准后按 per-tool-per-conversation 记忆（`src/server/mcp-approvals.ts`）。Codex 有自己的一套审批策略与沙箱，AgentHub 拦截不到它的工具决策，故 `trust` 对 Codex 只是**建议性**的。
+**审批（仅 Claude Code）**：外部工具名 `mcp__<server>__<tool>` 在 `bridgePermission` 里排在默认放行之前（见「ClaudeCodeAdapter / canUseTool 桥」第 5 步）：`trust='always'` 或本会话已批准过该工具 → 直接 allow；否则弹审批（`mcp_tool.pending` / `mcp_tool.resolved`），批准后按 per-tool-per-conversation 记忆（`src/server/mcp-approvals.ts`）。Codex 有自己的一套审批策略与沙箱，AgentHub 拦截不到它的工具决策，故 `trust` 对 Codex 只是**建议性**的。该审批门同样以「隔离启动」为前提：CLI 先求值项目设置的 `permissions.allow`，命中就不会回调 `canUseTool`（见「canUseTool 桥」的提示）。
 
 `custom` adapter 目前**不接**外部 MCP（需新建 MCP 客户端层，P1 未实现）；`mock` 同样不支持。
 

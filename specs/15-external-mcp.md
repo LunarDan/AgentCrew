@@ -4,6 +4,7 @@
 >
 > **状态:P0 已实现(2026-10-09),已端到端验证(2026-10-10)。** P0 = 数据模型 + `claude-code`/`codex` 接线 + 设置面板与 Agent builder + `trust='ask'` 审批门(仅 Claude Code)。`custom` 的 MCP 客户端层仍是 **P1,未实现**(见 §10)。
 > 实现记录与四项与本文原稿的偏差(现场核查得出)见 **§12**。改动安全约束(§6)已经讨论并记录。
+> **2026-10-13 补记:§12 D1 的「已知边界」已修。** adapter 改为隔离启动(`settingSources: []` + `strictMcpConfig: true`),workspace 里的 `.claude/settings.json`、项目 hooks、`.mcp.json` 都不再参与本次 run。审批门本身没变,变的是它前面不再站着别的放行者。见 `openspec/changes/fix-sdk-project-settings-bypass/`。
 
 源文件:`src/server/mcp-server-service.ts`(服务层)· `src/server/mcp-approvals.ts` + `src/server/pending-mcp-tools.ts`(审批门) · `src/shared/mcp.ts`(支持矩阵) · `src/app/api/mcp-servers/**` · 改动 `src/server/adapters/**`
 
@@ -173,6 +174,7 @@ createdAt     integer
 
 > 即「先让真 agent 平台(claude-code/codex)接上外部 MCP(便宜),再补 custom(贵)」。
 > `ask` 审批门从 P2 提前到 P0:理由是**存了 `trust='ask'` 却不拦**,比没有这个字段更糟——UI 会暗示一层并不存在的保护。详见 §12 D1。
+> 表外补充:P2 原本还包含「堵住 workspace `.claude/settings.json` 预放行 `mcp__*`」(§12 D1 的已知边界)。它**已于 2026-10-13 修复**(`fix-sdk-project-settings-bypass`)——而且修的时候发现它不只是审批门的事:同一处还漏了项目 hooks 与 workspace `.mcp.json`。
 
 ---
 
@@ -203,7 +205,14 @@ P0 落地时对着工作树逐条核查,发现原稿有四处与代码事实不�
 
 批准记忆在 `src/server/mcp-approvals.ts`,**内存态、按 conversation 分桶、按工具名去重**,不落库;会话被删除时清理。dev server 重启 / HMR 会清空,代价只是重新弹一次。这与 `pendingWrites` / pending bash 的既有做法一致。
 
-**已知边界(未修,记录在案)**:Claude Code adapter 以 `settingSources: ['project']` 启动,因此 workspace 里的 `.claude/settings.json` 若写了 `permissions.allow` 规则,可以在 CLI 侧先行放行 `mcp__*`,使 `canUseTool` 根本不被询问。这不是本特性引入的,而是项目级设置被加载的既有后果(同样的写法也能预放行 `Bash`)。缓解方向(去掉 `settingSources`,或把 `.claude/` 纳入写保护)属 P2。
+**已知边界(原记录 2026-10-10,当时未修)**:Claude Code adapter 以 `settingSources: ['project']` 启动,因此 workspace 里的 `.claude/settings.json` 若写了 `permissions.allow` 规则,可以在 CLI 侧先行放行 `mcp__*`,使 `canUseTool` 根本不被询问。这不是本特性引入的,而是项目级设置被加载的既有后果(同样的写法也能预放行 `Bash`)。缓解方向(去掉 `settingSources`,或把 `.claude/` 纳入写保护)属 P2。
+
+**2026-10-13 已修**(`openspec/changes/fix-sdk-project-settings-bypass/`;契约落在 `openspec/specs/{tools,external-mcp,adapters,platform-security}/spec.md`):
+
+- adapter 以 `settingSources: []` + `strictMcpConfig: true` 启动,并**自读 `<effectiveCwd>/CLAUDE.md` 注入 system prompt**,以补偿被同一个开关一并关掉的项目记忆(该 SDK 里这两件事是同一根线)。
+- **选「去掉设置源」而不是「写保护 `.claude/`」**,因为后者不可执行:bash 的 cwd 就是 workspace 根,`mkdir -p .claude && echo '{}' > .claude/settings.json` 既不在 `src/server/security.ts` 的黑名单里,也不触发 `src/server/bash-command-approval.ts` 的分类器;local 模式下 workspace 就是用户真实仓库,本来就可能有这个文件。
+- 同一处一共堵了**三个口**:项目设置的 `permissions.allow`(Bash 与 `mcp__*` 都受影响)、**项目 hooks**(hook 在宿主执行命令,不经过 `canUseTool`,也不经过黑名单)、workspace **`.mcp.json`**(由 `strictMcpConfig` 关掉,否则工作区放一个文件就能让 CLI 自己 spawn 任意 MCP server)。
+- 审批语义不变:`trust='ask'` 仍是 per-tool-per-conversation,`trust='always'` 仍直接放行(§12 D1)。
 
 ### D2 — `transport` 增加 `http`
 

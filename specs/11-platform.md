@@ -184,6 +184,32 @@ function buildSdkEnv(...) {
 
 ---
 
+## SDK 子进程不加载项目设置
+
+Claude Code adapter 以**隔离模式**启动 SDK 子进程：
+
+```typescript
+settingSources: [],       // 不读任何文件系统设置源
+strictMcpConfig: true,    // MCP server 只来自 adapter 显式传入的 mcpServers
+```
+
+`settingSources: []` 排除的是**作用域在 workspace 上的**文件系统设置源：
+
+- workspace 的 `.claude/settings.json` / `settings.local.json` —— 尤其 `permissions.allow`：它在 CLI 侧**先于** `canUseTool` 求值，命中就不再回调（Bash 审批门与外部 MCP 的 `trust='ask'` 门都会因此被绕过）
+- **项目 hooks** —— hook 是**在宿主上执行命令**，不经过 `canUseTool`，也不经过命令黑名单
+- workspace 的 plugins / skills / 自定义命令 / `.claude/agents/` frontmatter
+- workspace 的 `.mcp.json`（`strictMcpConfig` 独立再关一次，否则工作区放一个文件就能让 CLI 自己 spawn 任意 MCP server）
+
+**不在排除范围**：管理员托管 / 策略层设置（managed policy）。企业下发的 `deny` 规则照旧生效 —— 这是有意的。
+
+**唯一例外**：AgentHub 自己读 `<effectiveCwd>/CLAUDE.md` 注入 system prompt。原因是该 SDK 里「不加载项目设置」与「不加载项目 `CLAUDE.md`」是同一个开关，没有只关一半的选项（详见 Spec 05「项目记忆（CLAUDE.md）」）；上限 50 000 字符，读失败不 fail run。
+
+**为什么不是「写保护 `.claude/`」**：bash 的 cwd 就是 workspace 根，`mkdir -p .claude && echo '{}' > .claude/settings.json` 既不在 `security.ts` 的黑名单里也不触发关键命令审批；local 模式下 workspace 就是用户真实仓库，本来就可能有这个文件。写保护不可执行。
+
+契约：`openspec/specs/platform-security/spec.md`「SDK child processes SHALL start without filesystem settings sources」。改这一节等于改安全边界（CLAUDE.md §5.5、§6.2）。
+
+---
+
 ## 沙箱路径校验（isPathSafe）
 
 `src/server/workspace-utils.ts` 的 `isPathSafe(absPath)` 拒绝几类敏感目录。Windows 与 POSIX 走分支。

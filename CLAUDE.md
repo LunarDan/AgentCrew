@@ -192,6 +192,7 @@ Codex adapter 额外约束：运行时 `CODEX_HOME` / `CODEX_SQLITE_HOME` 指向
 - **两道 opt-in**：登记（`mcp_servers.enabled` 默认 `false`）与 per-agent 勾选（`agents.mcp_server_ids`）都是用户的手动动作。默认不启用任何外部 MCP。
 - **审批门**：`trust='ask'`（默认）时，Claude Code 下的外部工具调用走审批卡片，粒度 per-tool-per-conversation（内存态，不落库，见 `src/server/mcp-approvals.ts`）。`trust='always'` 直接放行。**Codex 不受此门约束**（Codex 自管的审批策略与沙箱在 AgentHub 之外），UI 必须如实标注该级别对 Codex 不生效。
 - **密钥**：`env` / `headers` 明文存 `mcp_servers` 表（同 §5.4 的取向，不引 keychain）；值里可写 `${ENV_NAME}` 占位，在 run 启动时展开，从而不必把密钥落库。**读接口一律脱敏**（只回后 4 位或占位符名），更新走合并语义。
+- **隔离启动**：Claude Code adapter 以 `settingSources: []` + `strictMcpConfig: true` 启动 SDK。workspace 里的 `.claude/settings.json`（`permissions.allow` 会在 CLI 侧**先于** `canUseTool` 求值）、**项目 hooks**（在宿主上执行命令）、`.mcp.json`（否则工作区放一个文件就能让 CLI 自己 spawn 任意 MCP server）都不参与本次 run。**这是上面两道门与命令黑名单真正生效的前提** —— 少了它，workspace 里一个 JSON 文件就能替 AgentHub 放行工具。代价是项目记忆被简化：AgentHub 只自读 `<effectiveCwd>/CLAUDE.md`（上限 50 000 字符）注入 system prompt，**不读**父目录、`CLAUDE.local.md`、`.claude/rules/`、`@import`。详见 `specs/11-platform.md`「SDK 子进程不加载项目设置」。
 - **改动本节（新增约束 / 收紧或放松）必须经过讨论**（§6.2），且同步 `specs/15-external-mcp.md`、`specs/11-platform.md`。
 
 ---
@@ -306,11 +307,11 @@ Codex adapter 额外约束：运行时 `CODEX_HOME` / `CODEX_SQLITE_HOME` 指向
 - `08-db-schema.md` — Drizzle schema 与索引（含 app_settings 全局 key 表）
 - `09-frontend-architecture.md` — 前端状态结构与事件应用
 - `10-agent-builder.md` — 自建 Agent 流程
-- `11-platform.md` — 平台抽象（POSIX / Windows shell 选择、双平台黑名单、子进程清理）
+- `11-platform.md` — 平台抽象（POSIX / Windows shell 选择、双平台黑名单、子进程清理、SDK 子进程隔离启动）
 - `12-desktop-electron.md` — 桌面版（Electron 打包 DMG / EXE，进程模型 / 路径迁移）
 - `13-conversation-context.md` — 跨 run 对话历史序列化（MessagePart → OpenAI ChatMessage、pinned 注入、agent 视角）
 - `14-mobile-remote.md` — 移动端伴随 App（Capacitor / Tailscale / 远程审批）
-- `15-external-mcp.md` — 外部 MCP server 接入（P0 已实现：数据模型 + 设置面板 + Agent builder + claude-code/codex 接线 + `ask` 审批门；custom 的 MCP 客户端与 Codex 审批门为 P1/P2）
+- `15-external-mcp.md` — 外部 MCP server 接入（P0 已实现：数据模型 + 设置面板 + Agent builder + claude-code/codex 接线 + `ask` 审批门；custom 的 MCP 客户端与 Codex 审批门为 P1/P2。2026-10-13：adapter 改为隔离启动，堵住 workspace 设置预放行工具的绕过口，见 §5.5）
 
 ### `skills/`（可复用开发任务模板）
 

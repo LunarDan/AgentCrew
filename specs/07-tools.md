@@ -502,7 +502,7 @@ AgentRunner 在构造 `AdapterInput.systemPrompt` 时会追加按可用工具生
 
 `adapterName === 'claude-code'` 的 agent 不消费上面的「内置工具清单」。它通过 Claude Agent SDK 直接使用 SDK preset 工具集：`Bash` / `Read` / `Write` / `Edit` / `Grep` / `Glob` / `WebFetch` / `WebSearch` / `Task` / `TodoWrite` / `NotebookEdit` / `Mcp` 等（命名为 PascalCase，与 AgentHub 的 snake_case 区分）。
 
-**审批 / 沙箱 / 黑名单仍由 AgentHub 接管**，但接缝在 adapter 的 `canUseTool` 钩子（详见 Spec 05 「ClaudeCodeAdapter / canUseTool 桥」一节）：
+**审批 / 沙箱 / 黑名单仍由 AgentHub 接管**，但接缝在 adapter 的 `canUseTool` 钩子（详见 Spec 05 「ClaudeCodeAdapter / canUseTool 桥」一节）。**前提是 adapter 以隔离模式启动**（`settingSources: []` + `strictMcpConfig: true`）：CLI 先求值 workspace 项目设置里的 `permissions.allow`，命中就不再回调这个钩子 —— 不隔离的话，workspace 里一个 `.claude/settings.json` 就能让下面每一条失效（详见 Spec 11「SDK 子进程不加载项目设置」）：
 
 - 路径检查走 `assertPathWithinWorkspace`（共享）
 - Bash 黑名单走 `findBannedPattern`（共享）
@@ -539,7 +539,7 @@ AgentHub 额外给 Codex 注入一个 stdio MCP bridge，只暴露 allowlist：`
 
 - `toolNames` / `AVAILABLE_AGENT_TOOLS` 里**不列**这些名字。一个 agent「能调到哪些外部工具」由 `agents.mcp_server_ids`（引用 `mcp_servers` 表）决定，与内置工具表相互独立（详见 Spec 08 / 10 / 15）。
 - **命名规则**：`__` 是 server 名与 tool 名的分隔符，故 server 名校验禁止包含 `__`，并保留 `agenthub` 不可占用（`src/server/mcp-server-service.ts`）。
-- **审批门**：`trust='ask'`（默认）的外部工具，在支持 AgentHub 侧审批的 adapter（当前仅 Claude Code）里，调用前必须过 `bridgePermission` 的 `mcp__*` 分支 —— per-tool-per-conversation 记忆，事件走 `mcp_tool.pending` / `mcp_tool.resolved`；`trust='always'` 直接放行。Codex 有自身的审批策略与沙箱，AgentHub 拦不到它的工具决策，故 `trust` 对 Codex 只是建议性的（UI 不得把它显示成生效的保护）。调用失败 / 被用户拒绝 → 返回 `isError` tool result，**run 继续**。
+- **审批门**：`trust='ask'`（默认）的外部工具，在支持 AgentHub 侧审批的 adapter（当前仅 Claude Code）里，调用前必须过 `bridgePermission` 的 `mcp__*` 分支 —— per-tool-per-conversation 记忆，事件走 `mcp_tool.pending` / `mcp_tool.resolved`；`trust='always'` 直接放行。该门同样以**隔离启动**为前提（`settingSources: []` + `strictMcpConfig: true`），否则 workspace 的 `.claude/settings.json` 会在 CLI 侧先放行 `mcp__*`。Codex 有自身的审批策略与沙箱，AgentHub 拦不到它的工具决策，故 `trust` 对 Codex 只是建议性的（UI 不得把它显示成生效的保护）。调用失败 / 被用户拒绝 → 返回 `isError` tool result，**run 继续**。
 - 外部 MCP server **不在 workspace 沙箱内运行**，stdio 子进程还继承完整进程环境（可读到 provider key）——这是本特性的安全前提，详见 Spec 15 §6 与 Spec 11。
 
 详见 Spec 15。

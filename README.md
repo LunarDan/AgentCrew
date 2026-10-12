@@ -385,7 +385,7 @@ This is a local single-user app, not a multi-tenant hosted service.
 - Cross-platform Electron builds with native modules should be handled through target-platform machines or CI.
 - Claude Code SDK can write files through its own tool layer; sandbox quota enforcement only applies to AgentHub-managed file tools.
 - Some SDK-level command/file approval bridges depend on what the underlying adapter exposes.
-- The Claude Code adapter loads project settings, so a `.claude/settings.json` inside a workspace can pre-allow tool patterns (including external MCP tools) and bypass the `ask` prompt for that workspace.
+- Project memory is reduced for the Claude Code adapter: AgentHub reads only `<effectiveCwd>/CLAUDE.md` into the system prompt. A parent-directory `CLAUDE.md`, `CLAUDE.local.md`, `.claude/rules/`, and `@import` are not loaded. The SDK cannot load project memory without also loading project settings, and project settings have to stay off so that a file inside the workspace can never pre-allow a tool past AgentHub's approval policy.
 - The mobile app is a companion client, not a standalone agent runtime.
 
 ---

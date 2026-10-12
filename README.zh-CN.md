@@ -364,6 +364,7 @@ AgentHub 假定 LLM 的输出是不可信输入。
 - 还没配置 Linux 桌面打包。
 - 带原生模块的跨平台 Electron 构建，应该通过目标平台机器或 CI 处理。
 - Claude Code SDK 可以通过它自己的工具层写文件；sandbox 配额只对 AgentHub 托管的文件工具生效。
+- Claude Code adapter 的项目记忆被简化：AgentHub 只把 `<effectiveCwd>/CLAUDE.md` 读进 system prompt，不读父目录的 `CLAUDE.md`、`CLAUDE.local.md`、`.claude/rules/` 和 `@import`。原因是 SDK 里「加载项目记忆」和「加载项目设置」是同一个开关，而项目设置必须关掉 —— 否则 workspace 里放一个文件就能替 AgentHub 放行工具、绕过审批。
 - 一些 SDK 层的命令/文件审批桥接，取决于底层适配器暴露了什么。
 - 移动端是伴随客户端，不是独立的 Agent 运行时。
 
