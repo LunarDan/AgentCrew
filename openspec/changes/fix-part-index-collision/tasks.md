@@ -4,4 +4,7 @@
 - [x] 4. Add `src/server/part-slots.ts` (stream ordinal → `parts` slot) with unit tests.
 - [x] 5. Apply the translation at the `consumeStream` choke point, before both `persistEvent` and `publish`.
 - [x] 6. Run `pnpm typecheck`, `pnpm lint`, `pnpm test`.
-- [ ] 7. End-to-end regression on the running app: a message whose tool call is followed by text keeps its tool card after the run completes **and** after a page reload.
+- [x] 7. End-to-end regression on the running app: a message whose tool call is followed by text keeps its tool card after the run completes **and** after a page reload.
+  - `e2e/chat.spec.ts` — 「单聊：工具调用之后的文本不覆盖工具卡片（F1 回归）」 drives the Mock adapter's `TOOL_SCRIPT` (`thinking → text → tool(read_artifact) → text`), the exact shape that used to collide: it asserts both text parts and the tool card are present on the completed message, then reloads the page, reopens the conversation from the sidebar, and asserts them again — the reload half reads `messages.parts` back from SQLite, so it is the part that proves the persisted shape is fixed.
+  - **The test was confirmed to fail on the pre-fix code** (`git checkout a174a79 -- src/server/agent-runner.ts`, one run): it failed at the *live* assertion, before the reload, with the card already gone the moment the trailing text landed — the reported symptom, reproduced deterministically.
+  - Full suite green: `pnpm e2e` 10/10; `pnpm typecheck`, `pnpm lint` clean.
