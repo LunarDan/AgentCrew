@@ -36,6 +36,8 @@ import type {
 } from '@/shared/types'
 
 import { buildChildProcessEnv, createAdapterEvent } from './adapter-utils'
+import { composeSystemPrompt, projectMemoryPath, readProjectMemory } from './project-memory'
+import { sdkIsolationOptions } from './sdk-isolation'
 import { claudeCodeSessions } from './session-store'
 import type { AdapterInput, AgentPlatformAdapter } from './types'
 
@@ -431,22 +433,32 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
     // agent 就不记得上一轮说了什么。
     const previousSessionId = claudeCodeSessions.get(input.conversationId)
 
+    const effectiveCwd = getEffectiveCwd(workspace)
+    // 项目记忆得自己读：SDK 里「加载项目 CLAUDE.md」与「加载项目 settings」是同一个开关，
+    // 而后者必须关掉（见 sdkIsolationOptions），所以两者只能一起关、再从这里补回来。
+    const systemPromptAppend = composeSystemPrompt(
+      input.systemPrompt,
+      readProjectMemory(effectiveCwd),
+      projectMemoryPath(effectiveCwd),
+    )
+
     const options: Options = {
-      cwd: getEffectiveCwd(workspace),
+      cwd: effectiveCwd,
       abortController: controller,
       model: input.modelId ?? DEFAULT_MODEL,
       systemPrompt: {
         type: 'preset',
         preset: 'claude_code',
-        append: input.systemPrompt,
+        append: systemPromptAppend,
       },
       tools: isPlanStage ? CLAUDE_PLAN_STAGE_BUILTIN_TOOLS : { type: 'preset', preset: 'claude_code' },
       // 禁用 SDK 内置 AskUserQuestion —— 我们用统一的 mcp__agenthub__ask_user 提供等价 UI
       disallowedTools: ['AskUserQuestion'],
       mcpServers: { agenthub: agenthubMcpServer, ...toSdkMcpServers(input.mcpServers) },
       includePartialMessages: true,
-      // 'project' = 只读绑定目录里的 CLAUDE.md（项目级上下文），不读用户全局 ~/.claude 设定（避免污染）
-      settingSources: ['project'],
+      // 隔离启动：workspace 的 .claude/settings.json / 项目 hooks / .mcp.json 都不参与本次 run，
+      // 否则它们会在 canUseTool 之前放行工具。代价与取舍见 sdk-isolation.ts
+      ...sdkIsolationOptions(),
       permissionMode: 'default', // 自己 canUseTool 接管
       env: buildSdkEnv(input.apiKey, input.apiBaseUrl),
       ...(previousSessionId ? { resume: previousSessionId } : {}),

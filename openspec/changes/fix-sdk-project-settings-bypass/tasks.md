@@ -16,24 +16,24 @@
 
 ## 2. Docs (commit 2)
 
-- [ ] 2.1 `specs/05-adapter-interface.md:348` — the line already reads `[]`; add `strictMcpConfig`, widen the comment to both vectors, show the composed `append`; `:376-389` — state that the `canUseTool` bridge only holds under isolation.
-- [ ] 2.2 `specs/05-adapter-interface.md` — move Skills / Plugins from "deferred" to "deliberately not loaded"; add a project-memory subsection (path, cap, marker, not-loaded list).
-- [ ] 2.3 `specs/05-adapter-interface.md:497,511`, `specs/07-tools.md:505,542` — each approval clause gains the isolation premise.
-- [ ] 2.4 `specs/15-external-mcp.md:5,:166-175,:206` — status header, the P2 table row the table was missing, and `:206`'s "known limitation" rewritten as fixed **with the original text kept and a dated line appended**, recording why the fix is "drop the settings sources" rather than "write-protect `.claude/`".
-- [ ] 2.5 `specs/11-platform.md` — a new section after `:186`: SDK children load no project settings; the single exception is the `<effectiveCwd>/CLAUDE.md` AgentHub reads itself.
-- [ ] 2.6 `CLAUDE.md §5.5` — an isolation bullet (the section already requires discussion before change **and** syncing `specs/15` / `specs/11`); sync the `specs/15` index line at `:313`.
-- [ ] 2.7 `README.md:388` — replace the bypass note with the honest new limitation (reduced project memory). `README.zh-CN.md:362-368` — the Chinese version never carried that note, so only the new entry is added. **The asymmetry is deliberate**: the two files were already out of sync, and this is recorded here so a reviewer does not go looking for a mirror deletion that does not exist.
-- [ ] 2.8 `OVERVIEW.md:63-64,190,203,208` — feature matrix, key conventions, the 待办 entry, footer.
-- [ ] 2.9 `openspec/changes/add-external-mcp/tasks.md:97` — **do not edit item 9.11**. Append a dated follow-up blockquote pointing at this change directory, following the existing precedent at `:99`.
+- [x] 2.1 `specs/05-adapter-interface.md:348` — the line already reads `[]`; add `strictMcpConfig`, widen the comment to both vectors, show the composed `append`; `:376-389` — state that the `canUseTool` bridge only holds under isolation.
+- [x] 2.2 `specs/05-adapter-interface.md` — move Skills / Plugins from "deferred" to "deliberately not loaded"; add a project-memory subsection (path, cap, marker, not-loaded list).
+- [x] 2.3 `specs/05-adapter-interface.md:497,511`, `specs/07-tools.md:505,542` — each approval clause gains the isolation premise.
+- [x] 2.4 `specs/15-external-mcp.md:5,:166-175,:206` — status header, the P2 table row the table was missing, and `:206`'s "known limitation" rewritten as fixed **with the original text kept and a dated line appended**, recording why the fix is "drop the settings sources" rather than "write-protect `.claude/`".
+- [x] 2.5 `specs/11-platform.md` — a new section after `:186`: SDK children load no project settings; the single exception is the `<effectiveCwd>/CLAUDE.md` AgentHub reads itself.
+- [x] 2.6 `CLAUDE.md §5.5` — an isolation bullet (the section already requires discussion before change **and** syncing `specs/15` / `specs/11`); sync the `specs/15` index line at `:313`.
+- [x] 2.7 `README.md:388` — replace the bypass note with the honest new limitation (reduced project memory). `README.zh-CN.md:362-368` — the Chinese version never carried that note, so only the new entry is added. **The asymmetry is deliberate**: the two files were already out of sync, and this is recorded here so a reviewer does not go looking for a mirror deletion that does not exist.
+- [x] 2.8 `OVERVIEW.md:63-64,190,203,208` — feature matrix, key conventions, the 待办 entry, footer.
+- [x] 2.9 `openspec/changes/add-external-mcp/tasks.md:97` — **do not edit item 9.11**. Append a dated follow-up blockquote pointing at this change directory, following the existing precedent at `:99`.
 
 ## 3. Implementation (commit 3)
 
-- [ ] 3.1 Add `src/server/adapters/project-memory.ts` — `PROJECT_MEMORY_FILENAME`, `MAX_PROJECT_MEMORY_CHARS`, `readProjectMemory(cwd, read = readFileIfPresent)`, `composeSystemPrompt(agentPrompt, memory, memoryPath)`.
-- [ ] 3.2 Add `src/server/adapters/project-memory.test.ts` — 5 stub branches (including the `<cwd>/CLAUDE.md` path contract), 3 real-fs cases via `mkdtempSync` (present / absent / a directory), 3 `composeSystemPrompt` cases. The most valuable assertion is **"no memory ⇒ the agent prompt is returned unchanged"**: that is today's behaviour and it is the regression guard.
-- [ ] 3.3 Add `src/server/adapters/sdk-isolation.ts` — `sdkIsolationOptions()` with a **type-only** `Options` import, so the test never boots `@/db/client`.
-- [ ] 3.4 Add `src/server/adapters/sdk-isolation.test.ts` — two assertions pinning the security invariants.
-- [ ] 3.5 `claude-code-adapter.ts` — `append: input.systemPrompt` → `append: systemPromptAppend`; `settingSources: ['project']` → `...sdkIsolationOptions()`; two consts near `:432`. **The generator and the `for await` loop are not touched.**
-- [ ] 3.6 `pnpm typecheck`, `pnpm lint`, `pnpm test`.
+- [x] 3.1 Add `src/server/adapters/project-memory.ts` — `PROJECT_MEMORY_FILENAME`, `MAX_PROJECT_MEMORY_CHARS`, `readProjectMemory(cwd, read = readFileIfPresent)`, `composeSystemPrompt(agentPrompt, memory, memoryPath)`.
+- [x] 3.2 Add `src/server/adapters/project-memory.test.ts` — 5 stub branches (including the `<cwd>/CLAUDE.md` path contract), 3 real-fs cases via `mkdtempSync` (present / absent / a directory), 3 `composeSystemPrompt` cases. The most valuable assertion is **"no memory ⇒ the agent prompt is returned unchanged"**: that is today's behaviour and it is the regression guard.
+- [x] 3.3 Add `src/server/adapters/sdk-isolation.ts` — `sdkIsolationOptions()` with a **type-only** `Options` import, so the test never boots `@/db/client`.
+- [x] 3.4 Add `src/server/adapters/sdk-isolation.test.ts` — two assertions pinning the security invariants.
+- [x] 3.5 `claude-code-adapter.ts` — `append: input.systemPrompt` → `append: systemPromptAppend`; `settingSources: ['project']` → `...sdkIsolationOptions()`; two consts near `:432`. **The generator and the `for await` loop are not touched.**
+- [x] 3.6 `pnpm typecheck`, `pnpm lint`, `pnpm test`.
 
 ## 4. Live verification (asks first — see the note)
 
