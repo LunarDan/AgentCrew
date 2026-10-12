@@ -1,0 +1,7 @@
+- [x] 1. Add the delta spec stating that AgentRunner owns message part slot assignment, and that `parts` keeps its order under tool activity.
+- [x] 2. Correct `specs/02-stream-events.md`: the slot-ownership rule, the persistence table, and the worked example in scenario A that numbers `artifact_ref` onto a slot already held by `tool_use`.
+- [x] 3. Clarify `specs/09-frontend-architecture.md` that the reducer receives an already-normalized slot.
+- [x] 4. Add `src/server/part-slots.ts` (stream ordinal → `parts` slot) with unit tests.
+- [x] 5. Apply the translation at the `consumeStream` choke point, before both `persistEvent` and `publish`.
+- [x] 6. Run `pnpm typecheck`, `pnpm lint`, `pnpm test`.
+- [ ] 7. End-to-end regression on the running app: a message whose tool call is followed by text keeps its tool card after the run completes **and** after a page reload.

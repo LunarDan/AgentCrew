@@ -111,6 +111,8 @@ So for a message whose text arrives *after* the tool call, the sequence `tool.ca
 
 This affects **every** tool call through the claude-code adapter (`mcp__agenthub__*` bridge calls included), not just external MCP tools. It is the same tool-call defect the user deferred earlier ("工具调用先别管"), so it is **not** being fixed as part of this change — recorded here because it is what makes 9.3's UI half only partially pass.
 
+> **Follow-up (2026-10-12)**: fixed separately in `openspec/changes/fix-part-index-collision/`. The paragraph above is the record of what the 2026-10-10 verification observed and is left as written.
+
 **F2 — an SDK-level MCP spawn failure is invisible (9.7 gap).**
 `resolveMcpServersForAgent` warns only for resolution failures. A server that resolves but cannot be spawned (bad `command`) is dropped silently by the SDK, so the user sees a server that is enabled, selected, and simply not there — with nothing explaining why. Closing this means surfacing spawn failures at connect time (e.g. prompting for a probe when a run resolves a server that produced no tools), which is a behavior change, so it is left open rather than patched in this change.
 
