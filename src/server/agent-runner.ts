@@ -58,6 +58,7 @@ import {
 import { eventBus } from './event-bus'
 import { newArtifactId, newRunId } from './ids'
 import { resolveMcpServersForAgent } from './mcp-server-service'
+import { translatePartIndex, type PartSlotsByMessage } from './part-slots'
 import { pendingDispatchPlans, type PlanReviewOutcome } from './pending-dispatch-plans'
 import { buildProjectFiles } from './project-artifact'
 import { getAppSettings } from './settings-service'
@@ -1528,6 +1529,8 @@ async function consumeStream(
   onToolCall?: (event: ToolCallEvent) => ToolCallControl,
 ): Promise<RunExecutionResult> {
   const partsBuffer = new Map<string, MessagePart[]>()
+  // 适配器给的 partIndex 是它自己的流内序号；parts 数组下标由这里统一分配，避免与 push 碰撞。
+  const partSlots: PartSlotsByMessage = new Map()
   const artifactIds: string[] = []
   const outputMessageIds: string[] = []
   const outputArtifacts: Record<string, string> = {}
@@ -1536,7 +1539,8 @@ async function consumeStream(
   let taskReport: TaskResultReport | undefined
   let currentMessageId: string | null = null
 
-  for await (const event of stream) {
+  for await (const rawEvent of stream) {
+    const event = translatePartIndex(rawEvent, partsBuffer, partSlots)
     if (event.type === 'message.start') currentMessageId = event.messageId
     if (event.type === 'tool.call') toolNameByCallId.set(event.callId, event.toolName)
 
