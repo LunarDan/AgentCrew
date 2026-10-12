@@ -144,7 +144,7 @@ A third-party stdio MCP child MUST be spawned with the same environment as Agent
 
 ### Requirement: MCP server trust SHALL gate tool execution — D1
 
-A server's `trust` MUST determine whether its tools execute freely or require approval. `trust = 'always'` MUST be the only value that executes without a prompt, and `trust = 'ask'` (the default) MUST require approval.
+A server's `trust` MUST determine whether its tools execute freely or require approval. `trust = 'always'` MUST be the only value that executes without a prompt, and `trust = 'ask'` (the default) MUST require approval. A workspace-resident settings file MUST NOT be able to grant that approval in advance.
 
 #### Scenario: Untrusted server tool is called for the first time
 - **WHEN** the model calls a tool on a server with `trust = 'ask'` for the first time in a conversation
@@ -164,6 +164,11 @@ A server's `trust` MUST determine whether its tools execute freely or require ap
 #### Scenario: Trusted server tool is called
 - **WHEN** a tool on a server with `trust = 'always'` is called
 - **THEN** it executes without a prompt.
+
+#### Scenario: Workspace settings try to pre-approve an external tool
+- **WHEN** the workspace contains a settings file allowing `mcp__<server>__<tool>`
+- **THEN** the `trust = 'ask'` gate still requests approval
+- **AND** the call executes without a prompt only if `trust = 'always'` or the tool is already approved in this conversation.
 
 ### Requirement: MCP transports SHALL be limited to what the adapter supports — D2
 
