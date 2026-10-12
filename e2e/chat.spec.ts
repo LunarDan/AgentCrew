@@ -39,6 +39,29 @@ test('单聊：发「写代码」→ 回复含代码块', async ({ page }) => {
   await expect(msg.locator('pre')).toBeVisible()
 })
 
+// 回归 F1：part.start 的索引曾覆盖已被 push 的 tool_use 槽位，工具卡片在文本到达后消失，
+// 且因为 parts 是整体 JSON 落库，刷新也救不回来。Mock 的 TOOL_SCRIPT 正是这个形状。
+test('单聊：工具调用之后的文本不覆盖工具卡片（F1 回归）', async ({ page }) => {
+  await createSingleChat(page)
+  const input = page.getByTestId('composer-input')
+  await input.fill('执行任务')
+  await input.press('Enter')
+
+  const msg = lastCompleteAgentMsg(page)
+  await expect(msg).toBeVisible({ timeout: 30_000 })
+  await expect(msg).toContainText('我先调用工具收集信息')
+  await expect(msg).toContainText('已读取产物信息')
+  await expect(msg.getByRole('button', { name: /读取产物/ })).toBeVisible()
+
+  // 刷新后前端从 DB 重读 parts，不再有事件流可以兜底
+  await page.reload()
+  await page.getByRole('button', { name: /单聊 · 1 位 Agent/ }).first().click()
+  const restored = lastCompleteAgentMsg(page)
+  await expect(restored).toBeVisible({ timeout: 30_000 })
+  await expect(restored.getByRole('button', { name: /读取产物/ })).toBeVisible()
+  await expect(restored).toContainText('已读取产物信息')
+})
+
 test('单聊：重新生成最后一条回复', async ({ page }) => {
   await createSingleChat(page)
   const input = page.getByTestId('composer-input')
