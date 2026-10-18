@@ -253,5 +253,5 @@ P0 落地时对着工作树逐条核查,发现原稿有四处与代码事实不�
 
 **两处未达预期**(均非本次改动引入,详见 `openspec/changes/add-external-mcp/tasks.md` §9 Findings):
 
-1. **工具卡片渲染后消失。** `part.start` 按 `partIndex` 赋值,而 `tool.call` / `tool.result` 是另一条 `push` 路径写入**同一个** `parts` 数组,两者共用一套索引但不互通 —— 模型在工具调用**之后**输出的 text 会覆盖掉工具调用占的那个槽位(服务端 `agent-runner.ts:1688` 与前端 `app-store.ts:680` 对称)。于是持久化结果恒为 `["text","tool_result"]`,而 UI 把孤立的 `tool_result` 丢弃,卡片在 run 进行中可见、text 一到就消失。这是 claude-code adapter 下**所有**工具调用的既有缺陷,与外部 MCP 无关。
+1. **工具卡片渲染后消失。** `part.start` 按 `partIndex` 赋值,而 `tool.call` / `tool.result` 是另一条 `push` 路径写入**同一个** `parts` 数组,两者共用一套索引但不互通 —— 模型在工具调用**之后**输出的 text 会覆盖掉工具调用占的那个槽位(服务端 `agent-runner.ts:1688` 与前端 `app-store.ts:680` 对称)。于是持久化结果恒为 `["text","tool_result"]`,而 UI 把孤立的 `tool_result` 丢弃,卡片在 run 进行中可见、text 一到就消失。这是 claude-code adapter 下**所有**工具调用的既有缺陷,与外部 MCP 无关。**后续(2026-10-12)**:已由 `openspec/changes/fix-part-index-collision/` 修复 —— 索引分配权收归 AgentRunner,不再由适配器自报序号;已落库的旧消息不回填(丢失的 `toolName` / `args` 无法重建)。
 2. **spawn 失败没有任何提示(9.7 只算半个)。** `resolveMcpServersForAgent` 只对**解析**阶段的失败告警;`command` 不存在这类问题能通过解析、到 SDK spawn 时才失败,而这条路径 AgentHub 完全不上报 —— 用户看到的是「server 已启用、已勾选、就是没有」,且没有任何解释。run 本身不失败这一点成立。

@@ -128,6 +128,8 @@ type PartDelta =
 
 ### 场景 A：单聊，Agent 回复一段文字 + 一个产物
 
+> 下面 `part.*` 的索引是**归一化后**的 `parts` 下标（见「partIndex 的归一化」）。适配器的流内序号与真实下标在本例的第一个 text 上恰好都是 0，之后分叉。
+
 ```
 run.start         (runId=r1, agentId=cc)
 message.start     (messageId=m1, agentId=cc, runId=r1)
@@ -135,17 +137,28 @@ part.start        (m1, 0, { type:'text', content:'' })
 part.delta        (m1, 0, { type:'text.append', text:'好的，' })
 part.delta        (m1, 0, { type:'text.append', text:'我为你写一个组件...' })
 part.end          (m1, 0)
-tool.call         (m1, c1, 'write_artifact', { ... })
+tool.call         (m1, c1, 'write_artifact', { ... })      → push tool_use，占 1
+tool.result       (m1, c1, { artifactId:'a1' }, false)     → push tool_result，占 2
 artifact.create   ({ id:'a1', type:'web_app', ... })
-tool.result       (m1, c1, { artifactId:'a1' }, false)
-part.start        (m1, 1, { type:'artifact_ref', artifactId:'a1' })
-tool.call         (m1, c2, 'deploy_artifact', { artifactId:'a1' })
+part.start        (m1, 3, { type:'artifact_ref', artifactId:'a1' })
+tool.call         (m1, c2, 'deploy_artifact', { artifactId:'a1' })  → push tool_use，占 4
 tool.result       (m1, c2, { id:'dep1', status:'ready', previewPath:'/deployments/dep1' }, false)
 deploy.status     (m1, { id:'dep1', status:'ready', ... })
-part.start        (m1, 2, { type:'deploy_status', deployment:{...} })
-part.end          (m1, 1)
+part.start        (m1, 6, { type:'deploy_status', deployment:{...} })
 message.end       (m1)
 run.end           (r1, 'complete')
+```
+
+最终 `m1.parts`：
+
+```
+[0] text            「好的，我为你写一个组件...」
+[1] tool_use        c1  write_artifact
+[2] tool_result     c1
+[3] artifact_ref    a1
+[4] tool_use        c2  deploy_artifact
+[5] tool_result     c2
+[6] deploy_status   dep1
 ```
 
 ### 场景 B：群聊，Orchestrator 调度 2 个子 Agent 并行
@@ -188,6 +201,23 @@ dispatch.end      (parentRunId=r1, taskId=t3, status='skipped', error='Upstream 
 
 ---
 
+## partIndex 的归一化
+
+`part.start` / `part.delta` / `part.end` 上的 `partIndex`，在**进入持久化与广播之前**由 AgentRunner 归一化：适配器给的是它自己的**流内逻辑序号**（只统计它自己 start 过的 part），AgentRunner 把它翻译成 `parts` 数组的真实下标。
+
+**为什么必须归一化**：`tool.call` / `tool.result` 由 AgentRunner 直接 `push` 进同一个 `parts` 数组，**不占**适配器的序号。两者混用时，工具调用之后到来的 text 会用未推进的旧序号写到已被 `tool_use` 占用的槽位，把工具调用覆盖掉 —— 且因为 parts 是整体 JSON 落库，这是**永久性**丢失。
+
+**规则**：
+
+- 同一 `messageId` 内，同一个流内序号恒映射到同一槽位（保证 `part.delta` 落在同一个 part 上）
+- 首次出现的序号分配到 `parts.length` —— 数组恒稠密（只由 `push` 与「落到 `length` 处」增长），`length` 永远是空闲槽位
+- 映射是 per-run 内存态，随 run 释放；`message.start` 换代时清空
+- 广播出去的 `partIndex` **已经是归一化后的下标**，前端不做任何索引换算（见 Spec 09）
+
+**不变量**：适配器在一条 message 内必须为其每个 part 使用**唯一**的流内序号。
+
+代码位置：`src/server/agent-runner.ts` 的 `consumeStream` 循环入口；`src/server/part-slots.ts:translatePartIndex`。
+
 ## artifact_ref part 的注入路径
 
 `artifact_ref` part **不由 Adapter 直接 emit**，由 AgentRunner 在接到 `artifact.create` 后注入到当前 message 的 parts 末尾。完整流程：
@@ -209,7 +239,7 @@ dispatch.end      (parentRunId=r1, taskId=t3, status='skipped', error='Upstream 
 
 **为什么不让 Adapter 直接 emit `part.start(artifact_ref)`**：保持「Adapter 只翻译事件，不操心 message.parts 结构」的边界。Adapter 知道「我创建了一个 artifact」，但不应关心「这条 message 的下一个 partIndex 是几」。AgentRunner 是唯一持有 message 流的角色，所以它来注入。
 
-**前端无差别处理**：part.start 事件不区分是 Adapter emit 的还是 Runner 补的，reducer 都按 partIndex 写入。详见 Spec 09。
+**前端无差别处理**：part.start 事件不区分是 Adapter emit 的还是 Runner 补的，reducer 都按 partIndex 写入 —— 前提是 AgentRunner 已在广播前把适配器的流内序号归一化为真实下标（见「partIndex 的归一化」）。详见 Spec 09。
 
 代码位置：`src/server/agent-runner.ts` 内 `consumeStream` 的 `artifact.create` 分支。
 
@@ -235,9 +265,9 @@ dispatch.end      (parentRunId=r1, taskId=t3, status='skipped', error='Upstream 
 | `message.end` | ✅ 更新 status='complete' | |
 | `message.added` | ❌ 透传 | user 消息已由 `sendMessage` 落库；此事件仅广播给其它客户端，前端按 id 幂等 upsert（详见下方「用户消息广播」） |
 | `message.removed` | ❌ 透传 | 撤回/编辑/重新生成已在服务端删库；此事件仅广播 messageIds/artifactIds 让其它客户端幂等移除 |
-| `part.start` | ✅ 写入 `messages.parts[i]` | parts 整体作为 JSON 更新 |
-| `part.delta` | ✅ 追加到 `messages.parts[i].content` | 高频写，可批量合并（每 100ms flush） |
-| `part.end` | ❌ 透传 | parts 状态由 part.start/delta 已足够 |
+| `part.start` | ✅ 写入 `messages.parts[i]` | `i` 是**归一化后**的下标（见「partIndex 的归一化」）；parts 整体作为 JSON 更新 |
+| `part.delta` | ✅ 追加到 `messages.parts[i].content` | 同上，`i` 是归一化后的下标；高频写，可批量合并（每 100ms flush） |
+| `part.end` | ❌ 透传 | parts 状态由 part.start/delta 已足够；其 `partIndex` 不参与槽位计算，consumer **不得**依赖 |
 | `tool.call` | ✅ 写为 message.parts 里的 tool_use part | |
 | `tool.result` | ✅ 写为 message.parts 里的 tool_result part | run 失败 / 中止时，AgentRunner 会为未配对 `tool_result` 的 `tool_use` 补发 `isError=true` 结果 |
 | `artifact.*` | ✅ 落到 `artifacts` 表 | |

@@ -87,10 +87,10 @@ interface AppState {
 | `run.usage` | 更新 run 的 `usage` 字段（input/output/cache tokens）；派生 hook `useConversationUsageTotal` 据此聚合 |
 | `message.start` | 在 `messages[messageId]` 创建空 parts 的 streaming agent 消息，挂入 `messageIdsByConv` |
 | `message.end` | `messages[messageId].status = 'complete'`；若用户不在该会话（`activeConversationId !== conversationId`）则 `unreadByConv[conversationId] +1`。**不在 message.start 计未读**——claude-code-adapter 整 run 只发一次 message.start，那时用户通常仍在该会话被抑制，后续切走再无 +1 机会 |
-| `part.start` | `messages[messageId].parts[partIndex] = event.part`（按 index 插入，不 push） |
+| `part.start` | `messages[messageId].parts[partIndex] = event.part`（按 index 插入，不 push）。**`partIndex` 是服务端归一化后的下标**，前端不做任何索引换算（见 Spec 02「partIndex 的归一化」） |
 | `part.delta` | 按 delta type 追加：`text.append` / `thinking.append` / `code.append`（其它类型 part 不增量） |
 | `part.end` | 无变更（前端用 `message.end` 收尾，不需要 part 级别 end） |
-| `tool.call` | 给消息 push 一个 `tool_use` part |
+| `tool.call` | 给消息 push 一个 `tool_use` part（与 `part.start` 的 assign 共用同一数组，依赖服务端已归一化的下标） |
 | `tool.result` | 给消息 push 一个 `tool_result` part（前端按 callId 合并渲染）；若同 callId 结果已存在，则更新已有结果以配合失败兜底的幂等处理 |
 | `artifact.create` | `artifacts[artifact.id] = artifact`（不在消息里插 `artifact_ref` part，那由 `part.start` 单独投递） |
 | `artifact.update` | 浅合并 `content` patch（TODO：当前没有 emitter，前端 reducer 已就绪） |

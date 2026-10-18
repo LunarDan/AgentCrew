@@ -167,7 +167,7 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 ### 测试（`e2e/` + `*.test.ts`）
 - 单元：`src/**/*.test.ts`（Vitest 纯函数：security / workspace-utils / dispatch-plan / artifact-content / ppt-export / ppt-theme / mock-adapter 编排契约）。
 - E2E：`e2e/`（Playwright；`global-setup.ts` 建隔离库 + 插 4 个 mock agent：`E2E Mock` / `E2E Orchestrator` / `E2E Worker A|B`）；
-  `chat.spec.ts`（核心 IM 流）· `conversations.spec.ts`（搜索/归档）· `artifacts.spec.ts`（产物卡片 → 预览分页 → .pptx 导出）· `dispatch.spec.ts`（群聊拆任务 → 审批 → 子任务 → 聚合）。
+  `chat.spec.ts`（核心 IM 流 + 工具卡片 F1 回归）· `conversations.spec.ts`（搜索/归档）· `artifacts.spec.ts`（产物卡片 → 预览分页 → .pptx 导出）· `dispatch.spec.ts`（群聊拆任务 → 审批 → 子任务 → 聚合）。
   配置 `playwright.config.ts`，命令 `pnpm e2e`。
 
 ---
@@ -175,6 +175,7 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 ## 附 · 当前现状（易过时,以代码为准）
 
 ### ✅ 近期完成（最新一批）
+- **F1 修复（`partIndex` 归一）**：新增 `src/server/part-slots.ts`，在 `agent-runner.ts` 的 `consumeStream` 入口把适配器的「流内序号」翻译成 `parts` 真实下标 —— 此前 `part.start` 按下标赋值、`tool.call` 按 push 追加，两套写入协议混用会让**工具调用之后到来的文本覆盖 `tool_use` 槽位**（持久化形状变 `["text","tool_result"]`，工具卡片闪现即消失、刷新也不复现）。Runner 从此是唯一索引权威（`specs/02`）；`StreamEvent` 形状不变，客户端零改动。E2E 回归见 `e2e/chat.spec.ts`
 - **PPT 预览/导出一致性修复**：预览改为固定逻辑画布（768×432）+ `transform: scale()` 适配面板，版式不再随面板宽度变形、全屏是真放大；去掉预览侧 7/6/4 与导出侧 8/6/3/4 的条数硬上限（不再静默吃内容），排不下时预览显示「本页内容超出画布，导出会被截断」角标；全屏元素改为整个 deck（翻页/退出按钮随之进入全屏）
 - **外部 MCP 工具接入 P0**（`specs/15`）：`mcp_servers` 表 + `agents.mcpServerIds` · 设置面板登记（stdio/sse/http + 测试连接 + 密钥脱敏）· Agent builder 勾选 · claude-code / codex 接线 · `trust='ask'` 审批门（仅 Claude Code）
 - **Playwright E2E 第二批**：MockAdapter 扩成确定性假 agent（普通脚本 + **真调 write_artifact 的产物场景** + Orchestrator 三阶段 + **产物交接**），新增 `artifacts.spec.ts`（产物卡片 → 预览分页 → 真 .pptx 导出）与 `dispatch.spec.ts`（群聊拆任务 → 审批 → 子任务 → 聚合；含 `expectedOutputs`/`inputs` 交接链）
@@ -193,6 +194,8 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 - sandbox 配额对 Claude Code SDK 失效（SDK 自己写盘绕过 quota）
 - 移动端伴随 App 配对通信打通
 - E2E 可观测性：本机 Playwright 浏览器版本与 `@playwright/test` 不匹配时需 `pnpm exec playwright install chromium`
+- `persistEvent` 空缓冲兜底（F1 修复时记录，未改）：`partsBuffer` 没有该 message 时回退 `?? []`，于是 `message.end` 之后到达的 part / tool 事件会把已存 `parts` 覆盖成单元素数组。当前不可达，预防性记录
+- claude-code adapter 非流式回退重复渲染（F1 修复时记录，未改）：流里已写出的文本被 `claude-code-adapter.ts:515-523` 的回退再发一份全文 part，同一段文字渲染两次
 
 ### ⚠️ 关键约定（动手前必看）
 - 改实体字段 → 同步 `specs/01`;改事件 → 同步 `specs/02`;改 Bash 黑名单 → 同步 `specs/11` + `src/server/security.ts`（单一数据源）;改 MCP 支持矩阵 → `src/shared/mcp.ts`。
@@ -203,4 +206,4 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 
 ---
 
-*最后更新：2026-10-13 · 记录 Claude Code adapter 的隔离启动（`settingSources: []` + `strictMcpConfig: true`）：功能矩阵「Workspace 沙箱」补上它，「关键约定」写明它是审批门与黑名单生效的前提，待办里的边界条目随之删除。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*
+*最后更新：2026-10-13 · 记录 Claude Code adapter 的隔离启动（`settingSources: []` + `strictMcpConfig: true`）：功能矩阵「Workspace 沙箱」补上它，「关键约定」写明它是审批门与黑名单生效的前提，待办里的边界条目随之删除；并记入 F1 修复（`partIndex` 归一，`src/server/part-slots.ts`）与 F1 期间记录、未修的两个相邻缺陷（`persistEvent` 空缓冲兜底、claude-code adapter 非流式回退重复渲染）。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*
