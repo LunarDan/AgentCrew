@@ -338,6 +338,9 @@ class ClaudeCodeAdapter implements AgentPlatformAdapter {
     const controller = new AbortController()
     signal.addEventListener('abort', () => controller.abort(), { once: true })
 
+    // 本次 run 实际提供的工具名，由 init 消息填入；canUseTool 用它识别 shell 工具
+    let sdkToolNames: string[] | null = null
+
     const options: Options = {
       cwd: getEffectiveCwd(workspace),
       abortController: controller,
@@ -357,11 +360,16 @@ class ClaudeCodeAdapter implements AgentPlatformAdapter {
       strictMcpConfig: true,     // MCP server 只来自上面的 mcpServers，忽略 workspace 的 .mcp.json
       permissionMode: 'default', // 自己 canUseTool 接管
       env: input.apiKey ? { ...process.env, ANTHROPIC_API_KEY: input.apiKey } : process.env,
-      canUseTool: bridgePermission, // ↓ 见下方
+      // 注意：这里的对象字面量在「每次工具调用时」求值，所以 sdkToolNames 读到的是
+      // init 之后的当前值，而不是 options 创建时的 null
+      canUseTool: (toolName, toolInput) =>
+        bridgePermission(toolName, toolInput, { sdkToolNames, workspace, input }), // ↓ 见下方
     }
 
     const q = query({ prompt: input.prompt, options })
     for await (const m of q) {
+      // init 携带 session_id 与本次 run 的工具表（shell 工具识别依赖后者）
+      if (m.type === 'system' && m.subtype === 'init') sdkToolNames = m.tools
       // 翻译 SDKMessage → StreamEvent
     }
   }
@@ -372,7 +380,7 @@ class ClaudeCodeAdapter implements AgentPlatformAdapter {
 
 | SDK 消息 | 对应 StreamEvent |
 |---|---|
-| `SDKSystemMessage subtype:'init'` | 忽略 |
+| `SDKSystemMessage subtype:'init'` | 不产生事件；读取 `session_id`（resume）与 `tools`（本次 run 的工具表，供 shell 工具识别） |
 | `SDKPartialAssistantMessage` (开 `includePartialMessages: true`) `content_block_delta + text_delta` | 第一次开 text part：`part.start({type:'text',content:''})`；后续：`part.delta({type:'text.append',text})` |
 | `SDKAssistantMessage.message.content` 里的 `text` 块 | 兜底：若 partial 没投递过，整段开一个 text part |
 | `SDKAssistantMessage.message.content` 里的 `tool_use` 块 | `tool.call({callId,toolName,args})`；本地 `Map<sdk_id, ourCallId>` 记账 |
@@ -388,8 +396,10 @@ SDK 提供 `canUseTool(toolName, toolInput, options) => PermissionResult` 钩子
 
 > ⚠️ **这条桥成立的前提是上面的 `settingSources: []`。** CLI 先求值项目设置里的 `permissions.allow`，命中就不再回调 `canUseTool` —— 把 `'project'` 加回去，下面每一条策略都能被 workspace 里一个 JSON 文件绕过（Bash 审批门、外部 MCP 的 `trust='ask'` 门都在其中）。改动本行必须同时改「项目记忆」一节与 `specs/11-platform.md`「SDK 子进程不加载项目设置」。
 
+> ⚠️ **shell 工具不能按 `Bash` 字面量识别。** 工具名由 SDK 按平台提供：POSIX 上是 `Bash`，Windows 上实测是 `PowerShell`（2026-10-18）。按字面量匹配会让第 2 步整个跳过，命令直接落到第 6 步的默认 allow —— 黑名单与审批分类器都不再被咨询。识别规则：`mcp__*` 排除；已知 shell 名直接命中；否则，若工具出现在本次 run 的 `tools` 表里且输入带非空 `command`，按 shell 处理；工具表尚未到达时按「带 `command` 即 shell」失败关闭。已知 shell 名但输入解析不出 `command` → deny，不 allow。
+
 1. **路径沙箱**（Read / Write / Edit / NotebookEdit）：`assertPathWithinWorkspace(workspace, toolInput.file_path)`，越界 `{ behavior: 'deny', message }`
-2. **Bash 黑名单与关键命令审批**（Bash）：`findBannedPattern(toolInput.command)` 命中 deny；未命中但 `classifyBashApproval(toolInput.command)` 命中时，注册 `PendingBashCommand` 并等待用户批准；通过后 allow（cwd 已限定）
+2. **shell 黑名单与关键命令审批**（POSIX `Bash`、Windows `PowerShell` 等）：`findBannedPattern(toolInput.command)` 命中 deny；未命中但 `classifyBashApproval(toolInput.command)` 命中时，注册 `PendingBashCommand` 并等待用户批准；通过后 allow（cwd 已限定）
 3. **fs_write 审批**（Write / Edit；Auto 模式直接 allow）：
    - `oldContent = readIfExists(workspace, path)`
    - `newContent = computeNewContent(...)` —— Write 取 `content`；Edit 用 `oldContent.split(old_string).join(new_string)` 计算应用后文件（`replace_all=false` 时要求 1 次匹配，跟 SDK 行为对齐）

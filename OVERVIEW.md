@@ -60,7 +60,7 @@ L1 Persistence                          src/db/**（Drizzle+SQLite） + workspac
 | Orchestrator 编排 | ✅ | 三阶段规划 + DAG 调度 + 级联中止 + 可视化卡 + 同波次代码冲突检测（检测+上报，不自动合并） |
 | 工具系统 | ✅ | write/deploy/read_artifact · read_attachment · fs_read/fs_write/bash · plan_tasks · ask_user |
 | Artifact 预览/编辑 | ✅ | web_app(iframe + preview URL + 本地静态发布/源码包/容器包) / document(md) / image / 版本对比 diff（历史 diff 只读兼容） / **ppt(幻灯片分页预览 + 固定逻辑画布缩放 + 溢出角标 + 完整 theme token + 导出真 .pptx)** · code_file workspace 预览/编辑 · 版本链 v1↔v2 · 选区改写 · 面板内编辑(CodeMirror)→提交新版本 · 导出 |
-| Workspace 沙箱 | ✅ | sandbox/local 双模式 · fs_write 审批(Review/Auto) · 双平台 Bash 黑名单 · SDK 隔离启动（workspace 的项目设置 / hooks / `.mcp.json` 不参与 run） |
+| Workspace 沙箱 | ✅ | sandbox/local 双模式 · fs_write 审批(Review/Auto) · 双平台 shell 黑名单（按工具身份识别，Windows 的 `PowerShell` 同样覆盖）· SDK 隔离启动（workspace 的项目设置 / hooks / `.mcp.json` 不参与 run） |
 | 外部 MCP server | ✅ | P0：设置面板登记（stdio/sse/http + 测试连接）+ Agent 勾选 · claude-code/codex 接线 · `ask` 审批门（仅 Claude Code）· ⚠️ **在沙箱与命令黑名单之外运行**（见「关键约定」） |
 | Token 计量 | ✅ | per-run/per-message · cache 命中率 · 全局分析 Tab |
 | 跨 run 对话记忆 | ✅ | 历史序列化注入 · token 预算 · 群聊跨 agent 可见 · 手动压缩 |
@@ -206,4 +206,4 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 
 ---
 
-*最后更新：2026-10-13 · 记录 Claude Code adapter 的隔离启动（`settingSources: []` + `strictMcpConfig: true`）：功能矩阵「Workspace 沙箱」补上它，「关键约定」写明它是审批门与黑名单生效的前提，待办里的边界条目随之删除；并记入 F1 修复（`partIndex` 归一，`src/server/part-slots.ts`）与 F1 期间记录、未修的两个相邻缺陷（`persistEvent` 空缓冲兜底、claude-code adapter 非流式回退重复渲染）。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*
+*最后更新：2026-10-18 · 记录 shell 工具按身份识别（Windows 上 SDK 的 shell 工具是 `PowerShell`，此前按 `Bash` 字面量匹配导致黑名单与审批分类器整条失效）。2026-10-13 记入了 Claude Code adapter 的隔离启动（`settingSources: []` + `strictMcpConfig: true`）与 F1 修复（`partIndex` 归一，`src/server/part-slots.ts`）及两个相邻未修缺陷（`persistEvent` 空缓冲兜底、claude-code adapter 非流式回退重复渲染）。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*

@@ -14,11 +14,11 @@
 
 ## 2. Docs（commit 2）
 
-- [ ] 2.1 `specs/11-platform.md:130` — 改掉被证伪的断言。原文说 ClaudeCodeAdapter 的黑名单「走同一份 `getBannedPatterns`」，需写明：成立的前提是 shell 工具能被识别，且 Windows 上该工具不叫 `Bash`。
-- [ ] 2.2 `specs/07-tools.md:505` — 「Bash 黑名单走 `findBannedPattern`」补上同一前提；「Claude Code agent 的工具集」段落的 `Bash` 改为「shell 工具（POSIX 为 `Bash`，Windows 为 `PowerShell` 等）」。
-- [ ] 2.3 `specs/05-adapter-interface.md` — `canUseTool` 桥一节补一句：工具名是 SDK 提供的，不能按 POSIX 的名字硬编码。
-- [ ] 2.4 `CLAUDE.md §5.2` — 加一条：黑名单要真正生效，前提是 adapter 能识别 shell 工具；**不新增/调整任何规则**，故不改 `security.ts` 与 `specs/11` 的黑名单清单。
-- [ ] 2.5 `OVERVIEW.md` — 关键约定或待办里补记；若之前把「审批门生效」写成无条件成立，一并修正。
+- [x] 2.1 `specs/11-platform.md:130` — 改掉被证伪的断言。原文说 ClaudeCodeAdapter 的黑名单「走同一份 `getBannedPatterns`」，需写明：成立的前提是 shell 工具能被识别，且 Windows 上该工具不叫 `Bash`。
+- [x] 2.2 `specs/07-tools.md:505` — 「Bash 黑名单走 `findBannedPattern`」补上同一前提；「Claude Code agent 的工具集」段落的 `Bash` 改为「shell 工具（POSIX 为 `Bash`，Windows 为 `PowerShell` 等）」。
+- [x] 2.3 `specs/05-adapter-interface.md` — `canUseTool` 桥一节补一句：工具名是 SDK 提供的，不能按 POSIX 的名字硬编码。
+- [x] 2.4 `CLAUDE.md §5.2` — 加一条：黑名单要真正生效，前提是 adapter 能识别 shell 工具；**不新增/调整任何规则**，故不改 `security.ts` 与 `specs/11` 的黑名单清单。
+- [x] 2.5 `OVERVIEW.md` — 关键约定或待办里补记；若之前把「审批门生效」写成无条件成立，一并修正。
 
 ## 3. Implementation（commit 3）
 
