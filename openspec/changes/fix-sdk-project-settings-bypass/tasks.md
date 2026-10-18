@@ -37,11 +37,42 @@
 
 ## 4. Live verification (asks first — see the note)
 
-- [ ] 4.1 Four-cell comparison from `design.md §5`; the evidence is that cells 1 and 2 are identical while cell 3 prompts for neither tool.
-- [ ] 4.2 Sentinel files: `.mcp.json` `probe` absent and `PROBE-SPAWNED` never written; `HOOK-FIRED` never written.
-- [ ] 4.3 `mcp__agenthub__*` still functional — a `write_artifact` that produces an artifact card. **Highest-risk point of this change.**
-- [ ] 4.4 Project memory compensation: the workspace `CLAUDE.md` sentinel is quotable; the parent-directory / `.claude/rules/` / `~/.claude/CLAUDE.md` decoys are not.
-- [ ] 4.5 Approval semantics unchanged (same conversation silent after approval, new conversation prompts).
-- [ ] 4.6 Record the results here in the format of `add-external-mcp/tasks.md §9`.
+> **Scope actually run (2026-10-13): the two post-fix cells only.** The pre-fix control cells (3 and 4 of `design.md §5`) were deliberately skipped, so the cells below establish that the isolation is *in effect*; they do not on their own show the gate beating a file that would have won before. Where a cell carries its own two-sided discriminator, that is called out.
 
-> The live half starts a dev server and makes at least four real model runs through the relay. The dev server was previously killed by the system under memory pressure, so **this step asks for a go-ahead before it runs** rather than starting on its own.
+- [x] 4.1 Two post-fix cells from `design.md §5` — one workspace without `.claude/settings.json`, one with.
+  - Real app on Windows, `claude-sonnet-4-6` via relay, conversation `conv_cfkLHn3qF8YI`.
+  - **The vector probed is `permissions.allow`, and it was probed with `Write`, not `Bash`.** The substitution is forced by finding F3 below: this host's shell tool is not named `Bash`, so a Bash cell cannot produce a card in *either* configuration and would have returned "identical" for the wrong reason.
+  - Cell A (no settings file): `pendingWrites` registered after 14.5s at `<workspace>\probe-write.txt`; rejected (`200`); `fileWritten: false`.
+  - Cell B (settings present, `permissions.allow: ['Bash','PowerShell','Write','Edit']`): card after 13.3s at the same path; rejected; `fileWritten: false`.
+  - The two cells are **identical** — the comparison the plan asks for. The cell also carries its own reverse control, which is why it reads without the skipped control cells: had the settings file been honoured, the CLI would have pre-approved `Write` and the cell would read *no card* + `fileWritten: true`. It read the opposite.
+- [x] 4.2 Sentinel files.
+  - `.mcp.json` declared a `probe` server whose `args` write `agenthub-probe-PROBE-SPAWNED` into `os.tmpdir()`: **never written** (`probeSpawned: false`), checked after both the write run and the shell run, cell B. `strictMcpConfig` holds.
+  - The settings file declared a `PreToolUse` hook writing `agenthub-probe-HOOK-FIRED`: **never written** (`hookFired: false`).
+  - **Honest limit**: these are one-sided checks. The skipped pre-fix cells were the control that would have shown the sentinels *can* fire, so "absent" here rests on the SDK's documented `settingSources` semantics rather than on a demonstration. The hook matcher was widened to `'*'` and a `Write` call certainly happened, so the hook sentinel was not left unarmed for want of a match.
+- [x] 4.3 `mcp__agenthub__*` still functional. **Highest-risk point of this change.**
+  - `write_artifact` produced artifact `art_Zl8mN3IVIQlZ`, confirmed through `GET /api/artifacts` rather than from the model's text. The in-process bridge is not collateral damage of `strictMcpConfig: true`.
+- [x] 4.4 Project memory compensation and its boundary.
+  - A3 and B3 — with and without the settings file — returned *only* `` `SENTINEL-WORKSPACE-MEMORY-7731` `` plus the path `…\workspaces\conv_cfkLHn3qF8YI\CLAUDE.md`.
+  - Both decoys absent: the parent-directory `CLAUDE.md` (`SENTINEL-PARENT-DECOY-4412`) and `.claude/rules/decoy.md` (`SENTINEL-RULES-DECOY-9903`).
+- [ ] 4.5 Approval semantics unchanged (same conversation silent after approval, new conversation prompts).
+  - **Not covered by this run.** 4.1–4.4 exercised the *reject* path only (register → card → reject → deny → the model reads the rejection and stops; it did not retry). The "approve ⇒ silent for the rest of the conversation, and a fresh conversation prompts again" half needs an approve path plus a third conversation, which is outside the two-cell scope this run was narrowed to. The approval path is visibly intact; this item guards its memory semantics.
+- [x] 4.6 Record the results here in the format of `add-external-mcp/tasks.md §9`.
+
+### Findings from the §4 live verification (2026-10-13)
+
+**F3 — the Bash gate is unreachable on Windows, because the SDK's shell tool is not named `Bash` (pre-existing; not caused by this change; not fixed here).**
+
+`bridgePermission` gates shell commands in exactly one place — `if (toolName === 'Bash')` at `claude-code-adapter.ts:882`, wrapping both `findBannedPattern` (`:884`) and `classifyBashApproval` (`:888`). Everything unmatched falls through to `:992`'s `return allow()`. On this host that branch is never entered:
+
+- Two live runs (the retry at A2B and B2) sent `Remove-Item probe.sh -Force; node -e "…agenthub-probe-BASH-EXECUTED…"`. The marker file was created **both times** — the command really executed.
+- No `pendingBashCommands` entry ever appeared: both cells waited the full 120s, and one of them had **no settings file at all**, so `permissions.allow` cannot explain it.
+- Approval *was* required by AgentHub's own rules — the Windows classifier arm `/\bRemove-Item\b[\s\S]*-(?:Recurse|Force)\b/i` matches that command (checked against the real regex from `bash-command-approval.ts:38`), and `git clean -n` in the first attempt matches `/\bgit\s+(?:reset|clean)\b/i` at `:26`.
+- The tool's own result string is `"(PowerShell completed with no output)"`, and the model reported that the tool offered to it is 不是名为 `Bash` 的工具.
+
+⇒ The branch is skipped, so **neither the Windows command blacklist nor the command approval classifier is consulted for Claude Code agents on this host**, and every shell command reaches the default allow. This contradicts `specs/11-platform.md:130`, which states the ClaudeCodeAdapter path is covered by the blacklist "走同一份 `getBannedPatterns`" through `canUseTool`: that holds on POSIX (the tool there is `Bash`) and does not hold here. The CustomAgent path is unaffected — `src/server/tools/bash.ts:146,168` gates AgentHub's *own* tool, whose name AgentHub defines.
+
+Not fixed here: it changes a security constraint (blacklist + approval gate), so CLAUDE.md §6.2 requires discussion first.
+
+**The `git clean -n` first attempt was a symptom of F3, not a bad probe.** It executed ungated in a cell with no settings file and initially looked like the fix failing, so it was replaced by the marker-carrying command above. That replacement was still the right move — it makes "executed" unfakeable — but the earlier hypothesis (that the CLI pre-allows dry runs before consulting the callback) is now unnecessary: the tool name explains the same result without inventing a special allowlist. Grepping `sdk.mjs` for such a list had already found nothing; the tool table lives in the CLI binary inside `manifest.zst.json`, not in greppable JS.
+
+> The live half starts a dev server and makes real model runs through the relay. The dev server was previously killed by the system under memory pressure, so **this step asks for a go-ahead before it runs** rather than starting on its own.
