@@ -22,19 +22,19 @@
 
 ## 3. Implementation（commit 3）
 
-- [ ] 3.1 新增 `src/server/adapters/shell-tool.ts`：
+- [x] 3.1 新增 `src/server/adapters/shell-tool.ts`：
   - `SHELL_TOOL_NAMES`（`Bash` / `PowerShell` / `pwsh` / `cmd` / `shell`，大小写无关）
   - `hasCommandString(input): boolean`
   - `isShellTool(toolName, toolInput, sdkToolNames: string[] | null): boolean`
   - 纯函数，无 import，便于单测。
-- [ ] 3.2 `claude-code-adapter.ts`：
+- [x] 3.2 `claude-code-adapter.ts`：
   - `options` 之前声明 `let sdkToolNames: string[] | null = null`
   - `:473` 的 `m.type === 'system'` 分支里，init 时写入 `sdkToolNames = m.tools ?? []`（保留 `session_id` 逻辑）
   - `:882` 的 `if (toolName === 'Bash')` → `if (isShellTool(toolName, toolInput, sdkToolNames))`
   - `PermissionCtx` 增加 `getSdkToolNames` 或直接把闭包变量传进去（选改动面更小的那种）
   - 已知 shell 名但 `command` 解析不出 → `deny('Unrecognized shell tool input…')`
-- [ ] 3.3 新增 `src/server/adapters/shell-tool.test.ts` — `design.md §6` 的 9 行表，逐行断言；其中 `PowerShell` 那行是本次回归守卫。
-- [ ] 3.4 `pnpm typecheck`、`pnpm lint`、`pnpm test`。
+- [x] 3.3 新增 `src/server/adapters/shell-tool.test.ts` — `design.md §6` 的 9 行表，逐行断言；其中 `PowerShell` 那行是本次回归守卫。
+- [x] 3.4 `pnpm typecheck`、`pnpm lint`、`pnpm test`（35 文件 / 278 通过 / 1 跳过）。
 
 ## 4. Live verification（动手前问）
 
