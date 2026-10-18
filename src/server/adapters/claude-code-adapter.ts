@@ -39,6 +39,7 @@ import { buildChildProcessEnv, createAdapterEvent } from './adapter-utils'
 import { composeSystemPrompt, projectMemoryPath, readProjectMemory } from './project-memory'
 import { sdkIsolationOptions } from './sdk-isolation'
 import { claudeCodeSessions } from './session-store'
+import { isShellTool } from './shell-tool'
 import type { AdapterInput, AgentPlatformAdapter } from './types'
 
 /**
@@ -433,6 +434,9 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
     // agent 就不记得上一轮说了什么。
     const previousSessionId = claudeCodeSessions.get(input.conversationId)
 
+    // init 消息到达后填入，canUseTool 用它识别 shell 工具（SDK 按平台命名，不能写死 Bash）
+    let sdkToolNames: readonly string[] | null = null
+
     const effectiveCwd = getEffectiveCwd(workspace)
     // 项目记忆得自己读：SDK 里「加载项目 CLAUDE.md」与「加载项目 settings」是同一个开关，
     // 而后者必须关掉（见 sdkIsolationOptions），所以两者只能一起关、再从这里补回来。
@@ -463,7 +467,13 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
       env: buildSdkEnv(input.apiKey, input.apiBaseUrl),
       ...(previousSessionId ? { resume: previousSessionId } : {}),
       canUseTool: (toolName, toolInput) =>
-        bridgePermission(toolName, toolInput, { workspace, approvalMode, input, signal }),
+        bridgePermission(toolName, toolInput, {
+          workspace,
+          approvalMode,
+          input,
+          signal,
+          sdkToolNames,
+        }),
     }
 
     try {
@@ -473,6 +483,10 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
         if (m.type === 'system') {
           const sid = (m as { session_id?: string }).session_id
           if (sid) claudeCodeSessions.set(input.conversationId, sid)
+          const tools = (m as { tools?: unknown }).tools
+          if (Array.isArray(tools)) {
+            sdkToolNames = tools.filter((t): t is string => typeof t === 'string')
+          }
           continue
         }
 
@@ -850,6 +864,8 @@ interface PermissionCtx {
   approvalMode: 'auto' | 'review'
   input: AdapterInput
   signal: AbortSignal
+  /** 本次 run 的 init 工具表；未到达时为 null（见 isShellTool 的失败关闭规则） */
+  sdkToolNames: readonly string[] | null
 }
 
 async function bridgePermission(
@@ -878,9 +894,13 @@ async function bridgePermission(
     }
   }
 
-  // 2. Bash 黑名单
-  if (toolName === 'Bash') {
-    const cmd = (toolInput.command as string | undefined) ?? ''
+  // 2. shell 黑名单（工具名由 SDK 按平台提供：POSIX 为 Bash，Windows 为 PowerShell）
+  if (isShellTool(toolName, toolInput, ctx.sdkToolNames)) {
+    const cmd = typeof toolInput.command === 'string' ? toolInput.command : ''
+    // 认得出是 shell 却读不出命令 → 失败关闭，不能落到默认放行
+    if (!cmd.trim()) {
+      return deny(`Unrecognized shell tool input for "${toolName}"; refusing to run it untracked.`)
+    }
     const banned = findBannedPattern(cmd)
     if (banned) {
       return deny(`Command blocked by safety policy (matches ${banned}): ${cmd.slice(0, 100)}`)

@@ -500,12 +500,12 @@ AgentRunner 在构造 `AdapterInput.systemPrompt` 时会追加按可用工具生
 
 ## Claude Code agent 的工具集（不走 AgentHub 工具表）
 
-`adapterName === 'claude-code'` 的 agent 不消费上面的「内置工具清单」。它通过 Claude Agent SDK 直接使用 SDK preset 工具集：`Bash` / `Read` / `Write` / `Edit` / `Grep` / `Glob` / `WebFetch` / `WebSearch` / `Task` / `TodoWrite` / `NotebookEdit` / `Mcp` 等（命名为 PascalCase，与 AgentHub 的 snake_case 区分）。
+`adapterName === 'claude-code'` 的 agent 不消费上面的「内置工具清单」。它通过 Claude Agent SDK 直接使用 SDK preset 工具集：shell 工具（POSIX 上为 `Bash`，Windows 上为 `PowerShell`，由 SDK 按平台提供）/ `Read` / `Write` / `Edit` / `Grep` / `Glob` / `WebFetch` / `WebSearch` / `Task` / `TodoWrite` / `NotebookEdit` / `Mcp` 等（命名为 PascalCase，与 AgentHub 的 snake_case 区分）。**不要假定 shell 工具叫 `Bash`** —— 名字是 SDK 的实现细节，见 Spec 11「命令黑名单」节。
 
 **审批 / 沙箱 / 黑名单仍由 AgentHub 接管**，但接缝在 adapter 的 `canUseTool` 钩子（详见 Spec 05 「ClaudeCodeAdapter / canUseTool 桥」一节）。**前提是 adapter 以隔离模式启动**（`settingSources: []` + `strictMcpConfig: true`）：CLI 先求值 workspace 项目设置里的 `permissions.allow`，命中就不再回调这个钩子 —— 不隔离的话，workspace 里一个 `.claude/settings.json` 就能让下面每一条失效（详见 Spec 11「SDK 子进程不加载项目设置」）：
 
 - 路径检查走 `assertPathWithinWorkspace`（共享）
-- Bash 黑名单走 `findBannedPattern`（共享）
+- shell 命令黑名单走 `findBannedPattern`（共享）—— **前提是 adapter 能识别出 shell 工具**：工具名按平台不同（Windows 为 `PowerShell`），不能按 `Bash` 字面量判断；识别规则与失败关闭行为见 Spec 05「canUseTool 桥」
 - `fs_write` 审批走同一个 `pendingWrites` store —— 但 `register` 传 `skipWrite: true`，approve 后由 SDK 自己写盘（不调 `writeFileInWorkspace`）。前端 UI（`PendingWritesPanel` / `PendingWriteDiffTab`）对这两条路径完全无感
 
 **副作用**：sandbox 模式 quota（`SANDBOX_TOTAL_BYTES` / `SANDBOX_TOTAL_FILES`）对 Claude Code agent 失效（SDK 自己写盘绕过 quota 检查）。Claude Code agent 实际场景都是 `workspace.mode === 'local'`（绑真实项目），quota 不适用，可接受。

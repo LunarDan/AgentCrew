@@ -158,6 +158,8 @@ Orchestrator 走同一个 `AgentRunner`，只是多了 `dispatch_to_agent` 工�
 
 命令在执行前需要匹配对应平台的黑名单。任何「快速放过」必须在 PR 中说明理由。
 
+**黑名单要真正生效，前提是 adapter 认得出 shell 工具。** SDK 按平台给 shell 工具命名（POSIX 为 `Bash`，Windows 实测为 `PowerShell`），adapter 不能按 `Bash` 字面量判断 —— 否则整条黑名单与审批分类器会被跳过，命令落到默认放行。识别与失败关闭规则见 `specs/05-adapter-interface.md`「canUseTool 桥」。本条不新增/调整任何黑名单规则，`src/server/security.ts` 与上面的平台清单不变。
+
 ### 5.3 Workspace 沙箱
 
 所有 `fs_read` / `fs_write` / `bash` 工具调用：
