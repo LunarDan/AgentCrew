@@ -36,12 +36,20 @@
 - [x] 3.3 新增 `src/server/adapters/shell-tool.test.ts` — `design.md §6` 的 9 行表，逐行断言；其中 `PowerShell` 那行是本次回归守卫。
 - [x] 3.4 `pnpm typecheck`、`pnpm lint`、`pnpm test`（35 文件 / 278 通过 / 1 跳过）。
 
-## 4. Live verification（动手前问）
+## 4. Live verification（2026-10-18）
 
-- [ ] 4.1 从真实的 `system:init` 里读出工具表，确认这台 Windows 上 shell 工具的实际名字（`PowerShell`）与输入字段（`command`）。**这是方案 C 唯一还没被直接观测到的事实。**
-- [ ] 4.2 修复后：同一条 `Remove-Item … -Force` 命令**必须**出现审批卡；拒绝后不得执行（marker 文件不存在）。
-- [ ] 4.3 修复后：一条无害命令（如 `Get-ChildItem`）不弹卡、正常执行 —— 证明没有把所有命令都变成审批。
-- [ ] 4.4 修复后：`git clean -n` / `git reset` 一类分类器规则仍会弹卡。
-- [ ] 4.5 记录结果到本文件，格式同 `add-external-mcp/tasks.md §9`。
+环境：Windows 11，dev server，claude-code adapter，`claude-sonnet-4-6`（经 relay）。工作区里**没有** `.claude/settings.json`（`settingsPresent: false`）—— 隔离启动后审批门本来就不依赖它。所有「执行与否」的判据都是文件系统事实（marker 文件、`probe.sh` 是否存在），不是模型自述。
 
-> 这一步要起 dev server 并跑真实模型。dev server 已两次被系统因内存终止，**动手前先问**，不自行启动。
+- [x] 4.1 从真实的 `system:init` 里读出工具表，确认这台 Windows 上 shell 工具的实际名字（`PowerShell`）与输入字段（`command`）。**这是方案 C 唯一还没被直接观测到的事实。**
+  - 由 F1 修复后持久化的 `tool_use` 直接观测到：`toolName: "PowerShell"`，`args: { command: "Get-ChildItem -Name", description: "…" }`。方案 C 的三条前提（名字、输入字段、init 表）全部成立。
+- [x] 4.2 修复后：同一条 `Remove-Item … -Force` 命令**必须**出现审批卡；拒绝后不得执行（marker 文件不存在）。
+  - 第一格（同会话）：命令 `Remove-Item probe.sh -Force; node -e "…写 marker…"`，卡在 14.5s 出现，`pendingReason: "PowerShell recursive or forced removal"`（`bash-command-approval.ts:37`），拒绝返回 200。**但这一格的 marker 断言不作数**：模型被拒后把命令改写成去掉 `-Force` 的版本重试，该版本不命中分类器、因而正常执行并创建了 marker。持久化的 `tool_use` 里能清楚看到这是**第二条不同的命令**（两条 `tool_use`），被拒的第一条没有执行。
+  - 补跑一格（新会话，prompt 明确「被拒后不得修改或重试」）：同一条命令，卡在 4.2s 出现，拒绝返回 200；只有 **一条** `tool_use`；`markerExecuted: false`；`probe.sh` 仍在。4.2 由此确定。
+  - 观察（不是本次缺陷）：分类器是**按命令文本**匹配的，模型可以把 `-Force` 去掉来绕开一条具体规则。这正是既有的「黑名单 / 分类器是尽力而为，不是隔离」的边界，与本次修复无关，也未因本次修复变好或变坏。
+- [x] 4.3 修复后：一条无害命令（如 `Get-ChildItem`）不弹卡、正常执行 —— 证明没有把所有命令都变成审批。
+  - `Get-ChildItem -Name`：30s 窗口内无卡，run `complete`，输出 `probe.sh`。
+- [x] 4.4 修复后：`git clean -n` / `git reset` 一类分类器规则仍会弹卡。
+  - `git clean -n`：卡在 4.2s 出现，`pendingReason: "git command may discard local changes"`（`bash-command-approval.ts:24`），拒绝返回 200；模型报告被拦截，未执行任何替代命令。
+- [x] 4.5 记录结果到本文件，格式同 `add-external-mcp/tasks.md §9`。
+
+**补充（黑名单 deny 路径）**：第一轮在旧会话里跑 `Remove-Item -Recurse -Force probe.sh` 时模型凭上下文直接拒绝，`toolUses: []`，没有真正触发分支。改在新会话重跑：命令**确实被发出**（恰好一条 `tool_use`），**无卡**，`markerExecuted: false`，`probe.sh` 完好，模型回复里引用了命中的规则 `/\bRemove-Item\b[^|;]*-Recurse[^|;]*-Force/i`（即 `src/server/security.ts` 的 `WINDOWS_BANNED`）。说明 `findBannedPattern` 被到达并直接 deny，没有退化成审批卡或放行。
