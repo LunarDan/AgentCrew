@@ -40,6 +40,18 @@ When companion mode is enabled, the desktop MUST NOT expose unauthenticated desk
 - **THEN** the companion listener forwards it to the loopback server
 - **AND** the route's bearer-token check decides access.
 
+### Requirement: Mobile event streaming SHALL be authenticated
+
+The mobile event stream MUST require the same authorization as other `/api/mobile/*` routes. A bearer token MAY be sent directly on the streaming request; when the client cannot send headers, a short-lived (30 seconds) single-use stream token MAY be exchanged for it and MUST be invalid after one use or expiry.
+
+#### Scenario: A mobile client subscribes with a bearer token
+- **WHEN** the client opens `/api/mobile/events` with a valid `Authorization` header
+- **THEN** it receives the global event stream.
+
+#### Scenario: A stream token is reused
+- **WHEN** a client presents a stream token that was already consumed or has expired
+- **THEN** the events endpoint rejects the request with 401.
+
 ### Requirement: Mobile APIs SHALL expose conversation snapshots
 
 Remote mobile APIs MUST provide a compact snapshot of conversations, messages, pending questions, pending writes, and run state needed for monitoring.

@@ -282,6 +282,8 @@ GET /api/mobile/events?streamToken=<short-lived-token>
 
 `streamToken` 30 秒内有效、一次性，用于 WebView 不支持 fetch streaming 而必须使用 `EventSource` 的平台。
 
+**实现状态（2026-10-20）**：`GET /api/mobile/events`（Bearer）与 `POST /api/mobile/stream-token`（30 秒一次性 token，`GET /api/mobile/events?streamToken=...`）已实现。移动端 App 用事件流触发快照刷新（500ms 去抖），同时保留 2–3s 轮询作为 WebView 不支持 fetch streaming 时的兜底。
+
 ### 6.4 操作 API
 
 移动端第一版需要：
@@ -298,7 +300,7 @@ GET  /api/mobile/artifacts/:id/export
 
 这些 API 可以复用现有 service，但 response DTO 要做移动端安全裁剪。
 
-**实现状态（2026-10-20）**：`GET /api/mobile/snapshot`、会话详情 / 消息发送 / 撤回 / 编辑 / 重新生成、`POST /api/mobile/pending-writes|pending-questions/:id`、`GET /api/mobile/artifacts/:id` 与 `POST /api/mobile/runs/:id/abort` 已实现（abort 在移动端状态页对运行中的 run 提供「停止」）。`/api/mobile/events` 与 `/api/mobile/stream-token` 尚未实现：移动端目前用 2–3s 轮询收敛状态。
+**实现状态（2026-10-20）**：`GET /api/mobile/snapshot`、会话详情 / 消息发送 / 撤回 / 编辑 / 重新生成、`POST /api/mobile/pending-writes|pending-questions/:id`、`GET /api/mobile/artifacts/:id`、`POST /api/mobile/runs/:id/abort`、事件流（§6.3）均已实现（abort 在移动端状态页对运行中的 run 提供「停止」）。
 
 ---
 
