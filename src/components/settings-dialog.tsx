@@ -37,10 +37,14 @@ import type { AppSettingsRow } from '@/db/schema'
 import {
   fetchAppSettings,
   fetchConnectionHints,
+  fetchMobileDevices,
+  createMobilePairingCode,
   regenerateMobileDeviceToken,
+  revokeMobileDevice,
   updateAppSettings,
   type AppSettingsPatchBody,
   type ConnectionHint,
+  type MobilePairedDevice,
 } from '@/lib/api'
 import { subscribeUiCommand } from '@/lib/ui-command-events'
 
@@ -460,6 +464,65 @@ function MobileConnectionHints({
 }) {
   const enabled = companionMode !== 'off'
 
+  const [pairingCode, setPairingCode] = useState<{ code: string; expiresAt: number } | null>(null)
+  const [pairingBusy, setPairingBusy] = useState(false)
+  const [pairingError, setPairingError] = useState<string | null>(null)
+  const [devices, setDevices] = useState<MobilePairedDevice[]>([])
+  const [devicesLoading, setDevicesLoading] = useState(false)
+  const [revokingId, setRevokingId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!enabled) {
+      setPairingCode(null)
+      setDevices([])
+      return
+    }
+    let cancelled = false
+    setDevicesLoading(true)
+    fetchMobileDevices()
+      .then((list) => {
+        if (!cancelled) setDevices(list)
+      })
+      .catch((err) => {
+        if (!cancelled) setPairingError(err instanceof Error ? err.message : '读取设备列表失败')
+      })
+      .finally(() => {
+        if (!cancelled) setDevicesLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [enabled])
+
+  const handleCreatePairingCode = async () => {
+    if (pairingBusy) return
+    setPairingBusy(true)
+    setPairingError(null)
+    try {
+      setPairingCode(await createMobilePairingCode())
+    } catch (err) {
+      setPairingError(err instanceof Error ? err.message : '生成配对码失败')
+    } finally {
+      setPairingBusy(false)
+    }
+  }
+
+  const handleRevokeDevice = async (device: MobilePairedDevice) => {
+    if (revokingId || !window.confirm(`吊销「${device.deviceName}」？该设备需要重新配对才能连接。`)) {
+      return
+    }
+    setRevokingId(device.id)
+    setPairingError(null)
+    try {
+      await revokeMobileDevice(device.id)
+      setDevices((prev) => prev.filter((item) => item.id !== device.id))
+    } catch (err) {
+      setPairingError(err instanceof Error ? err.message : '吊销失败')
+    } finally {
+      setRevokingId(null)
+    }
+  }
+
   return (
     <section className="rounded-lg border bg-muted/30 p-3">
       <div className="mb-3 flex items-center justify-between gap-2">
@@ -557,6 +620,97 @@ function MobileConnectionHints({
             </Button>
           )}
 
+          {enabled && (
+            <div className="rounded-md border bg-background px-2 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-xs font-medium">配对码</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    手机端输入地址和配对码即可换到自己的设备 token
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={pairingBusy}
+                  onClick={() => void handleCreatePairingCode()}
+                >
+                  {pairingBusy ? <Loader2 className="size-3.5 animate-spin" /> : '生成'}
+                </Button>
+              </div>
+              {pairingCode && (
+                <div className="mt-2 flex items-center justify-between gap-2 rounded-md bg-muted/40 px-2 py-1.5">
+                  <div className="min-w-0">
+                    <p className="font-mono text-lg tracking-[0.35em]">{pairingCode.code}</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      5 分钟内一次性有效 · 至 {formatClock(pairingCode.expiresAt)}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label="复制配对码"
+                    title="复制配对码"
+                    onClick={() => onCopyText(pairingCode.code)}
+                  >
+                    {copiedUrl === pairingCode.code ? (
+                      <Check className="size-4" />
+                    ) : (
+                      <Clipboard className="size-4" />
+                    )}
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {enabled && (
+            <div className="rounded-md border bg-background px-2 py-2">
+              <p className="text-xs font-medium">已配对设备</p>
+              {devicesLoading ? (
+                <div className="flex h-8 items-center justify-center">
+                  <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+                </div>
+              ) : devices.length === 0 ? (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  还没有通过配对码连接的设备。上面的全局 token 仍然有效。
+                </p>
+              ) : (
+                <div className="mt-1 flex flex-col gap-1">
+                  {devices.map((device) => (
+                    <div key={device.id} className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-xs">{device.deviceName}</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {device.lastSeenAt === null
+                            ? '尚未连接'
+                            : `最近活跃 ${formatClock(device.lastSeenAt)}`}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        disabled={revokingId !== null}
+                        onClick={() => void handleRevokeDevice(device)}
+                      >
+                        {revokingId === device.id ? '吊销中' : '吊销'}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {pairingError && (
+            <p className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-[11px] text-destructive">
+              {pairingError}
+            </p>
+          )}
+
           {hints.map((hint) => (
             <div
               key={hint.url}
@@ -588,6 +742,10 @@ function MobileConnectionHints({
       )}
     </section>
   )
+}
+
+function formatClock(timestamp: number): string {
+  return new Date(timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }
 
 function DeploymentPublishSettings({
