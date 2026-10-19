@@ -40,6 +40,7 @@ import {
   type AgentToolName as ToolName,
 } from '@/shared/agent-builder-config'
 import { validateCodexBaseUrl } from '@/shared/codex-compat'
+import { validateEndpointUrl } from '@/shared/endpoint-url'
 import { adapterSupportsTransport } from '@/shared/mcp'
 import {
   validateOpenAICompatibleApiKey,
@@ -212,8 +213,11 @@ export function CreateAgentDialog({
 
   const handleProviderChange = (p: Provider) => {
     setProvider(p)
-    // 切换 provider 时把 modelId 自动重置到该 provider 的默认（避免跨家串）
+    // provider 决定 endpoint 协议与 key 的归属：切换后旧值一定不可用（甚至会把新 provider
+    // 的请求发到旧 base URL），所以连同 modelId 一起重置，而不是留着让用户误提交。
     setModelId(PROVIDER_DEFAULTS[p].defaultModel)
+    setApiKey('')
+    setApiBaseUrl('')
   }
 
   const toggleTool = (t: string) => {
@@ -313,9 +317,17 @@ export function CreateAgentDialog({
       const baseUrlError = validateCodexBaseUrl(trimmedApiBaseUrl || null)
       if (baseUrlError) return fail('model', baseUrlError)
     }
+    if (adapterKind === 'claude-code') {
+      const baseUrlError = validateEndpointUrl(trimmedApiBaseUrl, 'Claude Code Base URL')
+      if (baseUrlError) return fail('model', baseUrlError)
+    }
     if (adapterKind === 'custom') {
       const baseUrlError = validateOpenAICompatibleBaseUrl(provider, trimmedApiBaseUrl || null)
       if (baseUrlError) return fail('model', baseUrlError)
+      if (provider === 'anthropic') {
+        const anthropicBaseUrlError = validateEndpointUrl(trimmedApiBaseUrl, 'Anthropic Base URL')
+        if (anthropicBaseUrlError) return fail('model', anthropicBaseUrlError)
+      }
       const apiKeyError = validateOpenAICompatibleApiKey(provider, trimmedApiKey || null)
       if (apiKeyError) return fail('model', apiKeyError)
     }
@@ -470,6 +482,7 @@ export function CreateAgentDialog({
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="例：TestBot"
+                    maxLength={64}
                   />
                 </div>
 
@@ -479,6 +492,7 @@ export function CreateAgentDialog({
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder="一句话讲清楚它能做什么"
+                    maxLength={280}
                   />
                 </div>
 
