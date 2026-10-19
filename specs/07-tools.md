@@ -312,7 +312,7 @@ write_artifact({
 
 **限制**：
 - 单文件大小上限 **100 KB**（`Buffer.byteLength`）
-- **sandbox 模式**额外检查 workspace 总量：累计 size > 100 MB 或文件数 > 1000 拒（递归扫 `rootPath`）
+- **sandbox 模式**额外检查 workspace 总量：累计 size > 100 MB 或文件数 > 1000 拒（递归扫 `rootPath`）；覆盖已有文件时只按「新大小 − 旧大小」和「不新增文件」计算增量，不会把同一个文件重复计入
 - **local 模式**跳过总量检查（用户自管理）
 
 **返回**：`{ path, absolutePath, cwd, bytes, applied: 'auto' | 'review' }`。`applied` 标识用户审批路径还是直接写。
