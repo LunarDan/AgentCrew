@@ -20,7 +20,8 @@ export async function POST(_req: NextRequest, ctx: RouteContext) {
     const message = err instanceof Error ? err.message : String(err)
     const status = message.startsWith('Conversation not found')
       ? 404
-      : message.startsWith('A newer user message arrived')
+      : message.startsWith('A newer user message arrived') ||
+          message.startsWith('Regeneration already in progress')
         ? 409
         : message.startsWith('No user message')
           ? 400

@@ -129,31 +129,39 @@ export async function createConversation(args: CreateConversationArgs): Promise<
 
   const title = args.title ?? defaultTitleFor(agents)
 
-  db.transaction((tx) => {
-    tx.insert(schema.conversations)
-      .values({
-        id: conversationId,
-        title,
-        mode: args.mode,
-        agentIds: args.agentIds,
-        pinnedMessageIds: [],
-        bookmarkedMessageIds: [],
-        archived: false,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .run()
-    tx.insert(schema.workspaces)
-      .values({
-        id: workspaceId,
-        conversationId,
-        rootPath,
-        mode: workspaceMode,
-        boundPath: resolvedBoundPath,
-        createdAt: now,
-      })
-      .run()
-  })
+  try {
+    db.transaction((tx) => {
+      tx.insert(schema.conversations)
+        .values({
+          id: conversationId,
+          title,
+          mode: args.mode,
+          agentIds: args.agentIds,
+          pinnedMessageIds: [],
+          bookmarkedMessageIds: [],
+          archived: false,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run()
+      tx.insert(schema.workspaces)
+        .values({
+          id: workspaceId,
+          conversationId,
+          rootPath,
+          mode: workspaceMode,
+          boundPath: resolvedBoundPath,
+          createdAt: now,
+        })
+        .run()
+    })
+  } catch (err) {
+    // 事务回滚后目录没有任何 DB 行指回它，不删就是永久孤儿
+    await rmDirWithRetry(rootPath).catch((cleanupErr) => {
+      console.warn(`[conversation] failed to clean workspace ${conversationId}`, cleanupErr)
+    })
+    throw err
+  }
 
   return {
     id: conversationId,
@@ -1048,7 +1056,25 @@ export interface RegenerateResult extends WithdrawResult {
   triggerMessageId: string
   runIds: string[]
 }
+// 并发的重新生成会在各自的「无运行中 run」检查后同时启动 responder，产生重复回复。
+// 同一会话同一时刻只允许一个重新生成；第二个请求直接 409，等第一个结束后用户可再点。
+const regenerationInFlight = new Set<string>()
+
 export async function regenerateLatestResponse(
+  conversationId: string,
+): Promise<RegenerateResult> {
+  if (regenerationInFlight.has(conversationId)) {
+    throw new Error('Regeneration already in progress for this conversation')
+  }
+  regenerationInFlight.add(conversationId)
+  try {
+    return await regenerateLatestResponseLocked(conversationId)
+  } finally {
+    regenerationInFlight.delete(conversationId)
+  }
+}
+
+async function regenerateLatestResponseLocked(
   conversationId: string,
 ): Promise<RegenerateResult> {
   const conv = await db.query.conversations.findFirst({
