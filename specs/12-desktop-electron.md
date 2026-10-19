@@ -444,7 +444,7 @@ pnpm electron:build
 ## 9. 安全模型
 
 - Renderer `nodeIntegration: false`、`contextIsolation: true`、`sandbox: true` —— 渲染端等同浏览器
-- 外链只放行 `http:` / `https:`：`setWindowOpenHandler` 与 `will-navigate` 统一走 `openExternalHttp`，`file:` / `smb:` 等 scheme 直接丢弃；非法 URL 不触发导航。LLM 输出不可信，绝不能把任意 scheme 交给 OS
+- 外链只放行 `http:` / `https:`：`setWindowOpenHandler`、`will-navigate` 与 `will-redirect` 统一走 `openExternalHttp`，`file:` / `smb:` 等 scheme 直接丢弃；非法 URL 不触发导航。LLM 输出不可信，绝不能把任意 scheme 交给 OS。服务端 302 不经过 `will-navigate`，所以产物导出等路由跳到外链时必须由 `will-redirect`（仅主 frame）拦下
 - Preload（如启用）只暴露白名单 API：当前只规划 `electronAPI.pickDirectory()` 走原生 dialog 选 boundPath，**Phase 1 可不挂**（继续用 web 版 `/api/fs/listdir`）
 - 不开 `webSecurity: false`、不开 `allowRunningInsecureContent`
 - iframe 渲染 LLM 产物：与 web 版完全一致（`sandbox="allow-scripts"`，详见 CLAUDE.md §5.1）

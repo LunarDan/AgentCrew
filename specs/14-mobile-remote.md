@@ -202,7 +202,9 @@ P0 同时支持 QR 和手输，QR 是主路径，手输是兜底。
 
 **实现约束（2026-10-20）**：打包版不要把整个 Next server 绑到 `0.0.0.0` —— 那等于把 `/api/settings`（含明文 provider key 与设备 token）、`/api/conversations` 等全部桌面 API 暴露给同一局域网。`electron/server-bootstrap.ts` 的做法是：Next 固定 `HOSTNAME=127.0.0.1` + 系统分配端口；companion 开启时另起 `0.0.0.0:<companionPort>` 的 HTTP 反向代理，仅放行路径前缀 `/api/mobile/`（含 CORS 预检），其余一律 404。移动端每条路由仍自行校验 Bearer token。
 
-路径判定必须**归一化后**再比较：`/api/mobile/../settings` 原始前缀命中，但 Next 会把它解析成 `/api/settings`。`electron/companion-proxy.ts` 先做百分号解码、再按 POSIX 规则归一化，归一化结果必须与解码结果完全一致且仍以 `/api/mobile/` 开头；`..`、`.`、重复斜杠、反斜杠与非法转义一律拒绝。
+路径判定必须**归一化后**再比较：`/api/mobile/../settings` 原始前缀命中，但 Next 会把它解析成 `/api/settings`。`electron/companion-proxy.ts` 先做百分号解码、再按 POSIX 规则归一化，归一化结果必须与解码结果完全一致且仍以 `/api/mobile/` 开头；`..`、`.`、重复斜杠、反斜杠（含编码后的 `%5C`）与非法转义一律拒绝。
+
+代理监听失败（典型是 `EADDRINUSE`）不能只写日志：此时手机侧完全连不上，而设置页仍会展示 LAN 地址。`electron/server-bootstrap.ts` 等待 `listen` 结果，失败时把原因写入 `AGENTHUB_COMPANION_PROXY_ERROR`；`GET /api/connection-hints` 原样带出 `companionProxyError`，设置页在「移动端连接」里显示错误横幅。代理自身的连接拆除也必须双向：手机断开后销毁 upstream 请求，否则 SSE 的订阅与心跳会一直泄漏。
 
 移动端 API 不得返回：
 
@@ -282,9 +284,11 @@ Authorization: Bearer <deviceToken>
 GET /api/mobile/events?streamToken=<short-lived-token>
 ```
 
-`streamToken` 30 秒内有效、一次性，用于 WebView 不支持 fetch streaming 而必须使用 `EventSource` 的平台。
+`streamToken` 30 秒内有效、一次性，用于 WebView 不支持 fetch streaming 而必须使用 `EventSource` 的平台。token 在签发时绑定当时的设备 token 哈希（内存表里不存设备 token 明文）：消费时要求当前设备 token 与签发时一致，轮换后旧流 token 立即作废；消费失败同样删除，避免反复试错。
 
 **实现状态（2026-10-20）**：`GET /api/mobile/events`（Bearer）与 `POST /api/mobile/stream-token`（30 秒一次性 token，`GET /api/mobile/events?streamToken=...`）已实现。移动端 App 用事件流触发快照刷新（500ms 去抖），同时保留 2–3s 轮询作为 WebView 不支持 fetch streaming 时的兜底。事件流每 15s 心跳时重新读取设置表比对期望 token：轮换 token 或关闭 companion mode 会主动关闭已建立的连接，吊销对长连接同样生效。
+
+事件流的生命周期必须完整：客户端断开（含反向代理一侧销毁）时通过 `ReadableStream.cancel` 退订 eventBus、停心跳并移除 abort 监听；鉴权是异步的，订阅建立后要再检查一次 `req.signal.aborted`。手机读得慢时按 `controller.desiredSize` 丢弃事件，不让服务端无界缓冲 —— 丢失的增量由重连后的快照补齐。
 
 ### 6.4 操作 API
 
