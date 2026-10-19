@@ -101,7 +101,7 @@ P0 实现允许先使用「桌面端地址 + 设备 token」完成配对：
 
 - `app_settings.mobile_device_token` 保存当前桌面端的移动端 token；
 - 桌面设置页展示可连接地址与 token；
-- 打包版 Electron 在 `companion_mode !== 'off'` 且 token 存在时监听 `0.0.0.0:60646`；
+- 打包版 Electron 在 `companion_mode !== 'off'` 且 token 存在时，对 `0.0.0.0:60646` 起一个**只转发 `/api/mobile/*`** 的反向代理；Next 本体始终只监听 `127.0.0.1`（见 §5.4 的实现约束）；
 - 手机 App 手动填写地址与 token；扫码配对后续复用同一 payload。
 
 **鉴权来源（2026-10-20）**：`/api/mobile/*` 的期望 token 优先取环境变量（dev 注入 / Electron bootstrap），否则取 `app_settings.companion_mode + mobile_device_token`。设置表是持久来源 —— 进程重启后旧 token 仍有效；`companion_mode = 'off'` 时 DB token 不再放行（环境变量覆盖仅用于 dev）。`GET /api/mobile/snapshot` 的 `server.companionMode` 同样来自设置表，不再读单独的 `AGENTHUB_COMPANION_MODE` 环境变量。
@@ -199,6 +199,8 @@ P0 同时支持 QR 和手输，QR 是主路径，手输是兜底。
 所有 `/api/mobile/*` 必须鉴权，除 `/api/mobile/pair`。
 
 现有桌面 Web API 可以保持 loopback 无鉴权，但 companion mode 打开后，远程访问路径必须走 mobile API 或 middleware 保护后的 API。不要让局域网设备直接调用未鉴权的 `/api/conversations`、`/api/agents`、`/api/settings`。
+
+**实现约束（2026-10-20）**：打包版不要把整个 Next server 绑到 `0.0.0.0` —— 那等于把 `/api/settings`（含明文 provider key 与设备 token）、`/api/conversations` 等全部桌面 API 暴露给同一局域网。`electron/server-bootstrap.ts` 的做法是：Next 固定 `HOSTNAME=127.0.0.1` + 系统分配端口；companion 开启时另起 `0.0.0.0:<companionPort>` 的 HTTP 反向代理，仅放行路径前缀 `/api/mobile/`（含 CORS 预检），其余一律 404。移动端每条路由仍自行校验 Bearer token。
 
 移动端 API 不得返回：
 

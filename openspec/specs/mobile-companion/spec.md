@@ -27,6 +27,19 @@ The companion token and companion mode saved through the settings API MUST remai
 - **WHEN** a mobile client presents the previously stored token
 - **THEN** the request is rejected as unconfigured.
 
+### Requirement: Remote exposure SHALL be limited to the mobile API
+
+When companion mode is enabled, the desktop MUST NOT expose unauthenticated desktop APIs on a non-loopback interface. The network listener reachable from LAN or Tailscale peers MUST forward only `/api/mobile/*`; other paths MUST be refused. The Next server itself MUST remain bound to loopback.
+
+#### Scenario: A LAN peer requests a desktop API
+- **WHEN** a peer on the companion interface requests `/api/settings` or `/api/conversations`
+- **THEN** the request is refused without reaching the Next server.
+
+#### Scenario: A paired phone requests a mobile API
+- **WHEN** a phone sends an authenticated request to `/api/mobile/snapshot`
+- **THEN** the companion listener forwards it to the loopback server
+- **AND** the route's bearer-token check decides access.
+
 ### Requirement: Mobile APIs SHALL expose conversation snapshots
 
 Remote mobile APIs MUST provide a compact snapshot of conversations, messages, pending questions, pending writes, and run state needed for monitoring.
