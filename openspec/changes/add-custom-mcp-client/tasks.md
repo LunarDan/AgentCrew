@@ -38,11 +38,23 @@
 
 ## 5. Live verification（动手前问）
 
-- [ ] 5.1 健康 stdio server + `trust='always'`：模型看到 `mcp__*` 工具，调用成功。
-- [ ] 5.2 `trust='ask'`：首次弹卡 → 批准 → 执行；同会话同工具不再弹；新会话重新弹；拒绝 → `isError`，run 继续且模型不重试。
-- [ ] 5.3 坏 `command`：run `complete`，出现 `[MCP]` 系统提示，点名该 server。
-- [ ] 5.4 中止：stdio 子进程树无残留。
-- [ ] 5.5 无 MCP 的 custom run 行为不变；Codex run 不受影响。
-- [ ] 5.6 记录结果到本文件，格式同 `fix-sdk-shell-tool-gate/tasks.md §4`。
+环境（2026-10-19）：Windows 11，dev server，custom adapter，`deepseek-v4-pro`。测试 server 是一个自建 stdio MCP server（`echo` / `slow` 两个工具，启动时把 pid 写入文件）。所有「执行与否」的判据都是持久化的 `tool_use` / `tool_result` 与进程事实，不是模型自述。
+
+- [x] 5.1 健康 stdio server + `trust='always'`：模型看到 `mcp__*` 工具，调用成功。
+  - 模型工具表中出现 `mcp__liveecho__echo`；`tool_use.args = {"text":"hello-mcp-live"}`，`tool_result = "hello-mcp-live"`、`isError: false`；会话内无 `[MCP]` 系统提示。
+- [x] 5.2 `trust='ask'`：首次弹卡 → 批准 → 执行；同会话同工具不再弹；新会话重新弹；拒绝 → `isError`，run 继续且模型不重试。
+  - 首次调用等待审批（`toolName: mcp__liveecho__echo`、`serverName: liveecho`、`args: {"text":"first-ask"}`），批准 200 后执行成功。
+  - 同会话第二次调用：审批队列**未**出现新条目，直接执行成功。
+  - 新会话：重新弹审批；拒绝 200 后 `tool_result.isError = true`，内容为拒绝文案；全程只有 **1** 条 `tool_use`（模型未重试），run `complete`。
+- [x] 5.3 坏 `command`：run `complete`，出现 `[MCP]` 系统提示，点名该 server。
+  - 同时挂健康 server 与坏 server（缺失可执行文件）：健康的 echo 正常调用；会话内恰好一条系统消息：`[MCP] 外部 MCP server 未能连接，本次运行不会提供它们的工具：\n- livebroken（failed）`；run `complete`。
+- [x] 5.4 中止：stdio 子进程树无残留。
+  - 在 `slow` 工具调用进行中中止：子进程 pid 中止前存活，`POST /api/runs/{id}/abort` 返回 200 后进程退出（< 20s 轮询窗口内，实测数秒）；agent 消息 `complete`；事后 `Get-CimInstance` 未发现任何 `agenthub-live-mcp` 残留进程。
+- [x] 5.5 无 MCP 的 custom run 行为不变；Codex run 不受影响。
+  - 无 MCP：agent 消息只有文本 `ok`，无 tool part，0 条系统消息。
+  - Codex：本次改动未触碰 `codex-adapter` / Codex 配置翻译路径，transport 矩阵中 Codex 行未变；回归由全量单测覆盖（39 文件 / 308 passed / 1 skipped）。
+- [x] 5.6 记录结果到本文件，格式同 `fix-sdk-shell-tool-gate/tasks.md §4`。
+
+> 现场发现并处理的非代码问题：上一轮 dev server 的 `.next` 编译缓存损坏，嵌套动态 API 路由（`pending-mcp-tools/[callId]`、`pending-writes/[pwId]`）被当成页面返回 404 HTML。清空 `.next` 重启后恢复，与应用代码无关。
 
 > dev server 曾多次被系统因内存终止，**动手前先问**，不自行启动。
