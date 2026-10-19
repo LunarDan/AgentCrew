@@ -55,8 +55,8 @@ export function runMessageSearchMigration(target: Database.Database): void {
   }
 }
 
-// CLI entry
-if (require.main === module) {
+// CLI entry。bootstrap 会静态 import 本模块，所以要防 ESM / 打包环境里没有 require
+if (typeof require !== 'undefined' && require.main === module) {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { sqlite } = require('./client') as typeof import('./client')
   runMessageSearchMigration(sqlite)

@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { bootstrapDatabase, reconcileInterruptedRuns } from './bootstrap'
+import { runMessageSearchMigration } from './migrate-add-message-search'
 
 function makeDb(): Database.Database {
   const db = new Database(':memory:')
@@ -83,6 +84,68 @@ describe('bootstrapDatabase', () => {
         'messages_fts_ai',
         'messages_fts_au',
       ])
+    } finally {
+      db.close()
+    }
+  })
+})
+
+describe('runMessageSearchMigration', () => {
+  function makeMessageDb(): Database.Database {
+    const db = new Database(':memory:')
+    db.exec(`
+      CREATE TABLE messages (
+        id TEXT PRIMARY KEY,
+        conversation_id TEXT,
+        role TEXT,
+        agent_id TEXT,
+        parts TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+    `)
+    return db
+  }
+
+  function insertMessage(db: Database.Database, id: string, parts: unknown[], status: string): void {
+    db.prepare(
+      'INSERT INTO messages (id, parts, status, created_at) VALUES (?, ?, ?, ?)',
+    ).run(id, JSON.stringify(parts), status, 1)
+  }
+
+  it('merges text parts into one row per message when backfilling', () => {
+    const db = makeMessageDb()
+    try {
+      insertMessage(
+        db,
+        'm1',
+        [
+          { type: 'text', content: 'hello world' },
+          { type: 'text', content: 'second part' },
+          { type: 'tool_use', content: 'ignored' },
+        ],
+        'complete',
+      )
+
+      runMessageSearchMigration(db)
+
+      const rows = db.prepare('SELECT content FROM messages_fts').all() as { content: string }[]
+      expect(rows).toEqual([{ content: 'hello world second part' }])
+    } finally {
+      db.close()
+    }
+  })
+
+  it('does not duplicate the backfill when the migration runs again', () => {
+    const db = makeMessageDb()
+    try {
+      insertMessage(db, 'm1', [{ type: 'text', content: 'hello' }], 'complete')
+
+      runMessageSearchMigration(db)
+      runMessageSearchMigration(db)
+
+      const count = db.prepare('SELECT count(*) AS n FROM messages_fts').get() as { n: number }
+      expect(count.n).toBe(1)
     } finally {
       db.close()
     }
