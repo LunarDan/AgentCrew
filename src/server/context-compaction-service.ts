@@ -12,6 +12,7 @@ import type {
   MessageRow,
 } from '@/db/schema'
 import { clearClaudeCodeSession, clearCodexSession } from '@/server/adapters/session-store'
+import { eventBus } from '@/server/event-bus'
 import { newContextSummaryId, newMessageId } from '@/server/ids'
 import {
   getEffectiveAnthropicBaseUrl,
@@ -122,8 +123,6 @@ export async function compactConversation(
     modelId: choice.modelId,
     createdAt: now,
   }
-  await db.insert(schema.contextSummaries).values(summaryInsert)
-
   const systemMessageInsert: MessageInsert = {
     id: newMessageId(),
     conversationId,
@@ -142,11 +141,34 @@ export async function compactConversation(
     usage: null,
     createdAt: now,
   }
-  await db.insert(schema.messages).values(systemMessageInsert)
-  await db
-    .update(schema.conversations)
-    .set({ updatedAt: now })
-    .where(eq(schema.conversations.id, conversationId))
+  // 三条写入必须同生共死：只写进 summary 而没写系统消息，历史边界会静默前移
+  db.transaction((tx) => {
+    // 并发 compact 请求：后到者基于同一份 latest 生成摘要，不能在无提示下覆盖
+    const currentLatest = tx
+      .select({ id: schema.contextSummaries.id })
+      .from(schema.contextSummaries)
+      .where(eq(schema.contextSummaries.conversationId, conversationId))
+      .orderBy(desc(schema.contextSummaries.createdAt))
+      .limit(1)
+      .get()
+    if ((currentLatest?.id ?? null) !== (latest?.id ?? null)) {
+      throw new Error('Compaction is already in progress for this conversation')
+    }
+    tx.insert(schema.contextSummaries).values(summaryInsert).run()
+    tx.insert(schema.messages).values(systemMessageInsert).run()
+    tx.update(schema.conversations)
+      .set({ updatedAt: now })
+      .where(eq(schema.conversations.id, conversationId))
+      .run()
+  })
+
+  // 其它已连接客户端（桌面 / 移动）也要看到「已压缩」提示
+  eventBus.publish({
+    type: 'message.added',
+    conversationId,
+    timestamp: now,
+    message: systemMessageInsert as MessageRow,
+  })
 
   clearClaudeCodeSession(conversationId)
   clearCodexSession(conversationId)
