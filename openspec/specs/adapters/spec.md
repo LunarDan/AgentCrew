@@ -24,6 +24,20 @@ CustomAgentAdapter SHALL call OpenAI Chat Completions-compatible endpoints for D
 - **THEN** the adapter emits thinking parts
 - **AND** includes reasoning content in the assistant message for subsequent turns.
 
+### Requirement: CustomAgentAdapter SHALL support Anthropic Messages API
+
+When the selected provider is `anthropic`, CustomAgentAdapter MUST use `@anthropic-ai/sdk` with the Messages API instead of the OpenAI client. It MUST keep the same AgentHub tool loop semantics: built-in and external MCP tools are offered with JSON input schemas, tool results are returned as `tool_result` blocks with `tool_use_id`, and the loop continues until the model stops requesting tools. Conversation history MUST be converted from the OpenAI chat-message shape to Anthropic user/assistant messages without tool messages.
+
+#### Scenario: Anthropic model calls an AgentHub tool
+- **WHEN** an Anthropic-backed custom agent calls a registered tool
+- **THEN** the adapter emits `tool.call` and `tool.result` events
+- **AND** sends the result back as a `tool_result` block in the next turn.
+
+#### Scenario: Streaming text and usage
+- **WHEN** Anthropic streams a text response
+- **THEN** the adapter emits text part start/delta/end events
+- **AND** reports input/output tokens plus cache read/creation tokens in usage events.
+
 ### Requirement: ClaudeCodeAdapter SHALL bridge SDK tool approvals
 
 ClaudeCodeAdapter MUST use `@anthropic-ai/claude-agent-sdk` and route supported tool approvals through AgentHub path checks, pending writes, and command blacklist policy. It MUST start the SDK so that no filesystem settings source in the workspace is loaded, because a workspace `permissions.allow` entry is evaluated by the CLI before the approval callback and would bypass this bridge entirely. It MUST identify shell tool calls from the run's own reported tool table and a known-name set rather than assuming one platform's literal name, so the blacklist and critical-command approval policy apply wherever the SDK exposes a shell.
