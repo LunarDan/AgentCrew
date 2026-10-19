@@ -75,7 +75,13 @@ export async function GET(req: NextRequest) {
       send({ type: 'connected', timestamp: Date.now() })
 
       handles.unsubscribe = eventBus.subscribe((event) => {
-        send(event)
+        // 手机只需要「有事发生」来触发快照刷新。原始事件带 host 绝对路径、文件内容、
+        // 工具参数与结果，不能整包发给局域网设备（数据最小化）。
+        send({
+          type: event.type,
+          conversationId: event.conversationId,
+          timestamp: event.timestamp,
+        })
       })
 
       let revalidating = false
