@@ -11,8 +11,25 @@ export function rejectCrossOriginWrite(req: NextRequest): NextResponse | null {
     return NextResponse.json({ error: 'Cross-origin request rejected' }, { status: 403 })
   }
   const origin = req.headers.get('origin')
-  if (origin && origin !== req.nextUrl.origin) {
+  if (origin && !isSameOrigin(origin, req.nextUrl)) {
     return NextResponse.json({ error: 'Cross-origin request rejected' }, { status: 403 })
   }
   return null
+}
+
+function isSameOrigin(origin: string, expected: URL): boolean {
+  let parsed: URL
+  try {
+    parsed = new URL(origin)
+  } catch {
+    return false
+  }
+  if (parsed.protocol !== expected.protocol || parsed.port !== expected.port) return false
+  // 同一台机器的 localhost / 127.0.0.1 / [::1] 是同一来源；Next 也会把 loopback 归一成 localhost
+  if (parsed.hostname === expected.hostname) return true
+  return isLoopbackHost(parsed.hostname) && isLoopbackHost(expected.hostname)
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]' || hostname === '::1'
 }
