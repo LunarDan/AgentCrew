@@ -108,11 +108,17 @@ export function FileLibraryDialog({
   }
 
   const confirmDelete = async () => {
-    if (!deleteTargetId) return
+    const target = attachments.find((a) => a.id === deleteTargetId)
+    if (!target) return
+    const targetId = target.id
     setDeleting(true)
     try {
-      await deleteAttachmentAPI(deleteTargetId)
-      setAttachments((prev) => prev.filter((a) => a.id !== deleteTargetId))
+      await deleteAttachmentAPI(targetId)
+      // 已删除的附件必须同时从输入框的待发送列表移除：否则每次发送都会被服务端拒绝
+      removePendingAttachment(target.conversationId, targetId)
+      if (conversationIdRef.current === conversationId) {
+        setAttachments((prev) => prev.filter((a) => a.id !== targetId))
+      }
       setDeleteTargetId(null)
     } catch (err) {
       console.error('[FileLibraryDialog] delete', err)
