@@ -6,7 +6,7 @@ import {
   type McpServerConfigForProcessTransport,
   type Options,
 } from '@anthropic-ai/claude-agent-sdk'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { statSync } from 'node:fs'
 import { z } from 'zod'
 
@@ -36,6 +36,7 @@ import type {
 } from '@/shared/types'
 
 import { buildChildProcessEnv, createAdapterEvent } from './adapter-utils'
+import { clampToolResult } from './custom-mcp-tools'
 import { composeSystemPrompt, projectMemoryPath, readProjectMemory } from './project-memory'
 import { sdkIsolationOptions } from './sdk-isolation'
 import { adapterSessionKey, claudeCodeSessions } from './session-store'
@@ -66,6 +67,16 @@ import type { AdapterInput, AgentPlatformAdapter } from './types'
  * sessions)，所以即使我们丢了 id，SDK 数据还在；只是接下来的会话变成新 session。
  */
 const DEFAULT_MODEL = 'claude-opus-4-7'
+/** SDK 各写盘工具的目标字段不同：NotebookEdit 用 notebook_path，其余是 file_path / path。 */
+function toolInputPath(toolInput: Record<string, unknown> | undefined): string | null {
+  if (!toolInput) return null
+  for (const key of ['file_path', 'path', 'notebook_path']) {
+    const value = toolInput[key]
+    if (typeof value === 'string' && value.trim()) return value
+  }
+  return null
+}
+
 /** SDK 内置工具中会改文件的，需要走审批 */
 const FS_WRITE_TOOLS = new Set(['Write', 'Edit'])
 /** 需要路径沙箱检查的工具（Bash 单独走黑名单 + cwd 限定） */
@@ -601,26 +612,29 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
                 type: 'tool.result' as const,
                 messageId,
                 callId,
-                result: block.content ?? null,
+                // 外部 MCP server 可能返回任意大的文本 / base64；不限长会撑爆消息行、SSE 与后续上下文
+                result: clampToolResult(block.content ?? null),
                 isError: !!block.is_error,
               }) as StreamEvent
 
               // 检测 agenthub MCP write_artifact 的成功结果 → 取出 artifact 并 yield artifact.create
               // 让 AgentRunner.consumeStream 给当前 message 注入 artifact_ref part（产物卡片）
               const toolName = toolNameByUseId.get(block.tool_use_id) ?? ''
-              if (!block.is_error && FS_WRITE_TOOLS.has(toolName)) {
+              if (
+                !block.is_error &&
+                (FS_WRITE_TOOLS.has(toolName) || toolName === 'NotebookEdit')
+              ) {
                 recordClaudeSdkFileWrite(input.runId, workspace, toolInputByUseId.get(block.tool_use_id))
               }
 
-              if (
-                !block.is_error &&
-                (toolName === 'mcp__agenthub__write_artifact' ||
-                  toolName.endsWith('__write_artifact'))
-              ) {
+              if (!block.is_error && toolName === 'mcp__agenthub__write_artifact') {
                 const artifactId = parseArtifactIdFromMcpResult(block.content)
                 if (artifactId) {
                   const row = await db.query.artifacts.findFirst({
-                    where: eq(schema.artifacts.id, artifactId),
+                    where: and(
+                      eq(schema.artifacts.id, artifactId),
+                      eq(schema.artifacts.conversationId, input.conversationId),
+                    ),
                   })
                   if (row) {
                     yield baseEvent({
@@ -644,9 +658,7 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
               if (
                 !block.is_error &&
                 (toolName === 'mcp__agenthub__deploy_artifact' ||
-                  toolName.endsWith('__deploy_artifact') ||
-                  toolName === 'mcp__agenthub__deploy_workspace' ||
-                  toolName.endsWith('__deploy_workspace'))
+                  toolName === 'mcp__agenthub__deploy_workspace')
               ) {
                 const deployment = parseDeploymentFromMcpResult(block.content)
                 if (deployment) {
@@ -760,7 +772,7 @@ function recordClaudeSdkFileWrite(
   workspace: WorkspaceRow,
   toolInput: Record<string, unknown> | undefined,
 ): void {
-  const target = (toolInput?.file_path as string | undefined) ?? (toolInput?.path as string | undefined)
+  const target = toolInputPath(toolInput)
   if (!target) return
 
   let absolutePath: string
@@ -927,8 +939,7 @@ async function bridgePermission(
 
   // 1. 路径沙箱检查（Read/Write/Edit/NotebookEdit）
   if (PATH_TOOLS.has(toolName)) {
-    const target =
-      (toolInput.file_path as string | undefined) ?? (toolInput.path as string | undefined)
+    const target = toolInputPath(toolInput)
     if (target) {
       try {
         assertPathWithinWorkspace(ctx.workspace, target)
@@ -968,7 +979,7 @@ async function bridgePermission(
   // 3. fs_write 审批 (Write / Edit)
   if (FS_WRITE_TOOLS.has(toolName)) {
     if (ctx.approvalMode === 'auto') return allow()
-    const target = (toolInput.file_path as string) ?? (toolInput.path as string)
+    const target = toolInputPath(toolInput)
     if (!target) return deny('Missing file_path/path')
 
     const oldContent = readIfExists(ctx.workspace, target)
