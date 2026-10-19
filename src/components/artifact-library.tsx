@@ -1,7 +1,7 @@
 'use client'
 
 import { FileText, FolderGit2, Image as ImageIcon, Layers, Loader2, Presentation, Search, Trash2 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   Dialog,
@@ -102,6 +102,7 @@ export function ArtifactLibrary({
     })
   }, [grouped, query])
 
+  const previewRequestRef = useRef(0)
   const openPreview = async (id: string) => {
     if (previewArtifactId === id) return
     if (artifactsById[id]) {
@@ -109,15 +110,18 @@ export function ArtifactLibrary({
       return
     }
 
+    const requestId = ++previewRequestRef.current
     setPendingPreviewId(id)
     try {
       const full = await fetchArtifact(id)
+      // 快速连点多个版本时，只让最后一次请求生效
+      if (previewRequestRef.current !== requestId) return
       upsertArtifact(full)
       openArtifactPreview(id)
     } catch (err) {
       console.error('[ArtifactLibrary] preview load failed', err)
     } finally {
-      setPendingPreviewId(null)
+      if (previewRequestRef.current === requestId) setPendingPreviewId(null)
     }
   }
 

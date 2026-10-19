@@ -28,7 +28,7 @@ import {
   X,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -66,9 +66,11 @@ export function FileExplorerPanel() {
   // 树状态：以 relPath 为 key 记录该节点是否展开 + 已加载条目
   const [nodes, setNodes] = useState<Record<string, DirNode>>({})
   const [loadingRoot, setLoadingRoot] = useState(false)
+  // 切会话 / 关闭面板 / 手动刷新都会换代，旧请求的响应直接丢弃
+  const generationRef = useRef(0)
 
   const loadDir = useCallback(
-    async (relPath: string) => {
+    async (relPath: string, gen = generationRef.current) => {
       if (!conv) return
       setNodes((prev) => ({
         ...prev,
@@ -81,6 +83,7 @@ export function FileExplorerPanel() {
       }))
       try {
         const result = await workspaceListDir(conv.id, relPath)
+        if (gen !== generationRef.current) return
         setNodes((prev) => ({
           ...prev,
           [relPath]: {
@@ -91,6 +94,7 @@ export function FileExplorerPanel() {
           },
         }))
       } catch (err) {
+        if (gen !== generationRef.current) return
         setNodes((prev) => ({
           ...prev,
           [relPath]: {
@@ -119,17 +123,25 @@ export function FileExplorerPanel() {
 
   const refresh = useCallback(() => {
     if (!conv) return
+    generationRef.current += 1
+    const gen = generationRef.current
     setNodes({})
     setLoadingRoot(true)
-    void loadDir('').finally(() => setLoadingRoot(false))
+    void loadDir('', gen).finally(() => {
+      if (gen === generationRef.current) setLoadingRoot(false)
+    })
   }, [conv, loadDir])
 
   // 切换会话时清空 + 重新加载根；首次打开时同样加载
   useEffect(() => {
+    generationRef.current += 1
+    const gen = generationRef.current
     if (!open || !conv) return
     setNodes({})
     setLoadingRoot(true)
-    void loadDir('').finally(() => setLoadingRoot(false))
+    void loadDir('', gen).finally(() => {
+      if (gen === generationRef.current) setLoadingRoot(false)
+    })
   }, [open, conv, loadDir])
 
   if (!open || !conv) return null

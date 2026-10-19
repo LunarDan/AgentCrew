@@ -46,6 +46,11 @@ export function FileLibraryDialog({
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const conversationIdRef = useRef(conversationId)
+
+  useEffect(() => {
+    conversationIdRef.current = conversationId
+  }, [conversationId])
 
   const pending = usePendingAttachments(conversationId)
   const pendingIds = new Set(pending.map((a) => a.id))
@@ -59,11 +64,20 @@ export function FileLibraryDialog({
 
   useEffect(() => {
     if (!open) return
+    let cancelled = false
+    setAttachments([])
     setLoading(true)
     fetchAttachments(conversationId)
-      .then(setAttachments)
+      .then((list) => {
+        if (!cancelled) setAttachments(list)
+      })
       .catch((err) => console.error('[FileLibraryDialog] load', err))
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [open, conversationId])
 
   const images = attachments.filter((a) => a.kind === 'image')
@@ -76,7 +90,10 @@ export function FileLibraryDialog({
       Array.from(fileList).map(async (f) => {
         try {
           const att = await uploadAttachmentAPI(conversationId, f)
-          setAttachments((prev) => [att, ...prev])
+          // 上传过程中切了会话：不要把旧会话的附件塞进新列表
+          if (conversationIdRef.current === conversationId) {
+            setAttachments((prev) => [att, ...prev])
+          }
         } catch (err) {
           console.error('[FileLibraryDialog] upload', err)
         } finally {

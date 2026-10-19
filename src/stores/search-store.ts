@@ -34,6 +34,7 @@ interface SearchState {
 }
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
+let requestSeq = 0
 
 export const useSearchStore = create<SearchState>()(
   immer((set, get) => ({
@@ -59,6 +60,7 @@ export const useSearchStore = create<SearchState>()(
 
     runSearch: async () => {
       const q = get().query.trim()
+      const seq = ++requestSeq
       if (q.length < 2) {
         set((s) => { s.hits = []; s.total = 0; s.loading = false; s.error = null })
         return
@@ -67,8 +69,11 @@ export const useSearchStore = create<SearchState>()(
       set((s) => { s.loading = true; s.error = null })
       try {
         const r = await searchMessagesApi(q, { fallback })
+        // 输入已变化 / 有更新的请求：丢弃这次结果，避免旧查询覆盖新查询
+        if (seq !== requestSeq) return
         set((s) => { s.hits = r.hits; s.total = r.total; s.loading = false })
       } catch (err) {
+        if (seq !== requestSeq) return
         set((s) => {
           s.hits = []
           s.total = 0
