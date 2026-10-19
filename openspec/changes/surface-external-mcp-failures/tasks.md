@@ -29,7 +29,9 @@
 - [x] 3.6 `src/server/agent-runner.ts` — `buildAdapterInput` 返回 `{ input, mcpWarnings }`；`appendMcpNotice`；`consumeStream` 处理事件；三个调用点接入。
 - [x] 3.7 `pnpm typecheck`、`pnpm lint`、`pnpm test`（37 个测试文件、288 通过 / 1 跳过）。
 
-## 4. Live verification（动手前问）
+## 4. Live verification（暂缓，2026-10-19 决定）
+
+> 用户选择「暂不启动 dev server，先推送」。以下五格**均未执行**；实现依赖的 SDK 行为（init 的 `mcp_servers` 状态取值、失败 server 是否被整个省略）目前只有 `.d.ts` 依据。恢复验证时从这里开始。
 
 - [ ] 4.1 坏 server 格：`command` 不存在的 stdio server，启用并在 claude-code agent 上勾选。预期 run `complete`，出现 `[MCP]` 系统消息点名该 server，且其工具不出现。**同时记录 SDK init 实际给出的 status 值**（若是「整个省略」，按 proposal 的兜底扩 `not-listed`）。
 - [ ] 4.2 健康 server 格：最小 stdio echo server。预期**没有** `[MCP]` 消息（无假阳性）。
