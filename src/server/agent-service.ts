@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 
 import { db, schema } from '@/db/client'
 import { newAgentId } from '@/server/ids'
@@ -89,10 +89,31 @@ export async function deleteCustomAgent(agentId: string): Promise<void> {
   if (!agent) throw new Error(`Agent not found: ${agentId}`)
   if (agent.isBuiltin) throw new Error('Built-in agents cannot be deleted')
 
-  const deleted = await db
-    .delete(schema.agents)
-    .where(and(eq(schema.agents.id, agentId), eq(schema.agents.isBuiltin, false)))
-    .returning({ id: schema.agents.id })
+  const deleted = db.transaction((tx) => {
+    // 会话成员列表是 JSON 数组，没有 FK；删 agent 前先摘掉引用，避免群聊残留死 id
+    const affected = tx
+      .select({ id: schema.conversations.id, agentIds: schema.conversations.agentIds })
+      .from(schema.conversations)
+      .where(
+        sql`exists (select 1 from json_each(${schema.conversations.agentIds}) where json_each.value = ${agentId})`,
+      )
+      .all()
+
+    for (const conv of affected) {
+      const nextIds = conv.agentIds.filter((id) => id !== agentId)
+      if (nextIds.length === conv.agentIds.length) continue
+      tx.update(schema.conversations)
+        .set({ agentIds: nextIds })
+        .where(eq(schema.conversations.id, conv.id))
+        .run()
+    }
+
+    return tx
+      .delete(schema.agents)
+      .where(and(eq(schema.agents.id, agentId), eq(schema.agents.isBuiltin, false)))
+      .returning({ id: schema.agents.id })
+      .all()
+  })
 
   if (deleted.length === 0) {
     throw new Error(`Failed to delete agent: ${agentId}`)
