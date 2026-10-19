@@ -104,13 +104,18 @@ export function ArtifactLibrary({
 
   const previewRequestRef = useRef(0)
   const openPreview = async (id: string) => {
-    if (previewArtifactId === id) return
+    // 每次点击都作废之前未完成的请求，包括命中缓存的即时打开
+    const requestId = ++previewRequestRef.current
+    if (previewArtifactId === id) {
+      setPendingPreviewId(null)
+      return
+    }
     if (artifactsById[id]) {
+      setPendingPreviewId(null)
       openArtifactPreview(id)
       return
     }
 
-    const requestId = ++previewRequestRef.current
     setPendingPreviewId(id)
     try {
       const full = await fetchArtifact(id)
