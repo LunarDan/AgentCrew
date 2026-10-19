@@ -168,7 +168,8 @@ function AskUserBody({
     setBusy(true)
     setError(null)
     try {
-      // 把 FREE_OTHER 这个 sentinel 换成 "其他"（label），freeformNote 保留
+      // FREE_OTHER 只是 UI 哨兵，不属于问题选项；服务端会校验 label 必须来自 options。
+      // 自由填写的内容由 freeformNote 带给 agent。
       const final: Record<string, AskUserAnswer> = {}
       for (const q of questions) {
         const a = draft[q.question]
@@ -177,7 +178,7 @@ function AskUserBody({
           continue
         }
         final[q.question] = {
-          selectedLabels: a.selectedLabels.map((l) => (l === FREE_OTHER ? '其他' : l)),
+          selectedLabels: a.selectedLabels.filter((l) => l !== FREE_OTHER),
           freeformNote: a.freeformNote,
         }
       }
