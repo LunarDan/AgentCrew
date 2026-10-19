@@ -144,12 +144,19 @@ export function createMobileApiClient(config: ConnectionConfig): MobileApiClient
 }
 
 function normalizeBaseUrl(value: string): string {
-  return value.trim().replace(/\/+$/, '')
+  return withScheme(value).replace(/\/+$/, '')
+}
+
+/** 用户常只填 `192.168.1.5:60646`；没有 scheme 时 fetch 会当成相对路径打到 WebView 自身。 */
+function withScheme(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`
 }
 
 function isLoopbackUrl(value: string): boolean {
   try {
-    const url = new URL(value)
+    const url = new URL(withScheme(value))
     return url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '::1'
   } catch {
     return false

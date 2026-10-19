@@ -37,7 +37,7 @@ export function SettingsScreen({
           <span>桌面端地址</span>
           <input
             value={connection.baseUrl}
-            placeholder="http://100.x.y.z:3000"
+            placeholder="http://192.168.x.y:60646"
             inputMode="url"
             autoCapitalize="none"
             onChange={(e) => onChange({ ...connection, baseUrl: e.target.value })}
@@ -100,7 +100,9 @@ export function SettingsScreen({
 
 function isLoopbackUrl(value: string): boolean {
   try {
-    const url = new URL(value)
+    const trimmed = value.trim()
+    const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`
+    const url = new URL(withScheme)
     return url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '::1'
   } catch {
     return false
