@@ -721,7 +721,10 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
       signal.removeEventListener('abort', onAbort)
     }
 
-    yield baseEvent({ type: 'message.end' as const, messageId }) as StreamEvent
+    // 主动中止时不要把消息收尾：留给 runner 按 aborted 标记，而不是留下一条 complete 消息。
+    if (!signal.aborted) {
+      yield baseEvent({ type: 'message.end' as const, messageId }) as StreamEvent
+    }
   }
 }
 

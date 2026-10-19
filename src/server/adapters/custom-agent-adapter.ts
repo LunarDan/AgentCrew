@@ -186,11 +186,10 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
           { signal },
         )
       } catch (err) {
-        yield baseEvent(input, { type: 'message.end', messageId })
+        // 请求没有建立起来：不要发出 message.end，否则会在会话里留下一条空的 complete 消息。
         throw err
       }
 
-      let finishReason: string | null = null
       // 本 turn 单条 message 的 usage（per-message）；与 runUsage 同时维护
       const msgUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }
 
@@ -272,7 +271,6 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
           }
         }
 
-        if (choice.finish_reason) finishReason = choice.finish_reason
       }
 
       if (thinkingPartIndex >= 0) {
@@ -303,7 +301,9 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
       }
       messages.push(assistantMsg as ChatMessage)
 
-      if (toolCalls.length === 0 || finishReason === 'stop') {
+      // 只按「有没有工具调用」判断结束：有些 provider 在带 tool_calls 时也会给 finish_reason = 'stop'，
+      // 不能因此丢掉已经累积的工具调用。
+      if (toolCalls.length === 0) {
         if (msgUsage.inputTokens > 0 || msgUsage.outputTokens > 0) {
           yield baseEvent(input, { type: 'message.usage', messageId, usage: msgUsage })
         }
@@ -611,7 +611,8 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
       runUsage.outputTokens += msgUsage.outputTokens
       runUsage.cacheReadTokens += msgUsage.cacheReadTokens
       runUsage.cacheCreationTokens += cacheCreationTokens
-      runUsage.lastInputTokens = msgUsage.inputTokens
+      runUsage.lastInputTokens =
+        msgUsage.inputTokens + msgUsage.cacheReadTokens + cacheCreationTokens
 
       const assistantContent: Anthropic.ContentBlockParam[] = []
       for (const block of textBlocks.values()) {
@@ -641,9 +642,9 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
       if (msgUsage.inputTokens > 0 || msgUsage.outputTokens > 0) {
         yield baseEvent(input, { type: 'message.usage', messageId, usage: msgUsage })
       }
-      yield baseEvent(input, { type: 'message.end', messageId })
 
       if (toolUses.length === 0 || stopReason !== 'tool_use') {
+        yield baseEvent(input, { type: 'message.end', messageId })
         yield baseEvent(input, {
           type: 'run.usage',
           runId: input.runId,
@@ -652,6 +653,8 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
         return
       }
 
+      // tool.call / tool.result 属于本条 assistant 消息：必须在 message.end 之前发出，
+      // 否则 runner 会先清掉 currentMessageId，后续 part 落不到已结束的消息上。
       const toolResults: Anthropic.ToolResultBlockParam[] = []
       for (const use of toolUses) {
         const outcome = yield* this.runToolCall({
@@ -673,6 +676,7 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
         })
       }
       messages.push({ role: 'user', content: toolResults })
+      yield baseEvent(input, { type: 'message.end', messageId })
     }
 
     yield baseEvent(input, {

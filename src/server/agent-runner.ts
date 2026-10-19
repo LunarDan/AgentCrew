@@ -15,6 +15,7 @@ import type {
   DispatchTaskEndStatus,
   MessagePart,
   ResolvedMcpServer,
+  RunUsageEvent,
   StreamEvent,
   TaskResultReport,
 } from '@/shared/types'
@@ -1584,7 +1585,9 @@ async function consumeStream(
     }
 
     if (event.type === 'deploy.status') {
-      const parts = partsBuffer.get(event.messageId) ?? []
+      // 不能以 `[]` 为基底写回：消息可能已结束（缓冲被清），那会把已落库的 parts 覆盖掉。
+      const parts = await getWritableParts(event.messageId, partsBuffer)
+      if (!parts) continue
       const partIndex = parts.length
       const deployPart: MessagePart = { type: 'deploy_status', deployment: event.deployment }
       parts.push(deployPart)
@@ -1653,6 +1656,20 @@ function readArtifactHandoffResult(result: unknown): { artifactId: string; outpu
   return { artifactId: value.artifactId, outputKey: value.outputKey }
 }
 
+function mergeRunUsage(previous: RunUsageEvent | null, next: RunUsageEvent): RunUsageEvent {
+  if (!previous) return next
+  return {
+    inputTokens: previous.inputTokens + next.inputTokens,
+    outputTokens: previous.outputTokens + next.outputTokens,
+    cacheCreationTokens: previous.cacheCreationTokens + next.cacheCreationTokens,
+    cacheReadTokens: previous.cacheReadTokens + next.cacheReadTokens,
+    ...(next.lastInputTokens || previous.lastInputTokens
+      ? { lastInputTokens: next.lastInputTokens || previous.lastInputTokens }
+      : {}),
+    ...(next.model || previous.model ? { model: next.model ?? previous.model } : {}),
+  }
+}
+
 async function persistEvent(
   event: StreamEvent,
   partsBuffer: Map<string, MessagePart[]>,
@@ -1663,11 +1680,14 @@ async function persistEvent(
 ): Promise<void> {
   switch (event.type) {
     case 'run.usage': {
-      // adapter 报告本次 run 的 token 用量；落到 agent_runs.usage（同 runId）。
-      // 多次 emit 时取最新（adapter 应该只 emit 一次，但 race 保护）。
+      // 同一个 runId 可能经历多个阶段（plan / aggregate / 子 run 复用），adapter 各自
+      // 只报告自己这段的用量：累加而不是覆盖，否则后续阶段会抹掉前面阶段的 token。
+      const row = await db.query.agentRuns.findFirst({
+        where: eq(schema.agentRuns.id, event.runId),
+      })
       await db
         .update(schema.agentRuns)
-        .set({ usage: event.usage })
+        .set({ usage: mergeRunUsage(row?.usage ?? null, event.usage) })
         .where(eq(schema.agentRuns.id, event.runId))
       return
     }
