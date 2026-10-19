@@ -779,6 +779,12 @@ export const useAppStore = create<AppState>()(
             }
             const replyId = s.replyTargetByConv[event.conversationId]
             if (replyId && toRemove.has(replyId)) delete s.replyTargetByConv[event.conversationId]
+            // 被删的消息不能继续占 pin / bookmark 位置（服务端也在事务里清理，这里保证本地即时一致）
+            const conv = s.conversations[event.conversationId]
+            if (conv) {
+              conv.pinnedMessageIds = conv.pinnedMessageIds.filter((id) => !toRemove.has(id))
+              conv.bookmarkedMessageIds = conv.bookmarkedMessageIds.filter((id) => !toRemove.has(id))
+            }
             for (const id of event.artifactIds) {
               delete s.artifacts[id]
               if (s.previewArtifactId === id) s.previewArtifactId = null

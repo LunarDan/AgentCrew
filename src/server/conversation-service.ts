@@ -16,7 +16,7 @@ import {
   parseDeployCommand,
   type DeployCommandResult,
 } from './deploy-command-service'
-import { deleteDeploymentsForArtifact } from './deployment-service'
+import { deleteDeploymentsForArtifact, deleteDeploymentsForConversation } from './deployment-service'
 import { eventBus } from './event-bus'
 import {
   newConversationId,
@@ -308,6 +308,13 @@ export async function deleteConversation(conversationId: string): Promise<void> 
     }
   }
 
+  // workspace 部署没有 artifact 行，按会话归属再清一遍
+  try {
+    deleteDeploymentsForConversation(conversationId)
+  } catch (err) {
+    console.warn(`[deleteConversation] failed to remove workspace deployments`, err)
+  }
+
   // 物理删 workspace 目录（不影响 DB 事务，容错）
   if (workspace) {
     try {
@@ -448,30 +455,38 @@ export async function toggleBookmarkedMessage(
   conversationId: string,
   messageId: string,
 ): Promise<{ bookmarkedMessageIds: string[]; bookmarked: boolean }> {
-  const conv = await db.query.conversations.findFirst({
-    where: eq(schema.conversations.id, conversationId),
+  // 读-改-写必须在同一个同步事务里：桌面与移动端并发 toggle 时，后写者不能覆盖先写者。
+  return db.transaction((tx) => {
+    const conv = tx
+      .select({ bookmarked: schema.conversations.bookmarkedMessageIds })
+      .from(schema.conversations)
+      .where(eq(schema.conversations.id, conversationId))
+      .get()
+    if (!conv) throw new Error(`Conversation not found: ${conversationId}`)
+
+    const msg = tx
+      .select({ id: schema.messages.id })
+      .from(schema.messages)
+      .where(
+        and(
+          eq(schema.messages.id, messageId),
+          eq(schema.messages.conversationId, conversationId),
+        ),
+      )
+      .get()
+    if (!msg) throw new Error(`Message not found in conversation: ${messageId}`)
+
+    const current = liveMessageIds(tx, conversationId, conv.bookmarked)
+    const isBookmarked = current.includes(messageId)
+    const next = isBookmarked ? current.filter((id) => id !== messageId) : [...current, messageId]
+
+    tx.update(schema.conversations)
+      .set({ bookmarkedMessageIds: next, updatedAt: Date.now() })
+      .where(eq(schema.conversations.id, conversationId))
+      .run()
+
+    return { bookmarkedMessageIds: next, bookmarked: !isBookmarked }
   })
-  if (!conv) throw new Error(`Conversation not found: ${conversationId}`)
-
-  // 校验 message 属于该会话
-  const msg = await db.query.messages.findFirst({
-    where: and(
-      eq(schema.messages.id, messageId),
-      eq(schema.messages.conversationId, conversationId),
-    ),
-  })
-  if (!msg) throw new Error(`Message not found in conversation: ${messageId}`)
-
-  const current = conv.bookmarkedMessageIds ?? []
-  const isBookmarked = current.includes(messageId)
-  const next = isBookmarked ? current.filter((id) => id !== messageId) : [...current, messageId]
-
-  await db
-    .update(schema.conversations)
-    .set({ bookmarkedMessageIds: next, updatedAt: Date.now() })
-    .where(eq(schema.conversations.id, conversationId))
-
-  return { bookmarkedMessageIds: next, bookmarked: !isBookmarked }
 }
 
 // ─── Pin 消息（注入 LLM 长期上下文）────────────────────────
@@ -487,32 +502,62 @@ export async function togglePinnedMessage(
   conversationId: string,
   messageId: string,
 ): Promise<{ pinnedMessageIds: string[]; pinned: boolean }> {
-  const conv = await db.query.conversations.findFirst({
-    where: eq(schema.conversations.id, conversationId),
+  return db.transaction((tx) => {
+    const conv = tx
+      .select({ pinned: schema.conversations.pinnedMessageIds })
+      .from(schema.conversations)
+      .where(eq(schema.conversations.id, conversationId))
+      .get()
+    if (!conv) throw new Error(`Conversation not found: ${conversationId}`)
+
+    const msg = tx
+      .select({ id: schema.messages.id })
+      .from(schema.messages)
+      .where(
+        and(
+          eq(schema.messages.id, messageId),
+          eq(schema.messages.conversationId, conversationId),
+        ),
+      )
+      .get()
+    if (!msg) throw new Error(`Message not found in conversation: ${messageId}`)
+
+    // 只按仍然存在的消息计数：历史上被删 / 撤回的消息不能继续占 pin 名额。
+    const current = liveMessageIds(tx, conversationId, conv.pinned)
+    const isPinned = current.includes(messageId)
+    if (!isPinned && current.length >= PIN_LIMIT_PER_CONVERSATION) {
+      throw new Error('PIN_LIMIT_EXCEEDED')
+    }
+    const next = isPinned ? current.filter((id) => id !== messageId) : [...current, messageId]
+
+    tx.update(schema.conversations)
+      .set({ pinnedMessageIds: next })
+      .where(eq(schema.conversations.id, conversationId))
+      .run()
+
+    return { pinnedMessageIds: next, pinned: !isPinned }
   })
-  if (!conv) throw new Error(`Conversation not found: ${conversationId}`)
+}
 
-  const msg = await db.query.messages.findFirst({
-    where: and(
-      eq(schema.messages.id, messageId),
-      eq(schema.messages.conversationId, conversationId),
-    ),
-  })
-  if (!msg) throw new Error(`Message not found in conversation: ${messageId}`)
-
-  const current = conv.pinnedMessageIds ?? []
-  const isPinned = current.includes(messageId)
-  if (!isPinned && current.length >= PIN_LIMIT_PER_CONVERSATION) {
-    throw new Error('PIN_LIMIT_EXCEEDED')
-  }
-  const next = isPinned ? current.filter((id) => id !== messageId) : [...current, messageId]
-
-  await db
-    .update(schema.conversations)
-    .set({ pinnedMessageIds: next })
-    .where(eq(schema.conversations.id, conversationId))
-
-  return { pinnedMessageIds: next, pinned: !isPinned }
+/** 过滤掉已经不在该会话里的消息 id（撤回 / 重新生成 / 清空历史会留下死引用）。 */
+function liveMessageIds(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  conversationId: string,
+  ids: string[],
+): string[] {
+  if (ids.length === 0) return []
+  const rows = tx
+    .select({ id: schema.messages.id })
+    .from(schema.messages)
+    .where(
+      and(
+        eq(schema.messages.conversationId, conversationId),
+        inArray(schema.messages.id, ids),
+      ),
+    )
+    .all()
+  const alive = new Set(rows.map((row) => row.id))
+  return ids.filter((id) => alive.has(id))
 }
 
 // ─── 添加 Agent 到现有会话 ──────────────────────────────
@@ -889,6 +934,27 @@ export async function withdrawLatestUserMessage(
     if (runIds.length > 0) {
       tx.delete(schema.agentRuns).where(inArray(schema.agentRuns.id, runIds)).run()
     }
+    // 被删的消息不能再占 pinned / bookmarked 的名额（pin 上限按数组长度算）。
+    if (messageIds.length > 0) {
+      const convRow = tx
+        .select({
+          pinned: schema.conversations.pinnedMessageIds,
+          bookmarked: schema.conversations.bookmarkedMessageIds,
+        })
+        .from(schema.conversations)
+        .where(eq(schema.conversations.id, conversationId))
+        .get()
+      if (convRow) {
+        const deleted = new Set(messageIds)
+        tx.update(schema.conversations)
+          .set({
+            pinnedMessageIds: convRow.pinned.filter((id) => !deleted.has(id)),
+            bookmarkedMessageIds: convRow.bookmarked.filter((id) => !deleted.has(id)),
+          })
+          .where(eq(schema.conversations.id, conversationId))
+          .run()
+      }
+    }
   })
 
   // 撤回 / 编辑删除产物后，本地部署目录也要删，避免站点在 /deployments 继续可访问
@@ -1004,6 +1070,27 @@ export async function regenerateLatestResponse(
     if (runIds.length > 0) {
       tx.delete(schema.agentRuns).where(inArray(schema.agentRuns.id, runIds)).run()
     }
+    // 被删的消息不能再占 pinned / bookmarked 的名额（pin 上限按数组长度算）。
+    if (messageIds.length > 0) {
+      const convRow = tx
+        .select({
+          pinned: schema.conversations.pinnedMessageIds,
+          bookmarked: schema.conversations.bookmarkedMessageIds,
+        })
+        .from(schema.conversations)
+        .where(eq(schema.conversations.id, conversationId))
+        .get()
+      if (convRow) {
+        const deleted = new Set(messageIds)
+        tx.update(schema.conversations)
+          .set({
+            pinnedMessageIds: convRow.pinned.filter((id) => !deleted.has(id)),
+            bookmarkedMessageIds: convRow.bookmarked.filter((id) => !deleted.has(id)),
+          })
+          .where(eq(schema.conversations.id, conversationId))
+          .run()
+      }
+    }
   })
 
   // 重新生成会删掉旧产物；对应部署目录一并清理
@@ -1074,6 +1161,20 @@ export async function editAndResendLatestUserMessage(
   for (const p of original.parts) {
     if (p.type === 'image_attachment' || p.type === 'file_attachment') {
       attachmentIds.push(p.attachmentId)
+    }
+  }
+
+  // 先在删除前确认附件仍在：附件可能在发送后被用户从文件库删掉。若等 withdraw 之后
+  // 才由 sendMessage 报错，原消息 / 回复 / 产物已经被物理删除，这一轮就永久丢了。
+  if (attachmentIds.length > 0) {
+    const rows = await db.query.attachments.findMany({
+      where: (a, { inArray }) => inArray(a.id, attachmentIds),
+    })
+    const missing = attachmentIds.filter(
+      (id) => !rows.some((row) => row.id === id && row.conversationId === conversationId),
+    )
+    if (missing.length > 0) {
+      throw new Error(`Attachments no longer exist and cannot be re-sent: ${missing.join(', ')}`)
     }
   }
 
