@@ -587,6 +587,13 @@ export function CreateAgentDialog({
                   </div>
                 )}
 
+                {adapterKind === 'custom' && provider === 'anthropic' && (
+                  <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                    自建 Agent 暂未接入 Anthropic Messages API，选择该 provider 后发消息会失败。请改用
+                    DeepSeek / OpenAI / 火山方舟 / OpenAI-compatible，或把适配器切到 Claude Code SDK。
+                  </div>
+                )}
+
                 {(adapterKind === 'claude-code' ||
                   adapterKind === 'codex' ||
                   (adapterKind === 'custom' && provider === 'openai-compatible')) && (
