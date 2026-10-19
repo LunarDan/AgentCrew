@@ -23,15 +23,19 @@ export interface MobileApiClient {
 
 export function createMobileApiClient(config: ConnectionConfig): MobileApiClient {
   const baseUrl = normalizeBaseUrl(config.baseUrl)
+  // 设置页允许带空格粘贴 token；多余的空白会让 Bearer 头无效（表现为莫名的 401）
+  const deviceToken = config.deviceToken.trim()
 
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
     if (!baseUrl) throw new Error('Desktop host is not configured')
-    if (!config.deviceToken) throw new Error('Device token is not configured')
+    if (!deviceToken) throw new Error('Device token is not configured')
 
     const res = await fetch(`${baseUrl}${path}`, {
       ...init,
+      // 弱网 / 睡着的桌面端可能永远不响应；没有超时会让 UI 一直卡在「处理中」
+      signal: mergeTimeoutSignal(init?.signal, REQUEST_TIMEOUT_MS),
       headers: {
-        Authorization: `Bearer ${config.deviceToken}`,
+        Authorization: `Bearer ${deviceToken}`,
         Accept: 'application/json',
         ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
         ...init?.headers,
@@ -100,11 +104,11 @@ export function createMobileApiClient(config: ConnectionConfig): MobileApiClient
     },
     subscribeEvents: async (onEvent, signal) => {
       if (!baseUrl) throw new Error('Desktop host is not configured')
-      if (!config.deviceToken) throw new Error('Device token is not configured')
+      if (!deviceToken) throw new Error('Device token is not configured')
 
       const res = await fetch(`${baseUrl}/api/mobile/events`, {
         headers: {
-          Authorization: `Bearer ${config.deviceToken}`,
+          Authorization: `Bearer ${deviceToken}`,
           Accept: 'text/event-stream',
         },
         signal,
@@ -145,6 +149,31 @@ export function createMobileApiClient(config: ConnectionConfig): MobileApiClient
 
 function normalizeBaseUrl(value: string): string {
   return withScheme(value).replace(/\/+$/, '')
+}
+
+/** 普通请求的超时；事件流不受限制（它本来就该长期挂着）。 */
+const REQUEST_TIMEOUT_MS = 15_000
+
+function mergeTimeoutSignal(
+  signal: AbortSignal | null | undefined,
+  timeoutMs: number,
+): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs)
+  if (!signal) return timeout
+  const anyOf = (
+    AbortSignal as unknown as { any?: (signals: AbortSignal[]) => AbortSignal }
+  ).any
+  if (typeof anyOf === 'function') return anyOf([signal, timeout])
+  // 旧 WebView 没有 AbortSignal.any：手动桥接，让调用方取消与超时都能生效
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+  if (signal.aborted || timeout.aborted) {
+    controller.abort()
+  } else {
+    signal.addEventListener('abort', abort, { once: true })
+    timeout.addEventListener('abort', abort, { once: true })
+  }
+  return controller.signal
 }
 
 /** 用户常只填 `192.168.1.5:60646`；没有 scheme 时 fetch 会当成相对路径打到 WebView 自身。 */
