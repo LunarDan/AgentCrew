@@ -3,6 +3,17 @@ import { app, BrowserWindow, session, shell } from 'electron'
 import { setupDataDir } from './paths'
 import { startEmbeddedServer } from './server-bootstrap'
 
+// 只把 http(s) 链接交给系统浏览器；其余 scheme（file:、smb: 等）一律丢弃
+function openExternalHttp(target: string): void {
+  try {
+    const parsed = new URL(target)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return
+    void shell.openExternal(target).catch(() => {})
+  } catch {
+    // 非法 URL 直接忽略
+  }
+}
+
 const isDev = process.env.AGENTHUB_DEV === '1'
 const DEV_URL = 'http://localhost:3000'
 
@@ -59,18 +70,24 @@ if (!gotLock) {
       },
     })
 
-    // a) 外链交给 OS 默认浏览器，不在窗口里新开
+    // a) 外链交给 OS 默认浏览器，不在窗口里新开。只放行 http/https：
+    //    LLM 输出里的 file:// / smb:// 等链接不能交给 OS 启动本地程序或发起凭据认证
     win.webContents.setWindowOpenHandler(({ url: target }) => {
-      shell.openExternal(target).catch(() => {})
+      openExternalHttp(target)
       return { action: 'deny' }
     })
 
     // b) 拦截站外导航；本地 server origin 通过
     win.webContents.on('will-navigate', (event, target) => {
-      const origin = new URL(target).origin
-      if (origin !== new URL(url).origin) {
+      let sameOrigin = false
+      try {
+        sameOrigin = new URL(target).origin === new URL(url).origin
+      } catch {
+        sameOrigin = false
+      }
+      if (!sameOrigin) {
         event.preventDefault()
-        shell.openExternal(target).catch(() => {})
+        openExternalHttp(target)
       }
     })
 
