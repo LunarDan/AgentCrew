@@ -5,6 +5,7 @@ import { mobileJson, mobileOptions } from '@/server/mobile-cors'
 import { mobileErrorJson } from '@/server/mobile-errors'
 import { requireMobileAuth } from '@/server/mobile-auth'
 import { sendMobileMessage } from '@/server/mobile-service'
+import { MAX_MESSAGE_CHARS } from '@/shared/constants'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -12,7 +13,7 @@ interface RouteContext {
 
 const Body = z.object({
   // 与桌面端一致：纯空白不算内容，否则会落一条空消息并触发空回复 run。
-  content: z.string().max(12000).refine((value) => value.trim().length > 0, {
+  content: z.string().max(MAX_MESSAGE_CHARS).refine((value) => value.trim().length > 0, {
     message: 'content must not be blank',
   }),
 })

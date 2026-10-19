@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
 import { clearConversationHistory, listMessages, sendMessage } from '@/server/conversation-service'
+import { MAX_MESSAGE_CHARS } from '@/shared/constants'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -9,7 +10,7 @@ interface RouteContext {
 
 const SendBody = z
   .object({
-    content: z.string().max(12000).default(''),
+    content: z.string().max(MAX_MESSAGE_CHARS).default(''),
     mentionedAgentIds: z.array(z.string()).optional(),
     parentMessageId: z.string().optional(),
     attachmentIds: z.array(z.string()).optional(),
@@ -44,7 +45,16 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     return NextResponse.json(result, { status: 202 })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    return NextResponse.json({ error: message }, { status: 400 })
+    const status = message.startsWith('Conversation not found')
+      ? 404
+      : /Message is too long|Attachments|群聊缺少协调者|No available agent/.test(message)
+        ? 400
+        : 500
+    if (status === 500) {
+      console.error('[messages] send failed', err)
+      return NextResponse.json({ error: 'Internal error' }, { status })
+    }
+    return NextResponse.json({ error: message }, { status })
   }
 }
 
