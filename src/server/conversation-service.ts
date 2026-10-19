@@ -16,6 +16,7 @@ import {
   parseDeployCommand,
   type DeployCommandResult,
 } from './deploy-command-service'
+import { deleteDeploymentsForArtifact } from './deployment-service'
 import { eventBus } from './event-bus'
 import {
   newConversationId,
@@ -282,6 +283,13 @@ export async function deleteConversation(conversationId: string): Promise<void> 
     where: eq(schema.workspaces.conversationId, conversationId),
   })
 
+  // 部署目录不随 DB cascade 消失；先记下产物 id，删会话后一并清理，
+  // 否则 /deployments/<id> 会继续对外提供已删除会话的站点。
+  const artifactRows = await db
+    .select({ id: schema.artifacts.id })
+    .from(schema.artifacts)
+    .where(eq(schema.artifacts.conversationId, conversationId))
+
   // 删 DB：依赖 cascade 级联清理 messages / artifacts / workspaces / agent_runs
   const deleted = await db
     .delete(schema.conversations)
@@ -290,6 +298,14 @@ export async function deleteConversation(conversationId: string): Promise<void> 
 
   if (deleted.length === 0) {
     throw new Error(`Conversation not found: ${conversationId}`)
+  }
+
+  for (const row of artifactRows) {
+    try {
+      deleteDeploymentsForArtifact(row.id)
+    } catch (err) {
+      console.warn(`[deleteConversation] failed to remove deployments for ${row.id}`, err)
+    }
   }
 
   // 物理删 workspace 目录（不影响 DB 事务，容错）
@@ -763,13 +779,33 @@ export interface WithdrawResult {
   deletedArtifactIds: string[]
 }
 
+/** abort 后轮询等待 run 真正落库收尾（最多 3s）；固定 sleep 500ms 会让迟到的 finalize 把错误消息写回删除窗口之后。 */
+async function waitForRunsToStop(runIds: string[]): Promise<void> {
+  if (runIds.length === 0) return
+  const deadline = Date.now() + 3000
+  while (Date.now() < deadline) {
+    const stillRunning = await db
+      .select({ id: schema.agentRuns.id })
+      .from(schema.agentRuns)
+      .where(
+        and(
+          inArray(schema.agentRuns.id, runIds),
+          eq(schema.agentRuns.status, 'running'),
+        ),
+      )
+      .limit(1)
+    if (stillRunning.length === 0) return
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+}
+
 /**
  * 撤回会话中**最后一条** user 消息，及其触发的所有下游 agent message + artifact。
  *
  * 处理逻辑：
  *  1. 校验 messageId 是会话最后一条 user 消息
  *  2. abort 所有运行中 run（fire-and-forget）
- *  3. wait 500ms 让 AgentRunner.finalize 跑完（避免 emitErrorVisualisation 后插的死消息漏删）
+ *  3. 等 AgentRunner.finalize 收尾（避免 emitErrorVisualisation 后插的死消息漏删）
  *  4. 时间窗删除：DELETE messages / artifacts / agent_runs WHERE created_at/started_at >= userMsg.createdAt
  */
 export async function withdrawLatestUserMessage(
@@ -809,7 +845,7 @@ export async function withdrawLatestUserMessage(
     const { AgentRunner } = await getAgentRunner()
     for (const r of runsToAbort) AgentRunner.abort(r.id)
     // 让 finalize 跑完，把 emitErrorVisualisation 的 msg_err_* 也落进时间窗
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    await waitForRunsToStop(runsToAbort.map((r) => r.id))
   }
 
   // 撤回会让 SDK session 中保存的「user msg → agent reply」对儿和 DB 不一致；清掉重来
@@ -854,6 +890,15 @@ export async function withdrawLatestUserMessage(
       tx.delete(schema.agentRuns).where(inArray(schema.agentRuns.id, runIds)).run()
     }
   })
+
+  // 撤回 / 编辑删除产物后，本地部署目录也要删，避免站点在 /deployments 继续可访问
+  for (const artifactId of artifactIds) {
+    try {
+      deleteDeploymentsForArtifact(artifactId)
+    } catch (err) {
+      console.warn(`[deleteMessages] failed to remove deployments for ${artifactId}`, err)
+    }
+  }
 
   // 广播删除：让其它已连接客户端（尤其桌面端）实时移除被撤回/编辑掉的消息及其产物。
   // 同时覆盖编辑路径——editAndResendLatestUserMessage 内部就是调本函数删除的。
@@ -913,7 +958,7 @@ export async function regenerateLatestResponse(
   if (runsToAbort.length > 0) {
     const { AgentRunner } = await getAgentRunner()
     for (const r of runsToAbort) AgentRunner.abort(r.id)
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    await waitForRunsToStop(runsToAbort.map((r) => r.id))
   }
 
   // 重新生成等价于「让 agent 对同一个 user msg 重新作答」，SDK session 里那个旧 reply 要扔；清掉重新开 session
@@ -957,6 +1002,15 @@ export async function regenerateLatestResponse(
       tx.delete(schema.agentRuns).where(inArray(schema.agentRuns.id, runIds)).run()
     }
   })
+
+  // 重新生成会删掉旧产物；对应部署目录一并清理
+  for (const artifactId of artifactIds) {
+    try {
+      deleteDeploymentsForArtifact(artifactId)
+    } catch (err) {
+      console.warn(`[regenerate] failed to remove deployments for ${artifactId}`, err)
+    }
+  }
 
   // 广播删除：在启动新 run 之前发，保证其它客户端「先移除旧回复，再收到新回复」。
   eventBus.publish({

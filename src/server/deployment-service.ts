@@ -266,8 +266,30 @@ export function publishDeploymentToStaticDirectory(
       writeFileSync(dest, readFileSync(source))
     }
 
-    rmSync(publishDir, { recursive: true, force: true })
-    renameSync(tempDir, publishDir)
+    // 不能先删线上目录再 rename：rename 失败（Windows 文件锁 / EPERM）会让站点直接消失。
+    // 先把旧目录挪到备份名，替换成功后再删；失败则把旧目录挪回来。
+    const backupDir = path.join(
+      publishRoot,
+      `.old-${deploymentId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    )
+    let movedAside = false
+    if (existsSync(publishDir)) {
+      renameSync(publishDir, backupDir)
+      movedAside = true
+    }
+    try {
+      renameSync(tempDir, publishDir)
+    } catch (err) {
+      if (movedAside) {
+        try {
+          renameSync(backupDir, publishDir)
+        } catch (restoreErr) {
+          console.error('[deployment] failed to restore previous publish dir', restoreErr)
+        }
+      }
+      throw err
+    }
+    if (movedAside) rmSync(backupDir, { recursive: true, force: true })
   } catch (err) {
     rmSync(tempDir, { recursive: true, force: true })
     throw err
