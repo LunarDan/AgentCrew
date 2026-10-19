@@ -143,6 +143,9 @@ export async function executeBashCommand(
   args: BashExecutionArgs,
   ctx: ToolContext,
 ): Promise<ToolResult> {
+  // 已中止的 run 不应该再启动新进程（审批等待可能刚好跨越 abort）。
+  if (ctx.abortSignal.aborted) return { ok: false, error: 'Run aborted' }
+
   const banned = findBannedPattern(args.command, PLATFORM)
   if (banned) {
     return { ok: false, error: `Command rejected by safety policy: ${banned.source}` }
@@ -180,6 +183,8 @@ export async function executeBashCommand(
       return { ok: false, error: `User rejected command execution: ${approval.reason}` }
     }
   }
+
+  if (ctx.abortSignal.aborted) return { ok: false, error: 'Run aborted' }
 
   return runShellCommand(args, cwd, ctx)
 }
@@ -290,6 +295,8 @@ function runShellCommand(
       closeInheritedStdio()
     }
     ctx.abortSignal.addEventListener('abort', onAbort, { once: true })
+    // abort 事件不会重放：spawn 与注册监听之间若已 abort，必须手动补一次。
+    if (ctx.abortSignal.aborted) onAbort()
 
     child.on('error', (err) => {
       const error = `Spawn failed: ${err instanceof Error ? err.message : String(err)}`
