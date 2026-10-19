@@ -23,6 +23,7 @@ import { estimateTokens, getModelLimits } from '@/shared/model-registry'
 
 import { agentRegistry } from './adapters/registry'
 import type { AdapterAttachment, AdapterInput } from './adapters/types'
+import { readArtifactHandoffResult } from './artifact-handoff'
 import { getAttachmentAbsolutePath } from './attachment-service'
 import {
   getLatestContextSummary,
@@ -226,7 +227,7 @@ const ORCHESTRATOR_PLAN_ALLOWED_TOOLS = new Set([
   'read_attachment',
 ])
 /** Orchestrator 动态重规划上限：首轮 + 最多 (N-1) 轮补救（呼应 spec 06「不无限重试」）。 */
-const MAX_DISPATCH_ROUNDS = 4
+const MAX_DISPATCH_ROUNDS = 2
 const MAX_CHILD_TASK_ATTEMPTS = 4
 const DEFAULT_VERIFICATION_TIMEOUT_MS = 5 * 60_000
 const DEFAULT_PREPARE_TIMEOUT_MS = 10 * 60_000
@@ -763,72 +764,88 @@ async function executeDag(
   const conflicts: FileWriteConflict[] = []
   const planContext = mergeExternalPlanItems(ctx.externalPlanItems ?? [], plan)
 
-  while (remaining.size > 0) {
-    if (ctx.signal.aborted) {
-      markRemainingTasksAborted(plan, remaining, results, ctx)
-      throw new Error('Orchestrator run aborted')
-    }
-
-    for (const task of plan) {
-      if (!remaining.has(task.id)) continue
-      const blockers = (task.dependsOn ?? []).flatMap((dep) => {
-        const result = results.get(dep)
-        return result && result.status !== 'complete' ? [{ taskId: dep, result }] : []
-      })
-      if (blockers.length === 0) continue
-
-      const result = skippedTaskResult(task, blockers)
-      results.set(task.id, result)
-      remaining.delete(task.id)
-      publishDispatchEnd(ctx, task.id, result)
-    }
-
-    if (remaining.size === 0) break
-
-    const ready = plan.filter(
-      (t) =>
-        remaining.has(t.id) &&
-        (t.dependsOn ?? []).every((d) => results.get(d)?.status === 'complete'),
-    )
-    if (ready.length === 0) {
-      throw new Error('Circular dependency or unresolved task in plan')
-    }
-
-    const wave = await Promise.all(ready.map((t) => runChildTask(t, results, planContext, ctx)))
-    for (let i = 0; i < ready.length; i++) {
-      results.set(ready[i].id, wave[i])
-      remaining.delete(ready[i].id)
-    }
-
-    // 同波次「代码冲突」检测：本波 ≥2 个子 run 经 fs_write 写了同一文件且内容不同
-    if (ready.length > 1) {
-      const runWrites: RunFileWrites[] = []
-      for (let i = 0; i < ready.length; i++) {
-        const childRunIds = getDispatchResultRunIds(wave[i])
-        if (childRunIds.length === 0) continue
-        runWrites.push({
-          taskId: ready[i].id,
-          agentId: ready[i].agentId,
-          runId: childRunIds[childRunIds.length - 1],
-          writes: mergeFileWrites(childRunIds),
-        })
+  try {
+    while (remaining.size > 0) {
+      if (ctx.signal.aborted) {
+        markRemainingTasksAborted(plan, remaining, results, ctx)
+        throw new Error('Orchestrator run aborted')
       }
-      conflicts.push(...detectWaveConflicts(runWrites))
-    }
-  }
 
-  // 释放本次 dispatch 各子 run 的写入记录（内存）
-  for (const [taskId, r] of results) {
-    if (!currentTaskIds.has(taskId)) continue
-    for (const childRunId of getDispatchResultRunIds(r)) {
-      clearFileWrites(childRunId)
-      clearRunToolEvidence(childRunId)
-    }
-  }
+      for (const task of plan) {
+        if (!remaining.has(task.id)) continue
+        const blockers = (task.dependsOn ?? []).flatMap((dep) => {
+          const result = results.get(dep)
+          return result && result.status !== 'complete' ? [{ taskId: dep, result }] : []
+        })
+        if (blockers.length === 0) continue
 
-  return {
-    results: new Map([...results].filter(([taskId]) => currentTaskIds.has(taskId))),
-    conflicts,
+        const result = skippedTaskResult(task, blockers)
+        results.set(task.id, result)
+        remaining.delete(task.id)
+        publishDispatchEnd(ctx, task.id, result)
+      }
+
+      if (remaining.size === 0) break
+
+      const ready = plan.filter(
+        (t) =>
+          remaining.has(t.id) &&
+          (t.dependsOn ?? []).every((d) => results.get(d)?.status === 'complete'),
+      )
+      if (ready.length === 0) {
+        throw new Error('Circular dependency or unresolved task in plan')
+      }
+
+      // allSettled：单个子任务抛错时也要等同波次其它子任务收尾，避免遗留孤儿 run
+      const settled = await Promise.allSettled(
+        ready.map((t) => runChildTask(t, results, planContext, ctx)),
+      )
+      const wave: DispatchTaskResult[] = []
+      let failure: unknown = null
+      for (let i = 0; i < ready.length; i++) {
+        const outcome = settled[i]
+        if (outcome.status === 'fulfilled') {
+          wave[i] = outcome.value
+          results.set(ready[i].id, outcome.value)
+          remaining.delete(ready[i].id)
+        } else if (failure === null) {
+          failure = outcome.reason
+        }
+      }
+      if (failure !== null) {
+        throw failure instanceof Error ? failure : new Error(String(failure))
+      }
+
+      // 同波次「代码冲突」检测：本波 ≥2 个子 run 经 fs_write 写了同一文件且内容不同
+      if (ready.length > 1) {
+        const runWrites: RunFileWrites[] = []
+        for (let i = 0; i < ready.length; i++) {
+          const childRunIds = getDispatchResultRunIds(wave[i])
+          if (childRunIds.length === 0) continue
+          runWrites.push({
+            taskId: ready[i].id,
+            agentId: ready[i].agentId,
+            runId: childRunIds[childRunIds.length - 1],
+            writes: mergeFileWrites(childRunIds),
+          })
+        }
+        conflicts.push(...detectWaveConflicts(runWrites))
+      }
+    }
+
+    return {
+      results: new Map([...results].filter(([taskId]) => currentTaskIds.has(taskId))),
+      conflicts,
+    }
+  } finally {
+    // 释放本次 dispatch 各子 run 的写入记录（内存）；中止 / 抛错路径同样要清
+    for (const [taskId, r] of results) {
+      if (!currentTaskIds.has(taskId)) continue
+      for (const childRunId of getDispatchResultRunIds(r)) {
+        clearFileWrites(childRunId)
+        clearRunToolEvidence(childRunId)
+      }
+    }
   }
 }
 
@@ -983,7 +1000,7 @@ async function maybeCreateProjectArtifact(args: {
   conversationId: string
   agentId: string
   taskId?: string
-  result: { artifactIds: string[] }
+  result: { artifactIds: string[]; outputMessageIds?: string[] }
 }): Promise<string | null> {
   if (args.evidence.fileWrites.length === 0) return null
   const workspace = await db.query.workspaces.findFirst({
@@ -1031,7 +1048,25 @@ async function maybeCreateProjectArtifact(args: {
       createdAt,
     },
   })
+  // 挂到消息上，撤回 / 重新生成时才能随消息一起清掉这个自动产物
+  await appendArtifactRefPart(args.result.outputMessageIds?.at(-1), artifactId)
   return artifactId
+}
+
+async function appendArtifactRefPart(messageId: string | undefined, artifactId: string): Promise<void> {
+  if (!messageId) return
+  const row = await db.query.messages.findFirst({ where: eq(schema.messages.id, messageId) })
+  if (!row) return
+  const parts: MessagePart[] = [...row.parts, { type: 'artifact_ref', artifactId }]
+  await db.update(schema.messages).set({ parts }).where(eq(schema.messages.id, messageId))
+  publish({
+    type: 'part.start',
+    conversationId: row.conversationId,
+    timestamp: Date.now(),
+    messageId,
+    partIndex: parts.length - 1,
+    part: { type: 'artifact_ref', artifactId },
+  })
 }
 
 async function runChildTaskAttempt(
@@ -1649,14 +1684,6 @@ async function consumeStream(
   }
 
   return { artifactIds, outputMessageIds, outputArtifacts, ...(taskReport ? { taskReport } : {}) }
-}
-
-function readArtifactHandoffResult(result: unknown): { artifactId: string; outputKey: string } | null {
-  if (result === null || typeof result !== 'object') return null
-  const value = result as { artifactId?: unknown; outputKey?: unknown }
-  if (typeof value.artifactId !== 'string' || typeof value.outputKey !== 'string') return null
-  if (!value.outputKey.trim()) return null
-  return { artifactId: value.artifactId, outputKey: value.outputKey }
 }
 
 function mergeRunUsage(previous: RunUsageEvent | null, next: RunUsageEvent): RunUsageEvent {
