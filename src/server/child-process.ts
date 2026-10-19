@@ -9,6 +9,23 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 
 import type { Platform } from '@/server/platform'
 
+const FORCE_KILL_DELAY_MS = 5_000
+
+/** POSIX 进程可能在收到 SIGTERM 后继续忽略；5 秒后对同一目标补 SIGKILL。 */
+function scheduleForceKill(pids: number[], useProcessGroup: boolean): void {
+  if (pids.length === 0) return
+  const timer = setTimeout(() => {
+    for (const pid of pids) {
+      try {
+        process.kill(useProcessGroup ? -pid : pid, 'SIGKILL')
+      } catch {
+        // 进程已退出；清理是尽力而为。
+      }
+    }
+  }, FORCE_KILL_DELAY_MS)
+  timer.unref()
+}
+
 /** 杀进程树。Windows 走 taskkill /F /T；POSIX 走进程组（要求子进程 detached）。 */
 export function killProcessTree(
   child: ChildProcess,
@@ -23,11 +40,13 @@ export function killProcessTree(
   if (typeof child.pid === 'number') {
     try {
       process.kill(-child.pid, signal)
+      if (signal !== 'SIGKILL') scheduleForceKill([child.pid], true)
       return
     } catch (error) {
       const code = error instanceof Error && 'code' in error ? (error as { code?: unknown }).code : null
       if (code !== 'ESRCH') {
         child.kill(signal)
+        if (signal !== 'SIGKILL') scheduleForceKill([child.pid], true)
       }
       return
     }
@@ -85,4 +104,6 @@ export function killProcessTreeByPid(
       // 进程可能已退出；清理是尽力而为。
     }
   }
+
+  if (signal !== 'SIGKILL') scheduleForceKill([...descendants, pid], false)
 }
