@@ -347,6 +347,8 @@ write_artifact({
 
 **参数**：`{ command: string }`。
 
+**中止语义**：run 已 abort（包括在审批等待期间 abort）时不再 spawn 新进程；spawn 与注册 abort 监听之间发生的 abort 会补做一次 kill，保证不会出现「已停止的 run 又跑了一条命令」。
+
 **流程**：
 1. 命中 `getBannedPatterns(currentPlatform())` 黑名单（POSIX / Windows 各一套，详见 Spec 11）→ 拒
 2. 命中关键命令审批规则 → 注册 `PendingBashCommand`，发 `bash_command.pending` SSE，等待用户批准；拒绝则不执行命令并返回错误
