@@ -4,6 +4,8 @@ import { createServer } from 'node:net'
 import fs from 'node:fs'
 import path from 'node:path'
 
+import { isCompanionProxyPath } from './companion-proxy'
+
 /**
  * In-process 启动 Next.js standalone server。详见 Spec 12 §4.3。
  *
@@ -53,14 +55,6 @@ export async function startEmbeddedServer(): Promise<number> {
   await waitUntilReady(`http://127.0.0.1:${port}/`)
   if (enabled) startCompanionProxy(companion.companionPort, port)
   return port
-}
-
-const COMPANION_ROUTE_PREFIX = '/api/mobile/'
-
-/** 只有移动端 API 允许越过 loopback 边界；desktop API 一律不转发。 */
-export function isCompanionProxyPath(rawUrl: string | undefined): boolean {
-  if (!rawUrl) return false
-  return rawUrl.split('?', 1)[0].startsWith(COMPANION_ROUTE_PREFIX)
 }
 
 /**
