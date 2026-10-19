@@ -28,6 +28,25 @@ Zustand reducers MUST update conversation, message, artifact, pending write, pen
 - **THEN** the store marks streaming messages from that run as terminal
 - **AND** appends local error `tool_result` parts for any unmatched `tool_use` call ids.
 
+#### Scenario: Hydration response overlaps live events
+- **WHEN** a `GET /messages` or pending-approval snapshot resolves after SSE already delivered newer items
+- **THEN** the client merges or skips the snapshot instead of replacing the bucket
+- **AND** messages / approvals that arrived over SSE stay visible.
+
+### Requirement: Optimistic sends SHALL be recoverable
+
+A user message inserted optimistically before the send request succeeds MUST be removed (or marked failed) when the request fails, and the composer content, attachments, mentions, quote, and reply target MUST be restored. Suspending a send from the IME composition state MUST NOT submit.
+
+#### Scenario: Send request fails
+- **WHEN** the messages API rejects or the network fails
+- **THEN** the temp message disappears
+- **AND** the user's text and attachments return to the composer
+- **AND** an error is shown.
+
+#### Scenario: User confirms an IME candidate with Enter
+- **WHEN** the composition session is active (`isComposing` / keyCode 229)
+- **THEN** Enter only commits the candidate and does not send the message.
+
 ### Requirement: Artifact preview SHALL be separate from chat rendering
 
 The UI MUST render artifact previews in a dedicated panel and render chat artifact references as cards or links.

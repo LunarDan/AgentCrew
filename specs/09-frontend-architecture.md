@@ -253,10 +253,12 @@ app/page.tsx
 
 | 数据 | 加载时机 | 落位 |
 |---|---|---|
-| `messages` | 切换会话时一次性拉全量（`fetchMessages`） | `messageIdsByConv` + `messages` |
+| `messages` | 切换会话时一次性拉全量（`fetchMessages`）；请求期间的 SSE 消息用并集保留，不能整桶覆盖 | `messageIdsByConv` + `messages` |
 | `artifacts` | 不预加载；首次见到 `artifact_ref` part 时 lazy fetch 详情（`ArtifactRefPart` 组件内 effect） | `artifacts[id]` |
 | `attachments` | 打开 `FileLibraryDialog` 时拉该会话列表；附件 chip 渲染时也按需拉 | 组件内 useState |
 | `agents` / `conversations` | 应用启动时全量拉一次 | 同名 maps |
+
+**挂载兜底请求**：pending writes / bash commands / MCP tools / questions 在面板挂载时 GET 一次兜底，但若该会话的 store 桶已经有条目（说明 SSE 已推来更新的数据），必须跳过这次快照，不能用更旧的响应覆盖。消息首次加载失败时展示错误 + 重试，而不是误显示「还没有消息」。
 
 **404 行为**：artifact lazy fetch 404 → 渲染「产物已删除」墓碑卡片（不在 store 标记 deleted；用组件 local state）。
 
@@ -269,6 +271,8 @@ app/page.tsx
 服务端 run 失败时，AgentRunner 通过 `emitErrorVisualisation` 注入一条 `msg_err_*` 消息（role=agent，status=error），前端无需特殊处理 —— SSE 推过来后 reducer 走正常 `message.start` + `part.start(text)` + `message.end`，渲染时 `MessageItem` 看到 `status==='error'` 显示红边框气泡。同理 `aborted` 显示灰色边框。
 
 **为什么走 message 而不是 toast**：错误是对话内容的一部分，应该和对话一起滚动 / 滚动到、可复制、可作为后续消息的上下文。toast 一关就丢，不适合 LLM 上下文。
+
+**发送失败**：`POST /messages` 失败时客户端撤掉乐观 `temp_*` 消息（不能留下永远等不到回复的假消息），把文本、附件、@ 提及、引用与回复目标放回输入框，并在输入区显示 `发送失败：...`。另外输入法组合态（`isComposing` / keyCode 229）的 Enter 只确认候选词，不触发发送或菜单选择。
 
 ---
 

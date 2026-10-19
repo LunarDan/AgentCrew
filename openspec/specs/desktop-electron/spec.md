@@ -38,6 +38,19 @@ Desktop mode MUST use the same SQLite `app_settings` key storage semantics and S
 - **WHEN** settings are saved
 - **THEN** the key is stored in the desktop SQLite database.
 
+### Requirement: External links SHALL be restricted to HTTP(S)
+
+Electron MUST hand off new-window and cross-origin navigation targets to the OS browser only for `http:` and `https:` URLs. Other schemes (`file:`, `smb:`, custom protocols) MUST be dropped, and malformed URLs MUST not escape the navigation guard.
+
+#### Scenario: Message renders a local-file link
+- **WHEN** rendered content contains `file:///C:/Windows/System32/calc.exe` and the user clicks it
+- **THEN** no external process is launched
+- **AND** the app window does not navigate away.
+
+#### Scenario: User opens a normal web link
+- **WHEN** an `https://` link is clicked
+- **THEN** the OS default browser opens it.
+
 ### Requirement: Desktop packaging SHALL include Codex runtime dependencies
 
 The packaging flow MUST carry Codex optional platform runtime dependencies needed by `@openai/codex-sdk`.
