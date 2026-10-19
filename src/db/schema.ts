@@ -70,7 +70,7 @@ export const conversations = sqliteTable(
     title: text('title').notNull(),
     mode: text('mode', { enum: ['single', 'group'] }).notNull(),
     agentIds: text('agent_ids', { mode: 'json' }).$type<string[]>().notNull(),
-    /** 注入 LLM 长期上下文的重要消息（agent-runner 用，UI 暂未暴露入口）。 */
+    /** 注入 LLM 长期上下文的重要消息；UI 在消息菜单里提供 pin / unpin。 */
     pinnedMessageIds: text('pinned_message_ids', { mode: 'json' })
       .$type<string[]>()
       .notNull()

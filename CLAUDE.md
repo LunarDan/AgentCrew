@@ -313,7 +313,7 @@ Codex adapter 额外约束：运行时 `CODEX_HOME` / `CODEX_SQLITE_HOME` 指向
 - `12-desktop-electron.md` — 桌面版（Electron 打包 DMG / EXE，进程模型 / 路径迁移）
 - `13-conversation-context.md` — 跨 run 对话历史序列化（MessagePart → OpenAI ChatMessage、pinned 注入、agent 视角）
 - `14-mobile-remote.md` — 移动端伴随 App（Capacitor / Tailscale / 远程审批）
-- `15-external-mcp.md` — 外部 MCP server 接入（P0 已实现：数据模型 + 设置面板 + Agent builder + claude-code/codex 接线 + `ask` 审批门；custom 的 MCP 客户端与 Codex 审批门为 P1/P2。2026-10-13：adapter 改为隔离启动，堵住 workspace 设置预放行工具的绕过口，见 §5.5）
+- `15-external-mcp.md` — 外部 MCP server 接入（P0 已实现：数据模型 + 设置面板 + Agent builder + claude-code/codex 接线 + `ask` 审批门；P1 已实现：custom 的 MCP 客户端与 `ask` 审批门。Codex 审批门为 P2。2026-10-13：adapter 改为隔离启动，堵住 workspace 设置预放行工具的绕过口，见 §5.5）
 
 ### `skills/`（可复用开发任务模板）
 
