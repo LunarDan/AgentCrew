@@ -104,6 +104,10 @@ export async function GET(req: NextRequest) {
     cancel() {
       closeStream?.()
     },
+  }, {
+    // 默认 highWaterMark=1 会让刚连上时的几个事件直接命中「读得慢」分支被丢掉；
+    // 放宽到 256 个 chunk，真正积压时才丢。
+    highWaterMark: 256,
   })
 
   const headers = mobileCorsHeaders(req)
