@@ -1,7 +1,7 @@
 'use client'
 
 import { AlertCircle, Eye, FileText, Loader2, PenLine, RefreshCw, Save } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { CodeBlock } from '@/components/code-block'
 import { Button } from '@/components/ui/button'
@@ -42,6 +42,9 @@ export function FileTab({
     size: 0,
   })
   const [editing, setEditing] = useState(false)
+  // 保存是异步的：请求回来时要判断用户在半路有没有继续输入
+  const stateRef = useRef(state)
+  stateRef.current = state
 
   const reload = useCallback(async () => {
     setState((s) => ({ ...s, loading: true, error: null }))
@@ -78,12 +81,15 @@ export function FileTab({
 
   const save = async () => {
     if (state.saving || !dirty || state.truncated) return
+    const draftToSave = state.draft
     setState((s) => ({ ...s, saving: true, error: null }))
     try {
-      await workspaceWriteFile(conversationId, relPath, state.draft)
-      clearDraft(conversationId, relPath)
-      setState((s) => ({ ...s, saving: false, content: s.draft }))
-      setEditing(false)
+      await workspaceWriteFile(conversationId, relPath, draftToSave)
+      // 保存期间用户继续输入：只把「已保存的那一版」记为 content，新草稿留在编辑态
+      const unchanged = stateRef.current.draft === draftToSave
+      if (unchanged) clearDraft(conversationId, relPath)
+      setState((s) => ({ ...s, saving: false, content: draftToSave }))
+      if (unchanged) setEditing(false)
     } catch (err) {
       setState((s) => ({
         ...s,
