@@ -147,7 +147,7 @@ createdAt     integer
 
 ## 8. 配置 UI(出口,细节另议)
 
-- **设置面板**(spec 09):MCP server 管理——增/删/改 + 「测试连接」(connect + listTools 预览)。敏感字段(headers 里的 key)按现有 key 管理思路存 DB(不引 keychain,见 CLAUDE.md §5.4)。
+- **设置面板**(spec 09):MCP server 管理——增/删/改 + 「测试连接」(connect + listTools 预览)。删除必须二次确认（会改变已在用 Agent 的工具集）。敏感字段(headers 里的 key)按现有 key 管理思路存 DB(不引 keychain,见 CLAUDE.md §5.4)。
 - **Agent builder**(spec 10):勾选本 Agent 启用哪些 server(形如 `AVAILABLE_TOOLS` 的多选)。
 
 ---
