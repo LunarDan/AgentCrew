@@ -12,7 +12,7 @@ import {
   type ThreadOptions,
   type Usage,
 } from '@openai/codex-sdk'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 
 import { db, schema } from '@/db/client'
 import { recordRunFileWrite } from '@/server/dispatch-run-evidence'
@@ -35,6 +35,7 @@ import {
   buildCodexChildProcessEnv,
   createAdapterEvent,
 } from './adapter-utils'
+import { clampToolResult } from './custom-mcp-tools'
 import { adapterSessionKey, codexSessions } from './session-store'
 import type { AdapterInput, AgentPlatformAdapter } from './types'
 
@@ -184,7 +185,7 @@ export class CodexAdapter implements AgentPlatformAdapter {
           if (event.item.server === 'agenthub' && event.item.tool === 'write_artifact') {
             const artifactId = parseArtifactIdFromCodexMcpResult(event.item.result)
             if (artifactId) {
-              const artifact = await loadArtifactRecord(artifactId)
+              const artifact = await loadArtifactRecord(artifactId, input.conversationId)
               if (artifact) {
                 yield baseEvent({
                   type: 'artifact.create' as const,
@@ -305,9 +306,16 @@ function getCodexMcpBridgePath(): string {
   return path.join(/* turbopackIgnore: true */ process.cwd(), 'scripts', 'agenthub-codex-mcp.mjs')
 }
 
-async function loadArtifactRecord(artifactId: string): Promise<ArtifactRecord | null> {
+async function loadArtifactRecord(
+  artifactId: string,
+  conversationId: string,
+): Promise<ArtifactRecord | null> {
   const row = await db.query.artifacts.findFirst({
-    where: eq(schema.artifacts.id, artifactId),
+    // 结果里的 id 来自外部 MCP server 的返回；跨会话 id 不能借 artifact.create 读出来
+    where: and(
+      eq(schema.artifacts.id, artifactId),
+      eq(schema.artifacts.conversationId, conversationId),
+    ),
   })
   if (!row) return null
   return {
@@ -368,7 +376,8 @@ function translateItemEvent(
             type: 'tool.result' as const,
             messageId: ctx.messageId,
             callId,
-            result: toolResultFor(item),
+            // 外部 MCP server 的结果可能无界；与 custom adapter 用同一个上限
+            result: clampToolResult(toolResultFor(item)),
             isError: isToolItemError(item),
           }),
         )
