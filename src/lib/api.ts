@@ -912,3 +912,31 @@ export async function regenerateMobileDeviceToken(): Promise<AppSettingsRow> {
   )
   return settings
 }
+
+export interface MobilePairedDevice {
+  id: string
+  deviceName: string
+  createdAt: number
+  lastSeenAt: number | null
+}
+
+/** 一次性配对码（5 分钟有效），只返回给桌面设置页。 */
+export async function createMobilePairingCode(): Promise<{ code: string; expiresAt: number }> {
+  return json<{ code: string; expiresAt: number }>(
+    fetch('/api/settings/pairing-code', { method: 'POST' }),
+  )
+}
+
+export async function fetchMobileDevices(): Promise<MobilePairedDevice[]> {
+  const { devices } = await json<{ devices: MobilePairedDevice[] }>(
+    fetch('/api/settings/devices'),
+  )
+  return devices
+}
+
+export async function revokeMobileDevice(id: string): Promise<boolean> {
+  const { revoked } = await json<{ revoked: boolean }>(
+    fetch(`/api/settings/devices/${id}`, { method: 'DELETE' }),
+  )
+  return revoked
+}
