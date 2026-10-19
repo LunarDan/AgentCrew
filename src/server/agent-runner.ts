@@ -244,17 +244,20 @@ export const AgentRunner = {
     const controller = new AbortController()
 
     // 级联：父 run abort 时子 run 也 abort
+    const onParentAbort = () => controller.abort()
     if (args.parentSignal) {
       if (args.parentSignal.aborted) {
         controller.abort()
       } else {
-        args.parentSignal.addEventListener('abort', () => controller.abort(), { once: true })
+        args.parentSignal.addEventListener('abort', onParentAbort, { once: true })
       }
     }
 
     activeRuns.set(runId, controller)
 
     const promise = executeRun(runId, controller.signal, args).finally(() => {
+      // 子 run 先结束时父 signal 的监听必须摘掉，否则父 run 会越攒越多。
+      args.parentSignal?.removeEventListener('abort', onParentAbort)
       activeRuns.delete(runId)
     })
 
