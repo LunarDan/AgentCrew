@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 
-import { and, desc, eq, gt, inArray } from 'drizzle-orm'
+import { and, desc, eq, inArray } from 'drizzle-orm'
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions'
 
 import { db, schema } from '@/db/client'
@@ -26,6 +26,7 @@ import type { AdapterAttachment, AdapterInput } from './adapters/types'
 import { readArtifactHandoffResult } from './artifact-handoff'
 import { getAttachmentAbsolutePath } from './attachment-service'
 import {
+  afterSummaryCoverage,
   getLatestContextSummary,
   prefixPromptWithContextSummary,
   renderConversationSummaryBlock,
@@ -2610,7 +2611,7 @@ async function buildSubAgentPrompt(
     ? and(
         eq(schema.messages.conversationId, conversationId),
         eq(schema.messages.status, 'complete'),
-        gt(schema.messages.createdAt, latestSummary.coveredUntilCreatedAt),
+        afterSummaryCoverage(latestSummary),
       )
     : and(
         eq(schema.messages.conversationId, conversationId),

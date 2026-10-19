@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, inArray, ne } from 'drizzle-orm'
+import { and, desc, eq, inArray, ne } from 'drizzle-orm'
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions'
 
 import { db, schema } from '@/db/client'
@@ -7,6 +7,7 @@ import { estimateTokens } from '@/shared/model-registry'
 import type { DeployStatusRecord, MessagePart } from '@/shared/types'
 
 import {
+  afterSummaryCoverage,
   getLatestContextSummary,
   renderConversationSummaryBlock,
 } from './context-compaction-service'
@@ -47,17 +48,12 @@ export async function buildHistoryFor(
   const latestSummary = await getLatestContextSummary(conversationId)
 
   // 拉最近 N 条 complete 消息（按时间逆序取，下面再翻回正序）
-  const recentWhereClauses = [
+  const recentWhere = and(
     eq(schema.messages.conversationId, conversationId),
     eq(schema.messages.status, 'complete'),
-  ]
-  if (excludeMessageId) recentWhereClauses.push(ne(schema.messages.id, excludeMessageId))
-  if (latestSummary) {
-    recentWhereClauses.push(
-      gt(schema.messages.createdAt, latestSummary.coveredUntilCreatedAt),
-    )
-  }
-  const recentWhere = and(...recentWhereClauses)
+    excludeMessageId ? ne(schema.messages.id, excludeMessageId) : undefined,
+    latestSummary ? afterSummaryCoverage(latestSummary) : undefined,
+  )
 
   const recent = await db
     .select()
@@ -138,7 +134,8 @@ export async function buildHistoryFor(
     items.push({ msgId: msg.id, isPinned: pinnedIdSet.has(msg.id), serialized, tokens })
   }
 
-  if (tokenBudget !== undefined && tokenBudget > 0) {
+  if (tokenBudget !== undefined) {
+    // 预算为 0 也要执行：只保留 pinned / summary，其余全部丢弃
     let total = items.reduce((s, it) => s + it.tokens, 0)
     // 超预算时，从老到新（按 items 顺序）丢非 pinned，直到符合预算
     for (let i = 0; i < items.length && total > tokenBudget; i++) {

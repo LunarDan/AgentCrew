@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { and, desc, eq, gt, inArray } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, ne } from 'drizzle-orm'
 import OpenAI from 'openai'
 
 import { db, schema } from '@/db/client'
@@ -157,6 +157,17 @@ export async function compactConversation(
   }
 }
 
+/**
+ * 摘要覆盖边界。同一毫秒内可能插入多条消息，且 id 不是时间有序的，无法判断谁在边界前，
+ * 所以用 >= 并只排除被覆盖的那条本身 —— 宁可重复一条，也不能悄悄丢掉新消息。
+ */
+export function afterSummaryCoverage(latest: ContextSummaryRow) {
+  return and(
+    gte(schema.messages.createdAt, latest.coveredUntilCreatedAt),
+    ne(schema.messages.id, latest.coveredUntilMessageId),
+  )
+}
+
 async function loadCompactableMessages(
   conversationId: string,
   latest: ContextSummaryRow | null,
@@ -165,7 +176,7 @@ async function loadCompactableMessages(
     ? and(
         eq(schema.messages.conversationId, conversationId),
         eq(schema.messages.status, 'complete'),
-        gt(schema.messages.createdAt, latest.coveredUntilCreatedAt),
+        afterSummaryCoverage(latest),
       )
     : and(
         eq(schema.messages.conversationId, conversationId),
