@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
 import { deleteCustomAgent, updateCustomAgent } from '@/server/agent-service'
+import { rejectCrossOriginWrite } from '@/server/local-origin'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -29,6 +30,8 @@ const PatchBody = z
   .strict()
 
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
+  const rejected = rejectCrossOriginWrite(req)
+  if (rejected) return rejected
   const { id } = await ctx.params
   const raw = await req.json().catch(() => null)
   const parsed = PatchBody.safeParse(raw)
@@ -45,7 +48,9 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   }
 }
 
-export async function DELETE(_req: Request, ctx: RouteContext) {
+export async function DELETE(req: NextRequest, ctx: RouteContext) {
+  const rejected = rejectCrossOriginWrite(req)
+  if (rejected) return rejected
   const { id } = await ctx.params
   try {
     await deleteCustomAgent(id)

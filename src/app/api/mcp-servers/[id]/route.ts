@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
+import { rejectCrossOriginWrite } from '@/server/local-origin'
 import {
   deleteMcpServer,
   getMcpServer,
@@ -39,6 +40,8 @@ const PatchBody = z
   .strict()
 
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
+  const rejected = rejectCrossOriginWrite(req)
+  if (rejected) return rejected
   const { id } = await ctx.params
   const raw = await req.json().catch(() => null)
   const parsed = PatchBody.safeParse(raw)
@@ -55,7 +58,9 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
   }
 }
 
-export async function DELETE(_req: NextRequest, ctx: RouteContext) {
+export async function DELETE(req: NextRequest, ctx: RouteContext) {
+  const rejected = rejectCrossOriginWrite(req)
+  if (rejected) return rejected
   const { id } = await ctx.params
   try {
     await deleteMcpServer(id)

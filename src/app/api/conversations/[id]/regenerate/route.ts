@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import { regenerateLatestResponse } from '@/server/conversation-service'
+import { rejectCrossOriginWrite } from '@/server/local-origin'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -11,7 +12,9 @@ interface RouteContext {
  * 删除最后一条 user 之后的所有 agent message + run + artifact_ref，
  * 然后以同一条 user 消息为触发重起 AgentRunner。
  */
-export async function POST(_req: NextRequest, ctx: RouteContext) {
+export async function POST(req: NextRequest, ctx: RouteContext) {
+  const rejected = rejectCrossOriginWrite(req)
+  if (rejected) return rejected
   const { id } = await ctx.params
   try {
     const result = await regenerateLatestResponse(id)

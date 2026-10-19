@@ -6,6 +6,7 @@ import {
   handleDeployCommand,
   listDeployCandidates,
 } from '@/server/deploy-command-service'
+import { rejectCrossOriginWrite } from '@/server/local-origin'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -27,6 +28,8 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
 }
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
+  const rejected = rejectCrossOriginWrite(req)
+  if (rejected) return rejected
   const { id } = await ctx.params
   // 畸形 JSON 不能被当成「空 body → 部署第一个候选」，那是用户没表达过的操作
   const raw = await req.json().catch(() => null)

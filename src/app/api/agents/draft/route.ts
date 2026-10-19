@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 
 import { AgentDraftRequestSchema, AgentDraftResponseSchema } from '@/server/agent-draft-schema'
 import { createAgentConfigDraft } from '@/server/agent-draft-service'
+import { rejectCrossOriginWrite } from '@/server/local-origin'
 
 export async function POST(req: NextRequest) {
+  const rejected = rejectCrossOriginWrite(req)
+  if (rejected) return rejected
   const raw = await req.json().catch(() => null)
   const parsed = AgentDraftRequestSchema.safeParse(raw)
   if (!parsed.success) {

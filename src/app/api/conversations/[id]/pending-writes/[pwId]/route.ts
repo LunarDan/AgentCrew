@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
+import { rejectCrossOriginWrite } from '@/server/local-origin'
 import { pendingWrites } from '@/server/pending-writes'
 
 interface RouteContext {
@@ -13,6 +14,8 @@ const Body = z.object({
 
 /** POST /api/conversations/:id/pending-writes/:pwId  body { action } —— 应用或拒绝一个 pending fs_write。 */
 export async function POST(req: NextRequest, ctx: RouteContext) {
+  const rejected = rejectCrossOriginWrite(req)
+  if (rejected) return rejected
   const { id, pwId } = await ctx.params
   const raw = await req.json().catch(() => null)
   const parsed = Body.safeParse(raw)

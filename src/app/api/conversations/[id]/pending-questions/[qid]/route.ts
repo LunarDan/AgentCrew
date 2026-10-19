@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
+import { rejectCrossOriginWrite } from '@/server/local-origin'
 import { pendingQuestions, validateAskUserAnswers } from '@/server/pending-questions'
 
 interface RouteContext {
@@ -23,6 +24,8 @@ const Body = z
 
 /** POST /api/conversations/:id/pending-questions/:qid  body { answers } —— 提交答案。 */
 export async function POST(req: NextRequest, ctx: RouteContext) {
+  const rejected = rejectCrossOriginWrite(req)
+  if (rejected) return rejected
   const { id, qid } = await ctx.params
   const raw = await req.json().catch(() => null)
   const parsed = Body.safeParse(raw)

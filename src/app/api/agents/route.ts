@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
 import { createCustomAgent, listAgentsOrdered } from '@/server/agent-service'
+import { rejectCrossOriginWrite } from '@/server/local-origin'
 
 export async function GET() {
   const agents = await listAgentsOrdered()
@@ -32,6 +33,8 @@ const CreateBody = z
   )
 
 export async function POST(req: NextRequest) {
+  const rejected = rejectCrossOriginWrite(req)
+  if (rejected) return rejected
   const raw = await req.json().catch(() => null)
   const parsed = CreateBody.safeParse(raw)
   if (!parsed.success) {

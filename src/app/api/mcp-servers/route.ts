@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
+import { rejectCrossOriginWrite } from '@/server/local-origin'
 import { createMcpServer, listMcpServers, toMcpServerView } from '@/server/mcp-server-service'
 
 export async function GET() {
@@ -23,6 +24,8 @@ const CreateBody = z.object({
 })
 
 export async function POST(req: NextRequest) {
+  const rejected = rejectCrossOriginWrite(req)
+  if (rejected) return rejected
   const raw = await req.json().catch(() => null)
   const parsed = CreateBody.safeParse(raw)
   if (!parsed.success) {

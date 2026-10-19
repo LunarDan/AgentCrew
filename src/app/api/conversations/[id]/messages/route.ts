@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
 import { clearConversationHistory, listMessages, sendMessage } from '@/server/conversation-service'
+import { rejectCrossOriginWrite } from '@/server/local-origin'
 import { MAX_MESSAGE_CHARS } from '@/shared/constants'
 
 interface RouteContext {
@@ -27,6 +28,8 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
 }
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
+  const rejected = rejectCrossOriginWrite(req)
+  if (rejected) return rejected
   const { id } = await ctx.params
   const raw = await req.json().catch(() => null)
   const parsed = SendBody.safeParse(raw)
@@ -58,7 +61,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   }
 }
 
-export async function DELETE(_req: NextRequest, ctx: RouteContext) {
+export async function DELETE(req: NextRequest, ctx: RouteContext) {
+  const rejected = rejectCrossOriginWrite(req)
+  if (rejected) return rejected
   const { id } = await ctx.params
   try {
     const result = await clearConversationHistory(id)

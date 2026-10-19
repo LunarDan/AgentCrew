@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
 import { createConversation, listConversations } from '@/server/conversation-service'
+import { rejectCrossOriginWrite } from '@/server/local-origin'
 
 const CreateBody = z.object({
   title: z.string().optional(),
@@ -16,6 +17,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const rejected = rejectCrossOriginWrite(req)
+  if (rejected) return rejected
   const raw = await req.json().catch(() => null)
   const parsed = CreateBody.safeParse(raw)
   if (!parsed.success) {

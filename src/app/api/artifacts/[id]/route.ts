@@ -1,8 +1,9 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { eq } from 'drizzle-orm'
 
 import { db, schema } from '@/db/client'
 import { deleteArtifact } from '@/server/artifact-service'
+import { rejectCrossOriginWrite } from '@/server/local-origin'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -19,7 +20,9 @@ export async function GET(_req: Request, ctx: RouteContext) {
   return NextResponse.json({ artifact })
 }
 
-export async function DELETE(_req: Request, ctx: RouteContext) {
+export async function DELETE(req: NextRequest, ctx: RouteContext) {
+  const rejected = rejectCrossOriginWrite(req)
+  if (rejected) return rejected
   const { id } = await ctx.params
   const existing = await db.query.artifacts.findFirst({
     where: eq(schema.artifacts.id, id),

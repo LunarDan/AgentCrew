@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 import { compactConversation } from '@/server/context-compaction-service'
+import { rejectCrossOriginWrite } from '@/server/local-origin'
 
 interface RouteContext {
   params: Promise<{ id: string }>
 }
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
+  const rejected = rejectCrossOriginWrite(req)
+  if (rejected) return rejected
   const { id } = await ctx.params
   try {
     const result = await compactConversation(id, req.signal)

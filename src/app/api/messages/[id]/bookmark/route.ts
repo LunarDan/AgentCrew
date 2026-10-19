@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
 import { toggleBookmarkedMessage } from '@/server/conversation-service'
+import { rejectCrossOriginWrite } from '@/server/local-origin'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -13,6 +14,8 @@ const Body = z.object({
 
 /** POST /api/messages/:id/bookmark  body { conversationId } —— toggle UI 书签（不影响 LLM 上下文）。 */
 export async function POST(req: NextRequest, ctx: RouteContext) {
+  const rejected = rejectCrossOriginWrite(req)
+  if (rejected) return rejected
   const { id } = await ctx.params
   const raw = await req.json().catch(() => null)
   const parsed = Body.safeParse(raw)

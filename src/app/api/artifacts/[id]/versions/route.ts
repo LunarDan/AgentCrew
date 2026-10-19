@@ -1,9 +1,10 @@
 import { eq } from 'drizzle-orm'
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
 import { db, schema } from '@/db/client'
 import { createArtifactVersion } from '@/server/artifact-service'
+import { rejectCrossOriginWrite } from '@/server/local-origin'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -69,7 +70,9 @@ const PostBody = z.object({
  * 用户在产物面板编辑后「提交为新版本」。以 :id 为父创建 version+1 的新产物行,返回新行。
  * 内容经 createArtifactVersion → buildArtifactContent 校验(与 write_artifact 同一来源)。
  */
-export async function POST(req: Request, ctx: RouteContext) {
+export async function POST(req: NextRequest, ctx: RouteContext) {
+  const rejected = rejectCrossOriginWrite(req)
+  if (rejected) return rejected
   const { id } = await ctx.params
   const parsed = PostBody.safeParse(await req.json().catch(() => null))
   if (!parsed.success) {

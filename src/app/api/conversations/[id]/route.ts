@@ -9,12 +9,15 @@ import {
   toggleArchiveConversation,
   togglePinConversation,
 } from '@/server/conversation-service'
+import { rejectCrossOriginWrite } from '@/server/local-origin'
 
 interface RouteContext {
   params: Promise<{ id: string }>
 }
 
-export async function DELETE(_req: NextRequest, ctx: RouteContext) {
+export async function DELETE(req: NextRequest, ctx: RouteContext) {
+  const rejected = rejectCrossOriginWrite(req)
+  if (rejected) return rejected
   const { id } = await ctx.params
   try {
     await deleteConversation(id)
@@ -52,6 +55,8 @@ const PatchBody = z
   )
 
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
+  const rejected = rejectCrossOriginWrite(req)
+  if (rejected) return rejected
   const { id } = await ctx.params
   const raw = await req.json().catch(() => null)
   const parsed = PatchBody.safeParse(raw)

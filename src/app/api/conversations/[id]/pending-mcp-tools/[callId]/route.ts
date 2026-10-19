@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
+import { rejectCrossOriginWrite } from '@/server/local-origin'
 import { pendingMcpTools } from '@/server/pending-mcp-tools'
 
 interface RouteContext {
@@ -12,6 +13,8 @@ const Body = z.object({
 })
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
+  const rejected = rejectCrossOriginWrite(req)
+  if (rejected) return rejected
   const { id, callId } = await ctx.params
   const raw = await req.json().catch(() => null)
   const parsed = Body.safeParse(raw)

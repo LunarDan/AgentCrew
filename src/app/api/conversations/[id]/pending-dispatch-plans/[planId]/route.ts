@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
 import { reviseDispatchPlan } from '@/server/conversation-service'
+import { rejectCrossOriginWrite } from '@/server/local-origin'
 import { pendingDispatchPlans } from '@/server/pending-dispatch-plans'
 
 interface RouteContext {
@@ -23,6 +24,8 @@ const Body = z.discriminatedUnion('action', [
 
 /** POST /api/conversations/:id/pending-dispatch-plans/:planId */
 export async function POST(req: NextRequest, ctx: RouteContext) {
+  const rejected = rejectCrossOriginWrite(req)
+  if (rejected) return rejected
   const { id, planId } = await ctx.params
   const raw = await req.json().catch(() => null)
   const parsed = Body.safeParse(raw)

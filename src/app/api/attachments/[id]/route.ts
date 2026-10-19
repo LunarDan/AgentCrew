@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs'
-
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 
 import { deleteAttachment, getAttachment, getAttachmentAbsolutePath } from '@/server/attachment-service'
+import { rejectCrossOriginWrite } from '@/server/local-origin'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -47,7 +47,9 @@ export async function GET(_req: Request, ctx: RouteContext) {
   })
 }
 
-export async function DELETE(_req: Request, ctx: RouteContext) {
+export async function DELETE(req: NextRequest, ctx: RouteContext) {
+  const rejected = rejectCrossOriginWrite(req)
+  if (rejected) return rejected
   const { id } = await ctx.params
   try {
     await deleteAttachment(id)
