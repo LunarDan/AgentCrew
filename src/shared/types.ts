@@ -550,6 +550,6 @@ export interface SearchHit {
   agentName: string | null
   agentAvatar: string | null
   createdAt: number
-  /** FTS5 path: contains <mark>...</mark> tags. LIKE path: plain text. */
+  /** HTML-escaped snippet. FTS5 path: only <mark>...</mark> tags are unescaped. LIKE path: plain escaped text. */
   snippetHtml: string
 }

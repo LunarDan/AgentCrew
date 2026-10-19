@@ -34,8 +34,24 @@ type HitRow = {
   snippetHtml: string
 }
 
-function rowToHit(row: HitRow): SearchHit {
-  return { ...row }
+// snippet() 只会插入高亮标记，不会转义正文；消息内容是不可信输入（LLM / 用户粘贴），
+// 所以先用控制字符占位、整体转义、再把占位换回 <mark>，避免命中片段里的 HTML 被执行。
+const FTS_MARK_OPEN = '\u0001'
+const FTS_MARK_CLOSE = '\u0002'
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function renderSnippetHtml(raw: string): string {
+  return escapeHtml(raw)
+    .split(FTS_MARK_OPEN).join('<mark>')
+    .split(FTS_MARK_CLOSE).join('</mark>')
 }
 
 /**
@@ -82,7 +98,7 @@ function runFtsPath(
       m.role AS role,
       m.agent_id AS agentId,
       m.created_at AS createdAt,
-      snippet(messages_fts, 0, '<mark>', '</mark>', '…', 12) AS snippetHtml,
+      snippet(messages_fts, 0, char(1), char(2), '…', 12) AS snippetHtml,
       c.title AS conversationTitle,
       a.name AS agentName,
       a.avatar AS agentAvatar
@@ -127,7 +143,11 @@ function runFtsPath(
     total = countRow.n
   }
 
-  return { hits: rows.map(rowToHit), total, tookMs: Date.now() - start }
+  return {
+    hits: rows.map((row) => ({ ...row, snippetHtml: renderSnippetHtml(row.snippetHtml) })),
+    total,
+    tookMs: Date.now() - start,
+  }
 }
 
 function runLikePath(
@@ -164,7 +184,11 @@ function runLikePath(
     limit, offset,
   ) as HitRow[]
 
-  return { hits: rows.map(rowToHit), total: rows.length, tookMs: Date.now() - start }
+  return {
+    hits: rows.map((row) => ({ ...row, snippetHtml: escapeHtml(row.snippetHtml) })),
+    total: rows.length,
+    tookMs: Date.now() - start,
+  }
 }
 
 export async function countSearchMatches(query: string): Promise<number> {

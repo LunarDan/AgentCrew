@@ -74,6 +74,31 @@ describe('searchMessages (FTS5 path)', () => {
     expect(r.hits[0].snippetHtml).toContain('<mark>')
   })
 
+  it('escapes HTML in snippets and keeps only the highlight markers', async () => {
+    insertMessage(db, 'm1', 'c1', 'user', [
+      { type: 'text', content: 'render <img src=x onerror="alert(1)">' },
+    ])
+    const r = await searchMessages({ query: 'render*', db: db as Database.Database })
+    expect(r.total).toBe(1)
+    expect(r.hits[0].snippetHtml).toContain('<mark>')
+    expect(r.hits[0].snippetHtml).not.toContain('<img')
+    expect(r.hits[0].snippetHtml).toContain('&lt;img')
+  })
+
+  it('escapes HTML on the LIKE fallback path', async () => {
+    insertMessage(db, 'm1', 'c1', 'user', [
+      { type: 'text', content: '模型 <script>alert(1)</script> 切换' },
+    ])
+    const r = await searchMessages({
+      query: '模型',
+      fallback: 'like',
+      db: db as Database.Database,
+    })
+    expect(r.total).toBe(1)
+    expect(r.hits[0].snippetHtml).not.toContain('<script')
+    expect(r.hits[0].snippetHtml).toContain('&lt;script')
+  })
+
   it('matches Chinese substring (3+ chars)', async () => {
     insertMessage(db, 'm1', 'c1', 'user', [
       { type: 'text', content: '渲染管线优化方案' },
