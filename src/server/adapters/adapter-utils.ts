@@ -39,16 +39,6 @@ export function buildCodexChildProcessEnv(): Record<string, string> {
   return env
 }
 
-export function isAbortLikeError(err: unknown, signal: AbortSignal): boolean {
-  return (
-    signal.aborted ||
-    (err instanceof Error &&
-      (err.name === 'AbortError' ||
-        err.message.includes('The operation was aborted') ||
-        err.message.includes('aborted')))
-  )
-}
-
 function getAgentHubDataDir(): string {
   return (
     process.env.AGENTHUB_DATA_DIR ??

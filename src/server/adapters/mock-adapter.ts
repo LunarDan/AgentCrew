@@ -114,6 +114,8 @@ async function* streamScriptedRun(
     }
   }
 
+  if (signal.aborted) return
+
   yield {
     type: 'message.end',
     conversationId: input.conversationId,
@@ -191,6 +193,7 @@ async function* streamPlanStage(
   const agents = parseAvailableAgents(input.systemPrompt)
   if (agents.length === 0) {
     yield* streamPart(input, messageId, 0, { kind: 'text', content: NO_TEAMMATE_REPLY }, signal)
+    if (signal.aborted) return
     yield {
       type: 'message.end',
       conversationId: input.conversationId,
@@ -327,6 +330,7 @@ async function* streamChildTask(
     isError: false,
   }
 
+  if (signal.aborted) return
   yield {
     type: 'message.end',
     conversationId: input.conversationId,
@@ -360,6 +364,7 @@ async function* streamAggregateStage(
     },
     signal,
   )
+  if (signal.aborted) return
   yield {
     type: 'message.end',
     conversationId: input.conversationId,

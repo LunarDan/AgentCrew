@@ -46,7 +46,11 @@ interface ToolCallOutcome {
 /** 防止单条 user message 塞太多图片（token 爆炸 + provider 通常有上限） */
 const MAX_IMAGES_PER_MESSAGE = 5
 const ANTHROPIC_MAX_TOKENS = 8192
-const ANTHROPIC_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
+/** 各家 vision 接口共同支持的格式；不支持的格式直接跳过，避免 provider 400 掉整个 run */
+const SUPPORTED_VISION_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
+/** 原图字节上限；base64 会再膨胀 4/3，太大的图跳过而不是把请求撑爆 */
+const MAX_VISION_IMAGE_BYTES = 5 * 1024 * 1024
+type AnthropicImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
 
 export class CustomAgentAdapter implements AgentPlatformAdapter {
   readonly name = 'custom' as const
@@ -316,6 +320,7 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
 
       // 执行工具
       for (const tc of toolCalls) {
+        if (signal.aborted) return
         let args: unknown
         try {
           args = tc.argsBuffer ? JSON.parse(tc.argsBuffer) : {}
@@ -342,9 +347,12 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
         })
       }
 
+      if (signal.aborted) return
       yield baseEvent(input, { type: 'message.end', messageId })
       // 继续下一轮
     }
+
+    throw new Error(`Tool-turn limit reached after ${MAX_TURNS} turns; the model was still requesting tools`)
   }
 
   /** 执行一次工具调用，产出 tool.call / tool.result 与产物副作用事件；两条 provider 循环共用。 */
@@ -640,6 +648,7 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
       // 否则 runner 会先清掉 currentMessageId，后续 part 落不到已结束的消息上。
       const toolResults: Anthropic.ToolResultBlockParam[] = []
       for (const use of toolUses) {
+        if (signal.aborted) return
         const outcome = yield* this.runToolCall({
           input,
           messageId,
@@ -659,8 +668,11 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
         })
       }
       messages.push({ role: 'user', content: toolResults })
+      if (signal.aborted) return
       yield baseEvent(input, { type: 'message.end', messageId })
     }
+
+    throw new Error(`Tool-turn limit reached after ${MAX_TURNS} turns; the model was still requesting tools`)
   }
 }
 
@@ -834,22 +846,40 @@ function buildAnthropicUserContent(
 ): Anthropic.ContentBlockParam[] {
   const blocks: Anthropic.ContentBlockParam[] = [{ type: 'text', text: prompt }]
   for (const img of images) {
-    if (!ANTHROPIC_IMAGE_TYPES.has(img.mimeType)) continue
-    try {
-      const data = readFileSync(img.absPath).toString('base64')
-      blocks.push({
-        type: 'image',
-        source: {
-          type: 'base64',
-          media_type: img.mimeType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
-          data,
-        },
-      })
-    } catch (err) {
-      console.warn('[CustomAgentAdapter] failed to read image', img.absPath, err)
-    }
+    const loaded = readVisionImage(img)
+    if (!loaded) continue
+    blocks.push({
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: loaded.mimeType as AnthropicImageMediaType,
+        data: loaded.base64,
+      },
+    })
   }
   return blocks
+}
+
+/** 读图前先过格式 + 体积；不满足的图直接跳过（附 warn），调用方无需再判。 */
+function readVisionImage(img: AdapterAttachment): { mimeType: string; base64: string } | null {
+  if (!SUPPORTED_VISION_IMAGE_TYPES.has(img.mimeType)) {
+    console.warn(`[CustomAgentAdapter] skip image with unsupported mime type ${img.mimeType}`)
+    return null
+  }
+  try {
+    const buf = readFileSync(img.absPath)
+    if (buf.byteLength > MAX_VISION_IMAGE_BYTES) {
+      console.warn(
+        `[CustomAgentAdapter] skip image ${buf.byteLength} bytes > ${MAX_VISION_IMAGE_BYTES}`,
+        img.absPath,
+      )
+      return null
+    }
+    return { mimeType: img.mimeType, base64: buf.toString('base64') }
+  } catch (err) {
+    console.warn('[CustomAgentAdapter] failed to read image', img.absPath, err)
+    return null
+  }
 }
 
 function serializeToolResult(value: unknown): string {
@@ -875,17 +905,14 @@ function buildMultimodalUserContent(
     { type: 'text', text: prompt },
   ]
   for (const img of images) {
-    try {
-      const data = readFileSync(img.absPath).toString('base64')
-      blocks.push({
-        type: 'image_url',
-        image_url: {
-          url: `data:${img.mimeType};base64,${data}`,
-        },
-      })
-    } catch (err) {
-      console.warn('[CustomAgentAdapter] failed to read image', img.absPath, err)
-    }
+    const loaded = readVisionImage(img)
+    if (!loaded) continue
+    blocks.push({
+      type: 'image_url',
+      image_url: {
+        url: `data:${loaded.mimeType};base64,${loaded.base64}`,
+      },
+    })
   }
   return blocks
 }

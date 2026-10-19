@@ -34,7 +34,6 @@ import type {
 import {
   buildCodexChildProcessEnv,
   createAdapterEvent,
-  isAbortLikeError,
 } from './adapter-utils'
 import { adapterSessionKey, codexSessions } from './session-store'
 import type { AdapterInput, AgentPlatformAdapter } from './types'
@@ -210,9 +209,11 @@ export class CodexAdapter implements AgentPlatformAdapter {
         }
       }
     } catch (err) {
-      if (!isAbortLikeError(err, signal)) throw normalizeCodexError(err)
+      // 只有本次 run 真的被中止才算 abort；SDK 内部错误即使带 aborted 字样也必须上抛
+      if (!signal.aborted) throw normalizeCodexError(err)
     }
 
+    if (signal.aborted) return
     yield baseEvent({ type: 'message.end' as const, messageId })
   }
 }
