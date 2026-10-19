@@ -67,7 +67,7 @@ L1 Persistence                          src/db/**（Drizzle+SQLite） + workspac
 | 平台抽象（Win/POSIX） | ✅ | shell 选择 · 多盘符 DirPicker · 子进程清理 |
 | Electron 桌面版 | ✅ | DMG / EXE 打包 · userData 路径迁移 |
 | 全局 API Key 设置面板 | ✅ | app_settings 单行表 · 三层 key 优先级 |
-| 移动端伴随 App | ⏳ | 响应式 Web 已适配;Capacitor 原生壳脚手架已建,配对通信待打通 |
+| 移动端伴随 App | ⏳ | 响应式 Web 已适配;Capacitor 原生壳脚手架已建;手动配对（地址 + 设备 token）可用并能跨桌面重启;事件流（`/api/mobile/events`）与 QR 配对码未实现 |
 | 斜杠命令菜单 | ✅ | 输入 `/` 弹命令浮层（打开设置 / Agents 库等 UI 命令） |
 | 测试覆盖 | 🟡 | Vitest 纯函数（security / workspace-utils / dispatch-plan / artifact-content / ppt-export / ppt-theme / mock-adapter 编排契约）；Playwright **E2E 基建 + 核心 IM 流 + 产物预览/导出 + 群聊编排**（mock agent，见附录） |
 
@@ -175,6 +175,7 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 ## 附 · 当前现状（易过时,以代码为准）
 
 ### ✅ 近期完成（最新一批）
+- **移动端鉴权改用设置表（2026-10-20）**：`/api/mobile/*` 的期望 token 此前只读 `AGENTHUB_MOBILE_TOKEN` 环境变量，而 token 实际存在 `app_settings.mobile_device_token` —— `pnpm dev` / 直接起 Next 时桌面一重启，设置面板里配好的 token 就全部 401/503。现在环境变量（dev / Electron bootstrap 注入）优先、否则读设置表，且 `companion_mode='off'` 时旧 token 不再放行；snapshot 的 `server.companionMode` 也改为读设置表（此前读一个从未写入的 `AGENTHUB_COMPANION_MODE`，永远报 `lan`）
 - **Custom adapter 支持 Anthropic（2026-10-20）**：`provider='anthropic'` 时走 `@anthropic-ai/sdk` Messages API（`messages.stream`），保留同一套 AgentHub 工具循环——`tool_use` / `tool_result` block、内置与外部 MCP 工具共用执行器、thinking/text 流式 part、缓存 token 用量；历史从 OpenAI ChatMessage 转换（只保留 user/assistant 文本、合并连续同角色）。key 回退 `agent.apiKey → ANTHROPIC_API_KEY → ANTHROPIC_AUTH_TOKEN`，Base URL 可指向兼容网关。已用本机 relay 做真实两轮 tool-loop 验证（模型 `claude-sonnet-4-6`）
 - **Agent 配置导入 / 导出（2026-10-20）**：v1 JSON（`format: agenthub-agent`）由 `src/shared/agent-export.ts` 严格校验（zod `strict`）；导出只含身份 / prompt / adapter / model / 工具 / vision，**永不含** `apiKey` / `apiBaseUrl` / `id` / `mcpServerIds`；导入在 Agent 库触发，校验通过后打开创建弹窗预填，用户补 key 并确认才落库，失败在列表顶部显示可读错误
 - **Agent 头像选择器（2026-10-20）**：创建 / 编辑弹窗的基本信息页新增 emoji 预设（10 个）+ 自定义输入（≤ 8 字符），`PATCH /api/agents/:id` 与服务层同步支持 `avatar`（空串回落到 `🤖`）；此前只能使用 service 默认值。顺带清理 `specs/10` 中两条已过时的 TODO（删除二次确认已实现）
@@ -199,7 +200,7 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 - 冲突检测盲区：bash / SDK adapter 写入（可加波次快照补全）
 - Codex 写盘审批 hook（当前 Review 模式用 read-only sandbox）
 - sandbox 配额对 Claude Code SDK 失效（SDK 自己写盘绕过 quota）
-- 移动端伴随 App 配对通信打通
+- 移动端伴随 App：事件流（`/api/mobile/events`）与 QR/一次性配对码
 - E2E 可观测性：本机 Playwright 浏览器版本与 `@playwright/test` 不匹配时需 `pnpm exec playwright install chromium`
 
 ### ⚠️ 关键约定（动手前必看）
@@ -211,4 +212,4 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 
 ---
 
-*最后更新：2026-10-20 · 记入 Custom adapter 的 Anthropic Messages API 支持、Agent 配置导入 / 导出、头像选择器、POSIX 子进程 SIGKILL 升级与内置 `web_fetch`（含 SSRF 防护）。同日更早记入了流式可靠性两处修复与 F2 的 live 验证结果。2026-10-19 记入外部 MCP P1（custom 自建 MCP 客户端 + 审批门扩展到 custom）与外部 MCP 连接失败可见（F2：`mcp_server.unavailable` + 持久系统提示）。2026-10-18 记入了 shell 工具按身份识别（Windows 上 SDK 的 shell 工具是 `PowerShell`，此前按 `Bash` 字面量匹配导致黑名单与审批分类器整条失效）。2026-10-13 记入了 Claude Code adapter 的隔离启动（`settingSources: []` + `strictMcpConfig: true`）与 F1 修复（`partIndex` 归一，`src/server/part-slots.ts`）及两个相邻未修缺陷（`persistEvent` 空缓冲兜底、claude-code adapter 非流式回退重复渲染）。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*
+*最后更新：2026-10-20 · 记入移动端鉴权改用设置表（重启后 token 不失效 + snapshot 模式来源修正）、Custom adapter 的 Anthropic Messages API 支持、Agent 配置导入 / 导出、头像选择器、POSIX 子进程 SIGKILL 升级与内置 `web_fetch`（含 SSRF 防护）。同日更早记入了流式可靠性两处修复与 F2 的 live 验证结果。2026-10-19 记入外部 MCP P1（custom 自建 MCP 客户端 + 审批门扩展到 custom）与外部 MCP 连接失败可见（F2：`mcp_server.unavailable` + 持久系统提示）。2026-10-18 记入了 shell 工具按身份识别（Windows 上 SDK 的 shell 工具是 `PowerShell`，此前按 `Bash` 字面量匹配导致黑名单与审批分类器整条失效）。2026-10-13 记入了 Claude Code adapter 的隔离启动（`settingSources: []` + `strictMcpConfig: true`）与 F1 修复（`partIndex` 归一，`src/server/part-slots.ts`）及两个相邻未修缺陷（`persistEvent` 空缓冲兜底、claude-code adapter 非流式回退重复渲染）。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*
