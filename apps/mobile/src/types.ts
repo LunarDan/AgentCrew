@@ -37,6 +37,10 @@ export type MobileMessagePart =
   | { type: 'tool_result'; callId: string; isError: boolean }
   | { type: 'artifact_ref'; artifactId: string }
   | {
+      type: 'deploy_candidates'
+      candidates: Array<{ artifactId: string; title: string; version: number }>
+    }
+  | {
       type: 'deploy_status'
       title: string
       version: number

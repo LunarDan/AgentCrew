@@ -476,6 +476,13 @@ function MessagePartView({
             : `部署失败：${part.error ?? part.title}`}
         </span>
       )
+    case 'deploy_candidates':
+      return (
+        <span className="inline-chip">
+          <Rocket className="inline-icon" aria-hidden="true" />
+          {part.candidates.length} 个可部署产物，请在桌面端选择要发布的版本
+        </span>
+      )
     case 'attachment':
       return (
         <span className="inline-chip">
@@ -754,6 +761,8 @@ function toMessagePartScrollKey(part: MobileMessagePart): string {
       return `${part.type}:${part.artifactId}`
     case 'deploy_status':
       return `${part.type}:${part.status}:${part.previewPath}:${part.error ?? ''}`
+    case 'deploy_candidates':
+      return `${part.type}:${part.candidates.length}`
     case 'attachment':
       return `${part.type}:${part.kind}:${part.fileName}`
   }

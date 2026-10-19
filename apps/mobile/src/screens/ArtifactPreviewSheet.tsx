@@ -69,6 +69,16 @@ function ArtifactContentView({ artifact }: { artifact: MobileArtifact }) {
       return <CodeFileArtifact content={content} />
     case 'diff':
       return <DiffArtifact content={content} />
+    default:
+      // 服务端产物类型（diagram / ppt / project …）可能多于移动端已适配的 5 种。
+      // 至少给出明确说明，而不是渲染一个空白 sheet。
+      return (
+        <div className="artifact-empty">
+          <FileCode2 className="artifact-empty-icon" aria-hidden="true" />
+          <h3>{artifact.title}</h3>
+          <p>该产物类型暂不支持在移动端预览，请在桌面端打开。</p>
+        </div>
+      )
   }
 }
 
