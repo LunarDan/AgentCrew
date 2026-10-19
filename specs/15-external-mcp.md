@@ -92,7 +92,8 @@ createdAt     integer
 
 - **命名空间**:外部 MCP 工具统一命名 `mcp__<serverName>__<toolName>`(对齐 claude-code/codex SDK 既有约定,如 `mcp__agenthub__write_artifact`),避免与内置工具冲突。
 - **调用事件**:MCP 工具调用复用现有 `tool.call` / `tool.result`(`specs/02`),`toolName` 用命名空间名。**不为「上报一次调用」新增任何 StreamEvent,不破坏前端 reducer**。
-- **审批事件**:审批是另一件事,用独立的一对 `mcp_tool.pending` / `mcp_tool.resolved`(镜像 `bash_command.*`,见 spec 02 / 09)。这是本特性**唯一**的 StreamEvent 新增。
+- **审批事件**:审批是另一件事,用独立的一对 `mcp_tool.pending` / `mcp_tool.resolved`(镜像 `bash_command.*`,见 spec 02 / 09)。这是本特性**唯一**的调用相关 StreamEvent 新增。
+- **连接生命周期事件**(2026-10-19 追加):SDK 在 init 消息里报告外部 server 的连接状态;claude-code adapter 对 `failed` / `needs-auth` / `disabled` 发 `mcp_server.unavailable`,由 AgentRunner 转成会话内持久的 `role='system'` 提示。它是生命周期事件,**不是**调用上报,不改变上面的命名规则。
 - **artifact**:外部 MCP 工具一般不产 AgentHub 产物;不触发 `artifact.create`(除非它显式返回 `artifactId` 并被约定识别——首版不做)。
 - **支持矩阵**(实测结论,前后端共用 `src/shared/mcp.ts`):
 
@@ -116,7 +117,7 @@ createdAt     integer
    - `ask`(默认):MCP 工具调用走**审批门**。**粒度 = per-tool-per-conversation**:某 `mcp__server__tool` 在一次会话内**首次**调用时弹审批,批准后该会话内该工具免再问;拒绝则该次调用返回 `isError`,run 继续。被拒时返回给模型的文案明确要求「不要重试」。(每次都问太吵;整个 server 一次批又太粗——同一 server 可能既有安全的读、又有危险的写。)
    - **生效范围**:审批门**只在 Claude Code** 落地(P0)。Codex 有自己的一套审批策略与沙箱,AgentHub 拦截不到它的工具决策,所以 `trust` 对 Codex 是**建议性的**,UI 必须如实标注而不是把它显示成一道生效的保护。custom 的 MCP 客户端是 P1。
 3. **stdio 收敛**:`cwd` 未强制到 workspace(见 §12 D3 说明);`env` **继承本进程完整环境**(`buildChildProcessEnv`)——这**不是白名单**,见 §6.3 下方。
-4. **失败隔离**:某 server 连接/调用失败 → 跳过该 server 并记警告(`console.warn('[mcp] ...')`),**不崩整个 run**。
+4. **失败隔离**:某 server 连接/调用失败 → 跳过该 server,**不崩整个 run**,并且**必须对用户可见**:解析阶段失败(transport 不支持、缺 `command`/`url`、`${ENV}` 无法展开)与 SDK spawn 阶段失败都写进会话内一条持久的 `role='system'` 提示(`msg_mcp_<runId>`),点名 server 与原因/状态。`console.warn` 不再是唯一出口(2026-10-19 修 F2;原文只写了 `console.warn`)。
 5. **中止**:`AbortSignal` 触发时关闭所有 MCP 连接、杀 stdio 进程树(复用 `killProcessTree` / spec 11)。
 6. **明确告知**:文档与 UI 必须写明「**外部 MCP 不在 AgentHub 的沙箱保证范围内**」,这是用户授予的信任。
 
@@ -152,7 +153,7 @@ createdAt     integer
 ## 9. 影响面 / 需同步的 spec（✅ 均已于 2026-10-09 同步）
 
 - `01-core-entities` — `Agent` 实体新增 `mcpServerIds` 字段（`CLAUDE.md §3.2` 要求实体字段改动必须同步本 spec）
-- `02-stream-events` — `mcp_tool.pending` / `mcp_tool.resolved` 两个事件 + 持久化表
+- `02-stream-events` — `mcp_tool.pending` / `mcp_tool.resolved` 两个事件 + 持久化表;2026-10-19 追加 `mcp_server.unavailable`(透传)与 `McpServerRunStatus`
 - `05-adapter-interface` — `AdapterInput.mcpServers` + 三 adapter 的 MCP 接入方式
 - `07-tools` — MCP 工具命名空间 + 与内置工具/`toolRegistry` 的关系
 - `08-db-schema` — `mcp_servers` 表 + `agents.mcp_server_ids` 列（实际按 `bootstrap.ts` DDL + `safeAlter` + `migrate-add-mcp-servers.ts` 落地，**不是** `pnpm db:push` —— 原因见 `specs/08` 迁移规范）
@@ -255,3 +256,5 @@ P0 落地时对着工作树逐条核查,发现原稿有四处与代码事实不�
 
 1. **工具卡片渲染后消失。** `part.start` 按 `partIndex` 赋值,而 `tool.call` / `tool.result` 是另一条 `push` 路径写入**同一个** `parts` 数组,两者共用一套索引但不互通 —— 模型在工具调用**之后**输出的 text 会覆盖掉工具调用占的那个槽位(服务端 `agent-runner.ts:1688` 与前端 `app-store.ts:680` 对称)。于是持久化结果恒为 `["text","tool_result"]`,而 UI 把孤立的 `tool_result` 丢弃,卡片在 run 进行中可见、text 一到就消失。这是 claude-code adapter 下**所有**工具调用的既有缺陷,与外部 MCP 无关。**后续(2026-10-12)**:已由 `openspec/changes/fix-part-index-collision/` 修复 —— 索引分配权收归 AgentRunner,不再由适配器自报序号;已落库的旧消息不回填(丢失的 `toolName` / `args` 无法重建)。
 2. **spawn 失败没有任何提示(9.7 只算半个)。** `resolveMcpServersForAgent` 只对**解析**阶段的失败告警;`command` 不存在这类问题能通过解析、到 SDK spawn 时才失败,而这条路径 AgentHub 完全不上报 —— 用户看到的是「server 已启用、已勾选、就是没有」,且没有任何解释。run 本身不失败这一点成立。
+
+> **Follow-up (2026-10-19): fixed.** F2 已由 `openspec/changes/surface-external-mcp-failures/` 修复:claude-code adapter 从 SDK init 的 `mcp_servers` 读取连接状态,对 `failed` / `needs-auth` / `disabled` 发 `mcp_server.unavailable`;两类失败(解析 + spawn)都由 AgentRunner 写成会话内一条持久的 `role='system'` 提示(`msg_mcp_<runId>`),点名 server 与原因/状态。Codex 的 spawn 状态仍无 SDK 事件可读,解析阶段的警告照旧可见。上面两段原始记录保留不改。

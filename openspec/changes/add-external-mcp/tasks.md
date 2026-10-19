@@ -88,6 +88,8 @@
   - Verified with a `slow` tool (120s) so the abort landed mid-execution. The child's own lifecycle log recorded `call slow` (proving the tool was really executing), the abort request was accepted, the child stopped logging within ~6s, and a process sweep found zero orphaned `mcp-verify` node processes. Note the timing trap: a fixed abort deadline is unreliable here because a relay-routed model can take ~11s to emit the first `tool.call` — the harness now aborts a fixed delay *after the approval*, not after the send.
 - [~] 9.7 Confirm a deliberately broken server degrades to a warning without failing the run.
   - **The "run does not fail" half holds; the "warning" half does not.** With a server whose `command` does not exist on PATH, the run still ended `complete` and the broken server's tools were simply absent — no crash, no hang. But **no warning reaches the user**: `resolveMcpServersForAgent` only warns on *resolution* problems (unsupported transport, missing `command`/`url`, unresolved `${ENV}`); a nonexistent command passes resolution and fails later at SDK spawn time, which AgentHub does not surface anywhere. See finding F2.
+
+> **Follow-up (2026-10-19)**: the missing "warning" half is now implemented in `openspec/changes/surface-external-mcp-failures/` — the claude-code adapter reads `mcp_servers` from the SDK init message and AgentRunner turns both failure classes into a persistent `role='system'` notice. The item text above is left as written.
 - [x] 9.8 With `trust = 'ask'`: confirm the first call to an external tool prompts, an approval makes the same tool silent for the rest of that conversation, and a **new** conversation prompts again.
   - All three parts verified: new conversation → prompt appeared; approving it → the tool executed; a second call to the same tool in the same conversation → no prompt (`pendingLog: []`); a *new* conversation → prompt appeared again. Memory is per (conversation, tool) and in-memory only, as designed.
 - [x] 9.9 With `trust = 'always'`: confirm the tool executes with no prompt.
@@ -117,6 +119,8 @@ This affects **every** tool call through the claude-code adapter (`mcp__agenthub
 
 **F2 — an SDK-level MCP spawn failure is invisible (9.7 gap).**
 `resolveMcpServersForAgent` warns only for resolution failures. A server that resolves but cannot be spawned (bad `command`) is dropped silently by the SDK, so the user sees a server that is enabled, selected, and simply not there — with nothing explaining why. Closing this means surfacing spawn failures at connect time (e.g. prompting for a probe when a run resolves a server that produced no tools), which is a behavior change, so it is left open rather than patched in this change.
+
+> **Follow-up (2026-10-19): fixed.** The behavior change landed as `openspec/changes/surface-external-mcp-failures/`. Rather than a 60s per-run probe, the adapter reads the connection status the SDK already reports in its init message (`mcp_servers`), emits `mcp_server.unavailable` for `failed` / `needs-auth` / `disabled`, and AgentRunner persists one system message per run covering both failure classes. Codex still has no equivalent SDK signal. The paragraph above is left as written.
 
 > Both findings above are recorded, not fixed. Neither is a regression introduced by the external-MCP work.
 >

@@ -380,7 +380,7 @@ class ClaudeCodeAdapter implements AgentPlatformAdapter {
 
 | SDK 消息 | 对应 StreamEvent |
 |---|---|
-| `SDKSystemMessage subtype:'init'` | 不产生事件；读取 `session_id`（resume）与 `tools`（本次 run 的工具表，供 shell 工具识别） |
+| `SDKSystemMessage subtype:'init'` | 读取 `session_id`（resume）、`tools`（本次 run 的工具表，供 shell 工具识别）与 `mcp_servers`（外部 server 连接状态）；仅当外部 server 报 `failed` / `needs-auth` / `disabled` 时 emit `mcp_server.unavailable`（详见 Spec 15） |
 | `SDKPartialAssistantMessage` (开 `includePartialMessages: true`) `content_block_delta + text_delta` | 第一次开 text part：`part.start({type:'text',content:''})`；后续：`part.delta({type:'text.append',text})` |
 | `SDKAssistantMessage.message.content` 里的 `text` 块 | 兜底：若 partial 没投递过，整段开一个 text part |
 | `SDKAssistantMessage.message.content` 里的 `tool_use` 块 | `tool.call({callId,toolName,args})`；本地 `Map<sdk_id, ourCallId>` 记账 |
