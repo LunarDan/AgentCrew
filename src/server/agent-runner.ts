@@ -1925,7 +1925,7 @@ async function emitErrorVisualisation(
     role: 'agent',
     agentId: args.agentId,
     parts: [{ type: 'text', content: errorText }],
-    status: 'error',
+    status: status === 'aborted' ? 'aborted' : 'error',
     mentionedAgentIds: [],
     runId,
     createdAt: now,
@@ -1946,12 +1946,8 @@ async function emitErrorVisualisation(
     partIndex: 0,
     part: { type: 'text', content: errorText },
   })
-  publish({
-    type: 'message.end',
-    conversationId: args.conversationId,
-    timestamp: now,
-    messageId: errorMessageId,
-  })
+  // 不发 message.end：客户端会把它当成 complete。随后发布的 run.end 会按
+  // failed / aborted 把这条 streaming 消息改成对应状态。
 }
 
 async function persistUnresolvedToolFailures(

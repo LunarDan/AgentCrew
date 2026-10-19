@@ -145,14 +145,6 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
 
     const MAX_TURNS = 8
     let turn = 0
-    // 跨 turn 累加 token 用量；run 结束前 yield run.usage 给 AgentRunner 落库
-    const runUsage = {
-      inputTokens: 0,
-      outputTokens: 0,
-      cacheCreationTokens: 0,
-      cacheReadTokens: 0,
-      lastInputTokens: 0,
-    }
 
     while (turn < MAX_TURNS) {
       if (signal.aborted) return
@@ -190,7 +182,7 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
         throw err
       }
 
-      // 本 turn 单条 message 的 usage（per-message）；与 runUsage 同时维护
+      // 本 turn 单条 message 的 usage（per-message）
       const msgUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }
 
       for await (const chunk of stream as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>) {
@@ -205,10 +197,6 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
           msgUsage.inputTokens += inp
           msgUsage.outputTokens += out
           msgUsage.cacheReadTokens += cached
-          runUsage.inputTokens += inp
-          runUsage.outputTokens += out
-          runUsage.cacheReadTokens += cached
-          runUsage.lastInputTokens = inp
         }
         const choice = chunk.choices[0]
         if (!choice) continue
@@ -282,6 +270,24 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
 
       const toolCalls = Array.from(toolCallBuffer.values()).filter((tc) => tc.id && tc.name)
 
+      // 本 turn 的 usage 必须在执行工具之前发出：plan 阶段会在 plan_tasks 的
+      // tool.call 处停下来，之后再发就永远发不出去。AgentRunner 按 runId 累加。
+      if (msgUsage.inputTokens > 0 || msgUsage.outputTokens > 0) {
+        yield baseEvent(input, { type: 'message.usage', messageId, usage: msgUsage })
+        yield baseEvent(input, {
+          type: 'run.usage',
+          runId: input.runId,
+          usage: {
+            inputTokens: msgUsage.inputTokens,
+            outputTokens: msgUsage.outputTokens,
+            cacheCreationTokens: 0,
+            cacheReadTokens: msgUsage.cacheReadTokens,
+            lastInputTokens: msgUsage.inputTokens,
+            model: modelId,
+          },
+        })
+      }
+
       // 写回 assistant message
       // DeepSeek thinking-mode 模型要求把 reasoning_content 一起回传到下一轮，
       // 否则 API 返回 "The reasoning_content in the thinking mode must be passed back".
@@ -304,15 +310,7 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
       // 只按「有没有工具调用」判断结束：有些 provider 在带 tool_calls 时也会给 finish_reason = 'stop'，
       // 不能因此丢掉已经累积的工具调用。
       if (toolCalls.length === 0) {
-        if (msgUsage.inputTokens > 0 || msgUsage.outputTokens > 0) {
-          yield baseEvent(input, { type: 'message.usage', messageId, usage: msgUsage })
-        }
         yield baseEvent(input, { type: 'message.end', messageId })
-        yield baseEvent(input, {
-          type: 'run.usage',
-          runId: input.runId,
-          usage: { ...runUsage, model: modelId },
-        })
         return
       }
 
@@ -344,18 +342,9 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
         })
       }
 
-      if (msgUsage.inputTokens > 0 || msgUsage.outputTokens > 0) {
-        yield baseEvent(input, { type: 'message.usage', messageId, usage: msgUsage })
-      }
       yield baseEvent(input, { type: 'message.end', messageId })
       // 继续下一轮
     }
-    // 到达 MAX_TURNS 兜底：把累计 usage emit 一下（正常路径在 line 232 已 emit 过 + return）
-    yield baseEvent(input, {
-      type: 'run.usage',
-      runId: input.runId,
-      usage: { ...runUsage, model: modelId },
-    })
   }
 
   /** 执行一次工具调用，产出 tool.call / tool.result 与产物副作用事件；两条 provider 循环共用。 */
@@ -484,13 +473,6 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
 
     const MAX_TURNS = 8
     let turn = 0
-    const runUsage = {
-      inputTokens: 0,
-      outputTokens: 0,
-      cacheCreationTokens: 0,
-      cacheReadTokens: 0,
-      lastInputTokens: 0,
-    }
 
     while (turn < MAX_TURNS) {
       if (signal.aborted) return
@@ -607,13 +589,6 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
         }
       }
 
-      runUsage.inputTokens += msgUsage.inputTokens
-      runUsage.outputTokens += msgUsage.outputTokens
-      runUsage.cacheReadTokens += msgUsage.cacheReadTokens
-      runUsage.cacheCreationTokens += cacheCreationTokens
-      runUsage.lastInputTokens =
-        msgUsage.inputTokens + msgUsage.cacheReadTokens + cacheCreationTokens
-
       const assistantContent: Anthropic.ContentBlockParam[] = []
       for (const block of textBlocks.values()) {
         if (block.text) assistantContent.push({ type: 'text', text: block.text })
@@ -641,15 +616,23 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
 
       if (msgUsage.inputTokens > 0 || msgUsage.outputTokens > 0) {
         yield baseEvent(input, { type: 'message.usage', messageId, usage: msgUsage })
+        // 每 turn 报告增量；必须在执行工具前发出（plan 阶段会在 tool.call 处停下）。
+        yield baseEvent(input, {
+          type: 'run.usage',
+          runId: input.runId,
+          usage: {
+            inputTokens: msgUsage.inputTokens,
+            outputTokens: msgUsage.outputTokens,
+            cacheCreationTokens,
+            cacheReadTokens: msgUsage.cacheReadTokens,
+            lastInputTokens: msgUsage.inputTokens + msgUsage.cacheReadTokens + cacheCreationTokens,
+            model: modelId,
+          },
+        })
       }
 
       if (toolUses.length === 0 || stopReason !== 'tool_use') {
         yield baseEvent(input, { type: 'message.end', messageId })
-        yield baseEvent(input, {
-          type: 'run.usage',
-          runId: input.runId,
-          usage: { ...runUsage, model: modelId },
-        })
         return
       }
 
@@ -678,12 +661,6 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
       messages.push({ role: 'user', content: toolResults })
       yield baseEvent(input, { type: 'message.end', messageId })
     }
-
-    yield baseEvent(input, {
-      type: 'run.usage',
-      runId: input.runId,
-      usage: { ...runUsage, model: modelId },
-    })
   }
 }
 
