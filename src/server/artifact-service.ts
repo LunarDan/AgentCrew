@@ -4,6 +4,7 @@ import { db, schema } from '@/db/client'
 import type { ArtifactRow } from '@/db/schema'
 import { buildArtifactContent, describeArtifactContentError } from '@/server/artifact-content'
 import { deleteDeploymentsForArtifact } from '@/server/deployment-service'
+import { eventBus } from '@/server/event-bus'
 import { newArtifactId } from '@/server/ids'
 
 /**
@@ -53,7 +54,7 @@ export async function deleteArtifact(artifactId: string): Promise<void> {
   const deleted = await db
     .delete(schema.artifacts)
     .where(eq(schema.artifacts.id, artifactId))
-    .returning({ id: schema.artifacts.id })
+    .returning({ id: schema.artifacts.id, conversationId: schema.artifacts.conversationId })
 
   if (deleted.length === 0) {
     throw new Error(`Artifact not found: ${artifactId}`)
@@ -61,6 +62,15 @@ export async function deleteArtifact(artifactId: string): Promise<void> {
 
   // 本地部署目录按 artifactId 归属，产物删掉后不应还能被预览 / 下载
   deleteDeploymentsForArtifact(artifactId)
+
+  // 其它标签页 / 移动端的产物库各自缓存了一份 meta 列表，不广播就会一直显示这个已删版本
+  eventBus.publish({
+    type: 'message.removed',
+    conversationId: deleted[0].conversationId,
+    timestamp: Date.now(),
+    messageIds: [],
+    artifactIds: [artifactId],
+  })
 }
 
 export type CreateArtifactVersionResult =
