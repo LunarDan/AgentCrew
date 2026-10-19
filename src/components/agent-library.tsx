@@ -1,7 +1,7 @@
 'use client'
 
-import { Pencil, Plus, Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import { Download, Pencil, Plus, Trash2, Upload } from 'lucide-react'
+import { useRef, useState } from 'react'
 
 import { AgentAvatar } from '@/components/agent-avatar'
 import { CreateAgentDialog } from '@/components/create-agent-dialog'
@@ -18,6 +18,12 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import type { AgentRow } from '@/db/schema'
 import { deleteAgent as deleteAgentAPI } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import {
+  agentExportFileName,
+  buildAgentExport,
+  parseAgentExport,
+  type AgentExportAgent,
+} from '@/shared/agent-export'
 import { useAgentList, useAppStore } from '@/stores/app-store'
 
 /**
@@ -30,6 +36,9 @@ export function AgentLibrary() {
 
   const [formOpen, setFormOpen] = useState(false)
   const [editingAgent, setEditingAgent] = useState<AgentRow | null>(null)
+  const [importedAgent, setImportedAgent] = useState<AgentExportAgent | null>(null)
+  const [importError, setImportError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 
@@ -37,15 +46,52 @@ export function AgentLibrary() {
 
   const openCreate = () => {
     setEditingAgent(null)
+    setImportedAgent(null)
+    setImportError(null)
     setFormOpen(true)
   }
   const openEdit = (agent: AgentRow) => {
     setEditingAgent(agent)
+    setImportedAgent(null)
     setFormOpen(true)
   }
   const handleFormOpenChange = (open: boolean) => {
     setFormOpen(open)
-    if (!open) setEditingAgent(null)
+    if (!open) {
+      setEditingAgent(null)
+      setImportedAgent(null)
+    }
+  }
+
+  const exportAgent = (agent: AgentRow) => {
+    const file = buildAgentExport(agent)
+    const blob = new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = agentExportFileName(agent.name)
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 0)
+  }
+
+  const importAgent = async (file: File) => {
+    setImportError(null)
+    try {
+      let raw: unknown
+      try {
+        raw = JSON.parse(await file.text())
+      } catch {
+        throw new Error('文件不是有效的 JSON')
+      }
+      const parsed = parseAgentExport(raw)
+      setEditingAgent(null)
+      setImportedAgent(parsed.agent)
+      setFormOpen(true)
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : String(err))
+    }
   }
 
   const confirmDelete = async () => {
@@ -65,14 +111,37 @@ export function AgentLibrary() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 px-3 pt-3">
-        <Button
-          className="w-full justify-start gap-2"
-          variant="outline"
-          onClick={openCreate}
-        >
-          <Plus className="size-4" />
-          创建 Agent
-        </Button>
+        <div className="flex gap-1.5">
+          <Button className="flex-1 justify-start gap-2" variant="outline" onClick={openCreate}>
+            <Plus className="size-4" />
+            创建 Agent
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            title="导入 Agent 配置"
+            aria-label="导入 Agent 配置"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Upload className="size-4" />
+          </Button>
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            if (file) void importAgent(file)
+            e.target.value = ''
+          }}
+        />
+        {importError && (
+          <div className="mt-2 rounded-md border border-red-500/40 bg-red-500/10 px-2 py-1.5 text-[10px] text-red-700 dark:text-red-300">
+            {importError}
+          </div>
+        )}
       </div>
 
       <ScrollArea className="min-h-0 flex-1">
@@ -115,6 +184,17 @@ export function AgentLibrary() {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation()
+                      exportAgent(a)
+                    }}
+                    title="导出配置"
+                    className="text-muted-foreground transition hover:text-foreground"
+                  >
+                    <Download className="size-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
                       openEdit(a)
                     }}
                     title="编辑 Agent"
@@ -146,6 +226,7 @@ export function AgentLibrary() {
         open={formOpen}
         onOpenChange={handleFormOpenChange}
         agent={editingAgent ?? undefined}
+        importedAgent={importedAgent}
       />
 
       <Dialog open={!!deleteTargetId} onOpenChange={(open) => !open && setDeleteTargetId(null)}>

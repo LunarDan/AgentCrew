@@ -25,6 +25,7 @@ import {
   type UpdateAgentBody,
 } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import type { AgentExportAgent } from '@/shared/agent-export'
 import {
   AGENT_BUILDER_PROVIDER_DEFAULTS as PROVIDER_DEFAULTS,
   AGENT_TOOL_META as TOOL_META,
@@ -73,10 +74,13 @@ export function CreateAgentDialog({
   open,
   onOpenChange,
   agent,
+  importedAgent,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   agent?: AgentRow
+  /** 导入的配置：创建模式下预填表单（不含 id / 密钥）。 */
+  importedAgent?: AgentExportAgent | null
 }) {
   const upsertAgent = useAppStore((s) => s.upsertAgent)
   const isEdit = !!agent
@@ -132,6 +136,28 @@ export function CreateAgentDialog({
       setSupportsVision(agent.supportsVision)
       setApiKey(agent.apiKey ?? '')
       setApiBaseUrl(agent.apiBaseUrl ?? '')
+    } else if (importedAgent) {
+      setAdapterKind(importedAgent.adapterName)
+      setName(importedAgent.name)
+      setAvatar(importedAgent.avatar || DEFAULT_AVATAR)
+      setDescription(importedAgent.description)
+      setCapabilitiesText(importedAgent.capabilities.join(', '))
+      setSystemPrompt(importedAgent.systemPrompt)
+      const p = (importedAgent.modelProvider ?? 'deepseek') as Provider
+      setProvider(p)
+      setModelId(
+        importedAgent.modelId ??
+          (importedAgent.adapterName === 'claude-code'
+            ? CLAUDE_CODE_DEFAULT_MODEL
+            : importedAgent.adapterName === 'codex'
+              ? CODEX_DEFAULT_MODEL
+              : PROVIDER_DEFAULTS[p].defaultModel),
+      )
+      setToolNames(new Set(importedAgent.toolNames))
+      setMcpServerIds(new Set())
+      setSupportsVision(importedAgent.supportsVision)
+      setApiKey('')
+      setApiBaseUrl('')
     } else {
       setAdapterKind('custom')
       setName('')
@@ -148,11 +174,11 @@ export function CreateAgentDialog({
       setApiBaseUrl('')
       setCreateStep('choose')
     }
-    if (agent) setCreateStep('detail')
+    if (agent || importedAgent) setCreateStep('detail')
     setShowApiKey(false)
     setError(null)
     setActiveTab('basic')
-  }, [open, agent])
+  }, [open, agent, importedAgent])
 
   // 外部 MCP server 列表（设置面板里注册的）。失败就静默留空——这个区块不是必填项，
   // 不该因为它拿不到数据而挡住整个 agent 表单。
