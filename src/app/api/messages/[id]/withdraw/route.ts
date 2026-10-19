@@ -29,7 +29,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const message = err instanceof Error ? err.message : String(err)
     const status = message.includes('not found')
       ? 404
-      : message.startsWith('A newer user message arrived')
+      : message.startsWith('A newer user message arrived') ||
+          message.startsWith('Agent runs are still stopping')
         ? 409
         : message.startsWith('Only the latest user message') ||
             message.startsWith('Only user messages')

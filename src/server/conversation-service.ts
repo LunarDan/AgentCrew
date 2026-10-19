@@ -871,10 +871,10 @@ export interface WithdrawResult {
   deletedArtifactIds: string[]
 }
 
-/** abort 后轮询等待 run 真正落库收尾（最多 3s）；固定 sleep 500ms 会让迟到的 finalize 把错误消息写回删除窗口之后。 */
-async function waitForRunsToStop(runIds: string[]): Promise<void> {
-  if (runIds.length === 0) return
-  const deadline = Date.now() + 3000
+/** abort 后轮询等待 run 真正落库收尾（最多 5s）；固定 sleep 500ms 会让迟到的 finalize 把错误消息写回删除窗口之后。 */
+async function waitForRunsToStop(runIds: string[]): Promise<boolean> {
+  if (runIds.length === 0) return true
+  const deadline = Date.now() + 5000
   while (Date.now() < deadline) {
     const stillRunning = await db
       .select({ id: schema.agentRuns.id })
@@ -886,9 +886,24 @@ async function waitForRunsToStop(runIds: string[]): Promise<void> {
         ),
       )
       .limit(1)
-    if (stillRunning.length === 0) return
+    if (stillRunning.length === 0) return true
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
+  return false
+}
+
+/**
+ * abort 仍在本进程内存里的 run 并等它们收尾。
+ * 不在内存里的 running 行（例如 dev server 重启前遗留）没有迟到的 finalize，可以直接删；
+ * 在内存里却迟迟不结束的则必须放弃本次删除，否则 run 收尾会把消息写回删除之后。
+ */
+async function stopActiveRuns(runIds: string[]): Promise<void> {
+  if (runIds.length === 0) return
+  const { AgentRunner } = await getAgentRunner()
+  const aborted = runIds.filter((id) => AgentRunner.abort(id))
+  if (aborted.length === 0) return
+  const stopped = await waitForRunsToStop(aborted)
+  if (!stopped) throw new Error('Agent runs are still stopping; try again')
 }
 
 /**
@@ -934,10 +949,8 @@ export async function withdrawLatestUserMessage(
     ),
   })
   if (runsToAbort.length > 0) {
-    const { AgentRunner } = await getAgentRunner()
-    for (const r of runsToAbort) AgentRunner.abort(r.id)
     // 让 finalize 跑完，把 emitErrorVisualisation 的 msg_err_* 也落进时间窗
-    await waitForRunsToStop(runsToAbort.map((r) => r.id))
+    await stopActiveRuns(runsToAbort.map((r) => r.id))
   }
 
   // 撤回会让 SDK session 中保存的「user msg → agent reply」对儿和 DB 不一致；清掉重来
@@ -1115,9 +1128,7 @@ async function regenerateLatestResponseLocked(
     ),
   })
   if (runsToAbort.length > 0) {
-    const { AgentRunner } = await getAgentRunner()
-    for (const r of runsToAbort) AgentRunner.abort(r.id)
-    await waitForRunsToStop(runsToAbort.map((r) => r.id))
+    await stopActiveRuns(runsToAbort.map((r) => r.id))
   }
 
   // 重新生成等价于「让 agent 对同一个 user msg 重新作答」，SDK session 里那个旧 reply 要扔；清掉重新开 session

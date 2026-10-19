@@ -32,6 +32,7 @@ const USER_ERROR_PREFIXES = [
   'Message is too long',
   'No user message to regenerate',
   'A newer user message arrived',
+  'Agent runs are still stopping',
   'Regeneration already in progress',
   'Attachments',
   '群聊缺少协调者',
@@ -44,7 +45,8 @@ export function mobileUserErrorJson(req: NextRequest, err: unknown, action: stri
     const status = err.message.startsWith('Message not found')
       ? 404
       : err.message.startsWith('A newer user message arrived') ||
-          err.message.startsWith('Regeneration already in progress')
+          err.message.startsWith('Regeneration already in progress') ||
+          err.message.startsWith('Agent runs are still stopping')
         ? 409
         : 400
     return mobileJson(req, { error: err.message }, { status })
