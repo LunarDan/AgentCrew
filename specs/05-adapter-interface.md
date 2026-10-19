@@ -215,8 +215,9 @@ DeepSeek 的多模态模型（`deepseek-v4-flash`）走标准 OpenAI image_url �
 - system prompt 走顶层 `system` 字段；历史（OpenAI ChatMessage）经 `toAnthropicMessages` 只保留 user / assistant 文本，丢弃 system / tool，合并连续同角色，并丢弃开头孤立的 assistant 消息。
 - 工具声明为 `{ name, description, input_schema }`；流式事件 `content_block_start/delta/stop` 映射到现有 `part.start` / `part.delta` / `part.end`（text / thinking）。
 - 工具调用从 `tool_use` block 的 `partial_json` 累加解析；执行后以 `tool_result` block（`tool_use_id` + JSON 字符串，失败带 `is_error`）回传，继续下一轮。
+- **是否继续由「有没有 `tool_use` block」决定，不看 `stop_reason`**：部分兼容网关在返回 tool_use 时把 `stop_reason` 报成 `end_turn` / `max_tokens` 或省略，按 `stop_reason === 'tool_use'` 判断会让请求的工具永远不执行、run 却显示正常完成。OpenAI 路径同理：工具调用缺 `id` 时按 `call_${index}` 补一个稳定 id，不能因为 provider 没给 id 就把整个调用丢掉；连 `name` 都没有则显式报错，而不是静默收尾。
 - `max_tokens` 固定 8192（Agent 实体暂无该字段）；usage 记录 `input_tokens` / `output_tokens` / `cache_read_input_tokens` / `cache_creation_input_tokens`。
-- 图片附件只发送 Anthropic 支持的 `image/jpeg|png|gif|webp`；key 回退顺序 `agent.apiKey → ANTHROPIC_API_KEY → ANTHROPIC_AUTH_TOKEN`。
+- 图片附件只发送 Anthropic 支持的 `image/jpeg|png|gif|webp`；key 回退顺序 `agent.apiKey → ANTHROPIC_API_KEY → ANTHROPIC_AUTH_TOKEN`。**凭据来源决定请求头**：前两者按 `x-api-key`，只有 `ANTHROPIC_AUTH_TOKEN` 按 `Authorization: Bearer`（`authToken`）发送 —— 否则只配置 Bearer token 的兼容网关会一律 401。读图失败 / 超限 / 被数量上限截掉的附件会以文本块 `[image "name" was not sent: <原因>]` 告知模型，不再静默丢图让模型凭空作答。
 - 外部 MCP 工具与 OpenAI 路径共用同一份工具表与执行器（`runToolCall`），审批门行为不变。
 
 ### Artifact / Deploy 注入路径
@@ -411,11 +412,13 @@ class ClaudeCodeAdapter implements AgentPlatformAdapter {
 | `SDKPartialAssistantMessage` (开 `includePartialMessages: true`) `content_block_delta + text_delta` | 第一次开 text part：`part.start({type:'text',content:''})`；后续：`part.delta({type:'text.append',text})` |
 | `SDKAssistantMessage.message.content` 里的 `text` 块 | 兜底：若 partial 没投递过，整段开一个 text part |
 | `SDKAssistantMessage.message.content` 里的 `tool_use` 块 | `tool.call({callId,toolName,args})`；本地 `Map<sdk_id, ourCallId>` 记账 |
-| `SDKUserMessage.message.content` 里的 `tool_result` 块 | 用 `Map` 查回 `callId`，`tool.result({callId,result,isError})` |
+| `SDKUserMessage.message.content` 里的 `tool_result` 块 | 用 `Map` 查回 `callId`，`tool.result({callId,result,isError})`；`result` 先经 `clampToolResult`（50 000 字符上限，与 custom adapter 同一实现）——外部 MCP server 的返回是无界的，原样落库会撑爆消息行、SSE 与后续上下文 |
 | `SDKResultMessage` (success / error variants) | 跳出 for-await，最后 emit `message.end` |
 | 其他（task progress / hook events / status / notification） | 忽略（MVP） |
 
 `message.start` / `message.end` 由 adapter 自己起止；`run.start` / `run.end` 仍由 AgentRunner 包外发。
+
+**产物事件只认自己的工具名（2026-10-20）**：`artifact.create` / `deploy.status` 的翻译只匹配精确的 `mcp__agenthub__write_artifact` / `mcp__agenthub__deploy_*`。此前的 `endsWith('__write_artifact')` 会让任意外部 server 的同名工具把 `artifactId` 塞进来，adapter 再按 id 拉整条记录（含内容）广播 —— 那是一条绕过 `read_artifact` 会话边界的跨会话读取通道。查询同时带 `conversationId` 过滤；Codex 的 `loadArtifactRecord` 同样按会话过滤。
 
 ### canUseTool 桥（审批 / 沙箱 / 黑名单）
 
@@ -425,7 +428,7 @@ SDK 提供 `canUseTool(toolName, toolInput, options) => PermissionResult` 钩子
 
 > ⚠️ **shell 工具不能按 `Bash` 字面量识别。** 工具名由 SDK 按平台提供：POSIX 上是 `Bash`，Windows 上实测是 `PowerShell`（2026-10-18）。按字面量匹配会让第 2 步整个跳过，命令直接落到第 6 步的默认 allow —— 黑名单与审批分类器都不再被咨询。识别规则：`mcp__*` 排除；已知 shell 名直接命中；否则，若工具出现在本次 run 的 `tools` 表里且输入带非空 `command`，按 shell 处理；工具表尚未到达时按「带 `command` 即 shell」失败关闭。已知 shell 名但输入解析不出 `command` → deny，不 allow。
 
-1. **路径沙箱**（Read / Write / Edit / NotebookEdit）：`assertPathWithinWorkspace(workspace, toolInput.file_path)`，越界 `{ behavior: 'deny', message }`
+1. **路径沙箱**（Read / Write / Edit / NotebookEdit）：目标字段按工具取 —— `file_path` → `path` → `notebook_path`（`NotebookEdit` 只带 `notebook_path`，漏读等于不做校验）；`assertPathWithinWorkspace(workspace, target)`，越界 `{ behavior: 'deny', message }`
 2. **shell 黑名单与关键命令审批**（POSIX `Bash`、Windows `PowerShell` 等）：`findBannedPattern(toolInput.command)` 命中 deny；未命中但 `classifyBashApproval(toolInput.command)` 命中时，注册 `PendingBashCommand` 并等待用户批准；通过后 allow（cwd 已限定）
 3. **fs_write 审批**（Write / Edit；Auto 模式直接 allow）：
    - `oldContent = readIfExists(workspace, path)`
@@ -433,7 +436,7 @@ SDK 提供 `canUseTool(toolName, toolInput, options) => PermissionResult` 钩子
    - `pendingWrites.register({ ..., skipWrite: true })` —— **关键**：传 `skipWrite: true`，approve 时 store 不调 `writeFileInWorkspace`，让 SDK 自己写
    - `await new Promise(resolve => pendingWrites.attachResolver(pending.id, resolve))` 阻塞等用户决定
    - applied → `{ behavior: 'allow' }`；rejected → `{ behavior: 'deny', message: 'User rejected the file change' }`
-4. **NotebookEdit**：MVP 不做 diff 审批，Review 模式直接 deny；Auto 模式 allow
+4. **NotebookEdit**：MVP 不做 diff 审批，Review 模式直接 deny；Auto 模式 allow —— 但第 1 步的 workspace 路径检查对 Auto 同样生效（不能把 `.ipynb` 写到 workspace 外）
 5. **其它工具**（Read / Grep / Glob / WebFetch / WebSearch / Task / TodoWrite / ...）：默认 allow
 
 ### 项目记忆（CLAUDE.md）

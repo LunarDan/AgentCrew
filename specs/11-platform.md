@@ -68,18 +68,18 @@ const POSIX_BANNED: RegExp[] = [
 ### Windows 黑名单
 
 ```typescript
+// PowerShell 接受无歧义参数前缀：-r / -Rec / -Fo 与 -Recurse / -Force 等价
+const PS_RECURSIVE = '-(?:r|rec(?:urse)?)\\b'
+const PS_FORCE = '-fo(?:rce)?\\b'
+const PS_DELETE_VERB = '(?:remove-item|ri|rm|rmdir|del|erase|rd)'
+
 const WINDOWS_BANNED: RegExp[] = [
-  // 删根 / 删盘
+  // 删根 / 删盘（cmd 与 PowerShell 的别名都算）
   /\b(del|erase)\s+\/[fsq\s/"']*[a-z]:[\\/]?/i,   // del /F /Q C:\  （路径带引号也算）
-  /\brd\s+\/[sq\s/"']*[a-z]:[\\/]?/i,             // rd /S /Q "C:\"（路径带引号也算）
-  /\bRemove-Item\b[^|;]*-Recurse[^|;]*-Force/i,     // Remove-Item -Recurse -Force
-  /\bRemove-Item\b[^|;]*-Force[^|;]*-Recurse/i,     // 参数顺序反过来
-  /\bri\b[^|;]*-Recurse[^|;]*-Force/i,              // ri = Remove-Item alias
-  // rm / rmdir 在 PowerShell 也是 Remove-Item alias，单独拦（注意：POSIX 黑名单的 `rm -rf /` 走的是 POSIX 分支）
-  /\brm\b[^|;]*-Recurse[^|;]*-Force/i,
-  /\brm\b[^|;]*-Force[^|;]*-Recurse/i,
-  /\brmdir\b[^|;]*-Recurse[^|;]*-Force/i,
-  /\brmdir\b[^|;]*-Force[^|;]*-Recurse/i,
+  /\b(rd|rmdir)\s+\/[sq\s/"']*[a-z]:[\\/]?/i,     // rd / rmdir /S /Q "C:\"
+  // Remove-Item 及其别名，两个参数任意顺序；缩写与全称同样命中
+  new RegExp(`\\b${PS_DELETE_VERB}\\b[^|;]*${PS_RECURSIVE}[^|;]*${PS_FORCE}`, 'i'),
+  new RegExp(`\\b${PS_DELETE_VERB}\\b[^|;]*${PS_FORCE}[^|;]*${PS_RECURSIVE}`, 'i'),
   // 格式化 / 关机
   /\bformat\s+[a-z]:/i,
   /\bshutdown\b/i,
@@ -103,6 +103,8 @@ const WINDOWS_BANNED: RegExp[] = [
   /\bcipher\s+\/w/i,                                // cipher /w 擦除空闲空间
 ]
 ```
+
+**参数缩写（2026-10-20）**：PowerShell 会解析无歧义前缀，`Remove-Item -Rec -Fo C:\...`、`rm -r -fo ...`、`ri -rec -fo ...` 都真的执行递归强删。规则按「动词 + 两个参数（任意顺序）」书写，而不是逐个别名 × 逐个全称。`-f` 单字母歧义（`-Filter` / `-Force`），不予匹配；`-r` 在 `Remove-Item` 上无歧义，按 `-Recurse` 处理。`bash-command-approval.ts` 的 Windows 关键命令分类器使用同一组缩写模式。
 
 ### 公共黑名单
 

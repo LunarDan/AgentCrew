@@ -278,5 +278,5 @@ P0 落地时对着工作树逐条核查,发现原稿有四处与代码事实不�
 - **并发建连**:所有 server `Promise.all` 并行 connect + listTools;每个 server 独立超时,互不拖累。某个失败时先关掉它自己的半开 client,再计入失败名单。
 - **stdio 的 `cwd`**:固定为本次 run 的 workspace 路径(`input.workspacePath`)。这只是工作目录,**不是**沙箱:server 仍可读写任意路径。
 - **stdio 的 `env`**:`{ ...buildChildProcessEnv(), ...server.env }`,沿用 §6.3 的完整继承;server 声明的值覆盖同名变量。
-- **结果转换**:优先 `structuredContent`;否则拼接 text 内容。image / audio / resource 只返回描述(**不内联 base64**,否则一条消息就可能塞进几十 MB 的 token)。最终序列化值超过 50 000 字符时截断并标记 `[truncated]`。
+- **结果转换**:优先 `structuredContent`;否则拼接 text 内容。image / audio / resource 只返回描述(**不内联 base64**,否则一条消息就可能塞进几十 MB 的 token)。最终序列化值超过 50 000 字符时截断并标记 `[truncated]`。claude-code / codex adapter 的 `tool.result` 也走同一个 `clampToolResult`（2026-10-20）—— 外部 server 的返回不受我们控制，不能只在 custom 路径设限。
 - **事件**:连接失败沿用 F2 的 `mcp_server.unavailable`;调用沿用 `tool.call` / `tool.result`;审批沿用 `mcp_tool.pending` / `mcp_tool.resolved`。**没有新增事件类型**。
