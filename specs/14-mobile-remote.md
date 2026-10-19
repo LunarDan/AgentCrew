@@ -288,7 +288,11 @@ GET /api/mobile/events?streamToken=<short-lived-token>
 
 **实现状态（2026-10-20）**：`GET /api/mobile/events`（Bearer）与 `POST /api/mobile/stream-token`（30 秒一次性 token，`GET /api/mobile/events?streamToken=...`）已实现。移动端 App 用事件流触发快照刷新（500ms 去抖），同时保留 2–3s 轮询作为 WebView 不支持 fetch streaming 时的兜底。事件流每 15s 心跳时重新读取设置表比对期望 token：轮换 token 或关闭 companion mode 会主动关闭已建立的连接，吊销对长连接同样生效。
 
-**错误面收敛**：`/api/mobile/*` 的错误响应不得把内部字符串（宿主绝对路径、SQLite 错误、errno）回给局域网设备。`src/server/mobile-errors.ts` 是统一出口：`mobileErrorJson` 只放行 `MobileNotFoundError`，其余记日志后返回 `Internal error` + 500；`mobileUserErrorJson` 额外放行会话服务里用户可理解、可操作的输入错误（撤回非最新消息、内容为空 / 超长、附件不存在等）。写盘审批失败在桌面端仍返回真实原因（便于排查），移动端只回通用文案。
+**事件负载最小化**：手机侧只需要「有事发生」的信号。事件流只转发 `{ type, conversationId, timestamp }`，不转发原始事件里的 host 绝对路径、文件内容、工具参数与结果（`fs_write.pending.absolutePath`、`tool.call.args` 等）。原始事件只走本机 SSE；手机要详情时走已脱敏的 snapshot / detail 接口。
+
+**错误面收敛**：`/api/mobile/*` 的错误响应不得把内部字符串（宿主绝对路径、SQLite 错误、errno）回给局域网设备。`src/server/mobile-errors.ts` 是统一出口：`mobileErrorJson` 只放行 `MobileNotFoundError`，其余记日志后返回 `Internal error` + 500；`mobileUserErrorJson` 额外放行会话服务里用户可理解、可操作的输入错误（撤回非最新消息、内容为空 / 超长、附件不存在等）。写盘审批失败在桌面端仍返回真实原因（便于排查），移动端只回通用文案。ask_user 答案同样有上限（≤4 题、每题 ≤8 个选项、备注 ≤4000 字），且 key / label 必须存在于原问题，否则 400。
+
+**桌面写接口的 CSRF 门**：桌面 API 虽只监听 loopback，浏览器仍可从任意网页发起跨站简单请求（例如无 body 的 `POST /api/settings/mobile-token` 会重置设备凭据）。`/api/settings` 的 PATCH 与 `mobile-token` 的 POST 统一经 `rejectCrossOriginWrite`：`Origin` 与请求 origin 不一致、或 `Sec-Fetch-Site` 为 `cross-site` / `same-site` 时返回 403；无这些头的非浏览器调用不受影响。
 
 事件流的生命周期必须完整：客户端断开（含反向代理一侧销毁）时通过 `ReadableStream.cancel` 退订 eventBus、停心跳并移除 abort 监听；鉴权是异步的，订阅建立后要再检查一次 `req.signal.aborted`。手机读得慢时按 `controller.desiredSize` 丢弃事件，不让服务端无界缓冲 —— 丢失的增量由重连后的快照补齐。
 
