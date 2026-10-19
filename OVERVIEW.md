@@ -175,6 +175,7 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 ## 附 · 当前现状（易过时,以代码为准）
 
 ### ✅ 近期完成（最新一批）
+- **MCP 连接失败可见（F2）**：claude-code adapter 从 SDK init 消息读取 `mcp_servers` 状态，对 `failed` / `needs-auth` / `disabled` 发 `mcp_server.unavailable`；解析阶段与 spawn 阶段失败统一由 AgentRunner 写成会话内一条持久的 `role='system'` 提示（`msg_mcp_<runId>`），点名 server 与状态 —— 此前只有 `console.warn`，用户看到的是「已启用、已勾选、就是没有」。Codex 的 spawn 状态仍无 SDK 信号可读
 - **F1 修复（`partIndex` 归一）**：新增 `src/server/part-slots.ts`，在 `agent-runner.ts` 的 `consumeStream` 入口把适配器的「流内序号」翻译成 `parts` 真实下标 —— 此前 `part.start` 按下标赋值、`tool.call` 按 push 追加，两套写入协议混用会让**工具调用之后到来的文本覆盖 `tool_use` 槽位**（持久化形状变 `["text","tool_result"]`，工具卡片闪现即消失、刷新也不复现）。Runner 从此是唯一索引权威（`specs/02`）；`StreamEvent` 形状不变，客户端零改动。E2E 回归见 `e2e/chat.spec.ts`
 - **PPT 预览/导出一致性修复**：预览改为固定逻辑画布（768×432）+ `transform: scale()` 适配面板，版式不再随面板宽度变形、全屏是真放大；去掉预览侧 7/6/4 与导出侧 8/6/3/4 的条数硬上限（不再静默吃内容），排不下时预览显示「本页内容超出画布，导出会被截断」角标；全屏元素改为整个 deck（翻页/退出按钮随之进入全屏）
 - **外部 MCP 工具接入 P0**（`specs/15`）：`mcp_servers` 表 + `agents.mcpServerIds` · 设置面板登记（stdio/sse/http + 测试连接 + 密钥脱敏）· Agent builder 勾选 · claude-code / codex 接线 · `trust='ask'` 审批门（仅 Claude Code）
@@ -206,4 +207,4 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 
 ---
 
-*最后更新：2026-10-18 · 记录 shell 工具按身份识别（Windows 上 SDK 的 shell 工具是 `PowerShell`，此前按 `Bash` 字面量匹配导致黑名单与审批分类器整条失效）。2026-10-13 记入了 Claude Code adapter 的隔离启动（`settingSources: []` + `strictMcpConfig: true`）与 F1 修复（`partIndex` 归一，`src/server/part-slots.ts`）及两个相邻未修缺陷（`persistEvent` 空缓冲兜底、claude-code adapter 非流式回退重复渲染）。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*
+*最后更新：2026-10-19 · 记入外部 MCP 连接失败可见（F2：`mcp_server.unavailable` + 持久系统提示）。2026-10-18 记入了 shell 工具按身份识别（Windows 上 SDK 的 shell 工具是 `PowerShell`，此前按 `Bash` 字面量匹配导致黑名单与审批分类器整条失效）。2026-10-13 记入了 Claude Code adapter 的隔离启动（`settingSources: []` + `strictMcpConfig: true`）与 F1 修复（`partIndex` 归一，`src/server/part-slots.ts`）及两个相邻未修缺陷（`persistEvent` 空缓冲兜底、claude-code adapter 非流式回退重复渲染）。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*

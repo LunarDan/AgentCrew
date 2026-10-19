@@ -69,6 +69,9 @@ type StreamEvent = BaseEvent & (
   | { type: 'mcp_tool.pending',  pendingCall: PendingMcpToolCall }
   | { type: 'mcp_tool.resolved', pendingId: string, approved: boolean }
 
+  // —— 外部 MCP 连接生命周期（adapter → runner；详见 Spec 15） ——
+  | { type: 'mcp_server.unavailable', runId: string, servers: McpServerRunStatus[] }
+
   // —— Token usage 计量（adapter 在 run 结束前 emit）——
   | { type: 'run.usage', runId: string, usage: RunUsageEvent }
 
@@ -83,6 +86,11 @@ interface RunUsageEvent {
   cacheReadTokens: number        // Anthropic prompt cache 命中；DeepSeek prompt_cache_hit_tokens 也映射到这
   lastInputTokens?: number       // 最近一次 input prompt 长度，UI 用作 ctx 仪表
   model?: string                 // 实际使用的模型 id
+}
+
+interface McpServerRunStatus {
+  name: string                   // 外部 server 名（不含 agenthub 桥）
+  status: string                 // SDK 报告的连接状态，如 failed / needs-auth / disabled
 }
 
 interface PendingWrite {
@@ -278,6 +286,7 @@ dispatch.end      (parentRunId=r1, taskId=t3, status='skipped', error='Upstream 
 | `bash_command.resolved` | ❌ 透传 | approved=true/false 由前端 store 用来移除对应 pending |
 | `mcp_tool.pending` | ❌ 透传 | pending 队列存于内存单例（`src/server/pending-mcp-tools.ts`）；前端 mount 时拉一次兜底 |
 | `mcp_tool.resolved` | ❌ 透传 | approved=true/false 由前端 store 用来移除对应 pending；批准后该工具在本会话内不再询问 |
+| `mcp_server.unavailable` | ❌ 透传 | 连接生命周期事件（不是调用上报）。AgentRunner 将其转成一条持久的 `role='system'` 消息 `msg_mcp_<runId>`，前端 store 走 `default: ignore` |
 | `run.usage` | ✅ 落到 `agent_runs.usage` JSON 列 | adapter 在 run 结束前 emit；前端 store 同步更新该 run 行 |
 | `heartbeat` | ❌ 透传 | |
 

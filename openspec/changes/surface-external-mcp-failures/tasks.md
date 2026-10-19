@@ -13,11 +13,11 @@
 
 ## 2. Docs（commit 2）
 
-- [ ] 2.1 `specs/02-stream-events.md` — 事件 union + payload + 持久化表（❌ 透传）+ 新事件 checklist。
-- [ ] 2.2 `specs/05-adapter-interface.md` — SDK init 行补「读取 `mcp_servers` 状态」。
-- [ ] 2.3 `specs/15-external-mcp.md` — §5 事件清单、§6.4（console.warn → 用户可见）、§9 影响面、§12 F2 追加带日期的已修说明（保留原文）。
-- [ ] 2.4 `openspec/changes/add-external-mcp/tasks.md` — 9.7 与 F2 各追加一条带日期的后续引用，不改原文。
-- [ ] 2.5 `OVERVIEW.md` — 近期完成 + footer。
+- [x] 2.1 `specs/02-stream-events.md` — 事件 union + payload + 持久化表（❌ 透传）+ 新事件 checklist。
+- [x] 2.2 `specs/05-adapter-interface.md` — SDK init 行补「读取 `mcp_servers` 状态」。
+- [x] 2.3 `specs/15-external-mcp.md` — §5 事件清单、§6.4（console.warn → 用户可见）、§9 影响面、§12 F2 追加带日期的已修说明（保留原文）。
+- [x] 2.4 `openspec/changes/add-external-mcp/tasks.md` — 9.7 与 F2 各追加一条带日期的后续引用，不改原文。
+- [x] 2.5 `OVERVIEW.md` — 近期完成 + footer。
 
 ## 3. Implementation（commit 3）
 
