@@ -14,6 +14,7 @@ import type {
   PendingMcpToolCall,
   PendingQuestion,
   PendingWrite,
+  RunUsageEvent,
   StreamEvent,
 } from '@/shared/types'
 
@@ -605,7 +606,8 @@ export const useAppStore = create<AppState>()(
 
           case 'run.usage': {
             const run = s.runsByConv[event.conversationId]?.[event.runId]
-            if (run) run.usage = event.usage
+            // adapter 每轮发增量；run 行上的 usage 是累计值，必须累加而不是覆盖
+            if (run) run.usage = mergeRunUsage(run.usage, event.usage)
             return
           }
 
@@ -902,6 +904,20 @@ export const useAppStore = create<AppState>()(
 // ─── 派生 hooks ──────────────────────────────────────
 // 用 useShallow 防止派生数组每次新引用导致无限渲染（Zustand 5 标准做法）。
 import { useShallow } from 'zustand/react/shallow'
+function mergeRunUsage(previous: RunUsageEvent | null, next: RunUsageEvent): RunUsageEvent {
+  if (!previous) return next
+  return {
+    inputTokens: previous.inputTokens + next.inputTokens,
+    outputTokens: previous.outputTokens + next.outputTokens,
+    cacheCreationTokens: previous.cacheCreationTokens + next.cacheCreationTokens,
+    cacheReadTokens: previous.cacheReadTokens + next.cacheReadTokens,
+    ...(next.lastInputTokens || previous.lastInputTokens
+      ? { lastInputTokens: next.lastInputTokens || previous.lastInputTokens }
+      : {}),
+    ...(next.model || previous.model ? { model: next.model ?? previous.model } : {}),
+  }
+}
+
 function findLatestAgentMessageIdForRun(
   messages: Record<string, MessageRow>,
   runId: string,
