@@ -69,9 +69,12 @@ export function FileExplorerPanel() {
   // 切会话 / 关闭面板 / 手动刷新都会换代，旧请求的响应直接丢弃
   const generationRef = useRef(0)
 
+  // 只依赖会话 id：会话对象的其它字段（标题、pin、审批模式）变化不该让文件树塌掉重拉
+  const convId = conv?.id
+
   const loadDir = useCallback(
     async (relPath: string, gen = generationRef.current) => {
-      if (!conv) return
+      if (!convId) return
       setNodes((prev) => ({
         ...prev,
         [relPath]: {
@@ -82,7 +85,7 @@ export function FileExplorerPanel() {
         },
       }))
       try {
-        const result = await workspaceListDir(conv.id, relPath)
+        const result = await workspaceListDir(convId, relPath)
         if (gen !== generationRef.current) return
         setNodes((prev) => ({
           ...prev,
@@ -106,7 +109,7 @@ export function FileExplorerPanel() {
         }))
       }
     },
-    [conv],
+    [convId],
   )
 
   const toggleDir = (relPath: string) => {
@@ -122,7 +125,7 @@ export function FileExplorerPanel() {
   }
 
   const refresh = useCallback(() => {
-    if (!conv) return
+    if (!convId) return
     generationRef.current += 1
     const gen = generationRef.current
     setNodes({})
@@ -130,19 +133,19 @@ export function FileExplorerPanel() {
     void loadDir('', gen).finally(() => {
       if (gen === generationRef.current) setLoadingRoot(false)
     })
-  }, [conv, loadDir])
+  }, [convId, loadDir])
 
   // 切换会话时清空 + 重新加载根；首次打开时同样加载
   useEffect(() => {
     generationRef.current += 1
     const gen = generationRef.current
-    if (!open || !conv) return
+    if (!open || !convId) return
     setNodes({})
     setLoadingRoot(true)
     void loadDir('', gen).finally(() => {
       if (gen === generationRef.current) setLoadingRoot(false)
     })
-  }, [open, conv, loadDir])
+  }, [open, convId, loadDir])
 
   if (!open || !conv) return null
 
