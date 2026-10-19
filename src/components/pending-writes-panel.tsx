@@ -1,7 +1,7 @@
 'use client'
 
 import { Check, FilePlus2, FilePenLine, Loader2, X } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { AgentAvatar } from '@/components/agent-avatar'
 import { Button } from '@/components/ui/button'
@@ -27,14 +27,19 @@ const DIFF_TAB_PREFIX = 'diff:'
 export function PendingWritesPanel({ conversationId }: { conversationId: string }) {
   const pending = usePendingWrites(conversationId)
   const setPendingWritesForConversation = useAppStore((s) => s.setPendingWritesForConversation)
+  const resyncNonce = useAppStore((s) => s.resyncNonce)
+  const handledResyncRef = useRef(0)
 
   useEffect(() => {
     let cancelled = false
+    // SSE 重连后断线期间的 approve/deny 不会补发，必须用快照覆盖本地状态
+    const forced = resyncNonce !== handledResyncRef.current
+    handledResyncRef.current = resyncNonce
     fetchPendingWrites(conversationId)
       .then((list) => {
         if (cancelled) return
         // 请求期间 SSE 可能已经推来新的 pending；此时快照可能更旧，不能覆盖
-        if (useAppStore.getState().pendingWritesByConv[conversationId]?.length) return
+        if (!forced && useAppStore.getState().pendingWritesByConv[conversationId]?.length) return
         setPendingWritesForConversation(conversationId, list)
       })
       .catch((err) => {
@@ -43,7 +48,7 @@ export function PendingWritesPanel({ conversationId }: { conversationId: string 
     return () => {
       cancelled = true
     }
-  }, [conversationId, setPendingWritesForConversation])
+  }, [conversationId, resyncNonce, setPendingWritesForConversation])
 
   if (pending.length === 0) return null
 

@@ -1,7 +1,7 @@
 'use client'
 
 import { CheckCheck, HelpCircle, Loader2, Sparkles } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { AgentAvatar } from '@/components/agent-avatar'
 import { Button } from '@/components/ui/button'
@@ -35,14 +35,19 @@ export function AskUserQuestionDialog({ conversationId }: { conversationId: stri
     (s) => s.setPendingQuestionsForConversation,
   )
   const agents = useAppStore((s) => s.agents)
+  const resyncNonce = useAppStore((s) => s.resyncNonce)
+  const handledResyncRef = useRef(0)
 
   useEffect(() => {
     let cancelled = false
+    // SSE 重连后断线期间的作答不会补发，必须用快照覆盖本地状态
+    const forced = resyncNonce !== handledResyncRef.current
+    handledResyncRef.current = resyncNonce
     fetchPendingQuestions(conversationId)
       .then((list) => {
         if (cancelled) return
         // 请求期间 SSE 可能已经推来新的问题；此时快照可能更旧，不能覆盖
-        if (useAppStore.getState().pendingQuestionsByConv[conversationId]?.length) return
+        if (!forced && useAppStore.getState().pendingQuestionsByConv[conversationId]?.length) return
         setPendingQuestionsForConversation(conversationId, list)
       })
       .catch((err) => {
@@ -51,7 +56,7 @@ export function AskUserQuestionDialog({ conversationId }: { conversationId: stri
     return () => {
       cancelled = true
     }
-  }, [conversationId, setPendingQuestionsForConversation])
+  }, [conversationId, resyncNonce, setPendingQuestionsForConversation])
 
   const current = pending[0] ?? null
   const agentName = current ? agents[current.agentId]?.name ?? current.agentId : ''

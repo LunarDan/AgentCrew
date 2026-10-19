@@ -15,6 +15,7 @@ import { useAppStore } from '@/stores/app-store'
 
 let activeSource: EventSource | null = null
 let refCount = 0
+let openedBefore = false
 
 export function StreamProvider({ children }: { children: React.ReactNode }) {
   const applyEvent = useAppStore((s) => s.applyEvent)
@@ -28,6 +29,9 @@ export function StreamProvider({ children }: { children: React.ReactNode }) {
 
       activeSource.onopen = () => {
         setStreamConnected(true)
+        // 重连后服务端不补发断线期间的事件：让各面板重新拉一次快照
+        if (openedBefore) useAppStore.getState().bumpResync()
+        openedBefore = true
       }
 
       activeSource.onerror = () => {

@@ -1,7 +1,7 @@
 'use client'
 
 import { Check, Loader2, Plug, X } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { AgentAvatar } from '@/components/agent-avatar'
 import { Button } from '@/components/ui/button'
@@ -24,13 +24,19 @@ export function PendingMcpToolsPanel({ conversationId }: { conversationId: strin
     (s) => s.setPendingMcpToolCallsForConversation,
   )
 
+  const resyncNonce = useAppStore((s) => s.resyncNonce)
+  const handledResyncRef = useRef(0)
+
   useEffect(() => {
     let cancelled = false
+    // SSE 重连后断线期间的 approve/deny 不会补发，必须用快照覆盖本地状态
+    const forced = resyncNonce !== handledResyncRef.current
+    handledResyncRef.current = resyncNonce
     fetchPendingMcpToolCalls(conversationId)
       .then((list) => {
         if (cancelled) return
         // 请求期间 SSE 可能已经推来新的 pending；此时快照可能更旧，不能覆盖
-        if (useAppStore.getState().pendingMcpToolCallsByConv[conversationId]?.length) return
+        if (!forced && useAppStore.getState().pendingMcpToolCallsByConv[conversationId]?.length) return
         setPendingMcpToolCallsForConversation(conversationId, list)
       })
       .catch((err) => {
@@ -39,7 +45,7 @@ export function PendingMcpToolsPanel({ conversationId }: { conversationId: strin
     return () => {
       cancelled = true
     }
-  }, [conversationId, setPendingMcpToolCallsForConversation])
+  }, [conversationId, resyncNonce, setPendingMcpToolCallsForConversation])
 
   if (pending.length === 0) return null
 

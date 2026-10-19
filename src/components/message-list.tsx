@@ -14,6 +14,7 @@ const STREAM_SCROLL_THROTTLE_MS = 80
 export function MessageList({ conversationId }: { conversationId: string }) {
   const messages = useMessagesForConversation(conversationId)
   const setMessagesForConversation = useAppStore((s) => s.setMessagesForConversation)
+  const resyncNonce = useAppStore((s) => s.resyncNonce)
   const fetchedConversationsRef = useRef<Set<string>>(new Set())
   const [loadError, setLoadError] = useState<string | null>(null)
   const [retryNonce, setRetryNonce] = useState(0)
@@ -88,6 +89,13 @@ export function MessageList({ conversationId }: { conversationId: string }) {
       viewport.removeEventListener('scroll', updateStickiness)
     }
   }, [conversationId, hasMessages])
+
+  // SSE 重连后补拉一次快照，修复断线期间漏掉的 message.end / message.removed
+  useEffect(() => {
+    if (resyncNonce === 0) return
+    fetchedConversationsRef.current.delete(conversationId)
+    setRetryNonce((n) => n + 1)
+  }, [resyncNonce, conversationId])
 
   useEffect(() => {
     if (fetchedConversationsRef.current.has(conversationId)) {

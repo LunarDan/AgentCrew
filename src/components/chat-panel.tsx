@@ -52,6 +52,7 @@ export function ChatPanel() {
   const setPendingDispatchPlansForConversation = useAppStore(
     (s) => s.setPendingDispatchPlansForConversation,
   )
+  const resyncNonce = useAppStore((s) => s.resyncNonce)
   const [addOpen, setAddOpen] = useState(false)
   const [filesOpen, setFilesOpen] = useState(false)
   const [artifactsOpen, setArtifactsOpen] = useState(false)
@@ -87,7 +88,7 @@ export function ChatPanel() {
     return () => {
       cancelled = true
     }
-  }, [conv, setPendingDispatchPlansForConversation])
+  }, [conv, resyncNonce, setPendingDispatchPlansForConversation])
 
   if (!conv) {
     return (

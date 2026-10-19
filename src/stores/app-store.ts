@@ -96,9 +96,14 @@ interface AppState {
 
   // ─── 流连接状态 ────────────────────────────────────
   streamConnected: boolean
+  /** SSE 重连计数；各数据面板据此强制重新拉快照，补回断线期间漏掉的事件 */
+  resyncNonce: number
+  /** 从消息快照重建、尚未收到 run.start/run.end 的 run，用于流式门控与过期清理 */
+  restoredRunIds: Record<string, true>
 
   // ─── actions ───────────────────────────────────────
   setStreamConnected(connected: boolean): void
+  bumpResync(): void
 
   setConversations(list: ConversationWithMeta[]): void
   upsertConversation(conv: ConversationWithMeta): void
@@ -203,10 +208,17 @@ export const useAppStore = create<AppState>()(
     pendingQuoteForInput: null,
     highlightedMessageId: null,
     streamConnected: false,
+    resyncNonce: 0,
+    restoredRunIds: {},
 
     setStreamConnected: (connected) =>
       set((s) => {
         s.streamConnected = connected
+      }),
+
+    bumpResync: () =>
+      set((s) => {
+        s.resyncNonce++
       }),
 
     setConversations: (list) =>
@@ -224,13 +236,32 @@ export const useAppStore = create<AppState>()(
         delete s.conversations[id]
         // 清理该会话所有消息
         const msgIds = s.messageIdsByConv[id] ?? []
+        const msgIdSet = new Set(msgIds)
+        const runIds = new Set(Object.keys(s.runsByConv[id] ?? {}))
         for (const mid of msgIds) delete s.messages[mid]
         delete s.messageIdsByConv[id]
         delete s.runsByConv[id]
+        for (const runId of runIds) delete s.restoredRunIds[runId]
         delete s.pendingWritesByConv[id]
         delete s.pendingBashCommandsByConv[id]
         delete s.pendingMcpToolCallsByConv[id]
         delete s.pendingQuestionsByConv[id]
+        // 其余 per-conversation 状态：草稿、标签页、回复目标、未读数不随会话一起消失会泄漏内存，
+        // 且删除的 id 万一被复用时旧状态会串进新会话
+        delete s.openFilesByConv[id]
+        delete s.activeTabByConv[id]
+        delete s.replyTargetByConv[id]
+        delete s.pendingAttachmentsByConv[id]
+        delete s.unreadByConv[id]
+        for (const [runId, dispatch] of Object.entries(s.dispatchesByRunId)) {
+          if (
+            runIds.has(runId) ||
+            msgIdSet.has(dispatch.messageId) ||
+            Object.values(dispatch.childRunIds).some((childId) => runIds.has(childId))
+          ) {
+            delete s.dispatchesByRunId[runId]
+          }
+        }
         // 服务端删会话会级联删产物；客户端同步清掉，否则预览面板 / 产物库会继续显示已删除的行
         for (const [artifactId, artifact] of Object.entries(s.artifacts)) {
           if (artifact.conversationId !== id) continue
@@ -259,18 +290,73 @@ export const useAppStore = create<AppState>()(
       set((s) => {
         const snapshotIds = list.map((m) => m.id)
         const snapshotSet = new Set(snapshotIds)
-        // GET 快照可能早于本次请求期间到达的 SSE 消息：并集合并，不能整桶覆盖
+        const latestSnapshotAt = list.reduce((max, m) => Math.max(max, m.createdAt), 0)
+        // GET 快照可能早于本次请求期间到达的 SSE 消息：并集合并，不能整桶覆盖。
+        // 反向也要处理：断线期间被撤回 / 删除的消息不在快照里，本地不能永远留着。
         const existingIds = s.messageIdsByConv[conversationId] ?? []
-        const nextIds = [...snapshotIds, ...existingIds.filter((id) => !snapshotSet.has(id))]
+        const preservedIds = existingIds.filter((id) => {
+          if (snapshotSet.has(id)) return false
+          const m = s.messages[id]
+          if (!m) return false
+          // 本地乐观消息 / 正在流式的消息不能被快照判死
+          return id.startsWith('temp_') || m.status === 'streaming' || m.createdAt > latestSnapshotAt
+        })
+        const preservedSet = new Set(preservedIds)
+        for (const id of existingIds) {
+          if (snapshotSet.has(id) || preservedSet.has(id)) continue
+          delete s.messages[id]
+        }
+        const nextIds = [...snapshotIds, ...preservedIds]
         if (!areStringArraysEqual(s.messageIdsByConv[conversationId], nextIds)) {
           s.messageIdsByConv[conversationId] = nextIds
         }
         for (const m of list) {
           const existing = s.messages[m.id]
-          if (!existing || !areMessagesEquivalent(existing, m)) {
+          if (!existing) {
             s.messages[m.id] = m
+          } else {
+            const merged = mergeSnapshotMessage(existing, m)
+            if (merged !== existing && !areMessagesEquivalent(existing, merged)) {
+              s.messages[m.id] = merged
+            }
           }
           attachDispatchToMessageForRun(s.dispatchesByRunId, m.runId, m.id)
+        }
+        // 刷新页面后 run.start 早已错过：从仍处于 streaming 的消息重建 run，
+        // 否则输入框会解锁、停止按钮消失，甚至能在旧 run 仍在写盘时再发一条。
+        const runBucket = (s.runsByConv[conversationId] ??= {})
+        const streamingRunIds = new Set<string>()
+        for (const m of list) {
+          if (m.status !== 'streaming' || !m.runId) continue
+          streamingRunIds.add(m.runId)
+          if (!runBucket[m.runId]) {
+            runBucket[m.runId] = {
+              id: m.runId,
+              conversationId,
+              agentId: m.agentId ?? '',
+              triggerMessageId: null,
+              status: 'running',
+              error: null,
+              parentRunId: null,
+              usage: m.usage
+                ? {
+                    inputTokens: m.usage.inputTokens,
+                    outputTokens: m.usage.outputTokens,
+                    cacheCreationTokens: 0,
+                    cacheReadTokens: m.usage.cacheReadTokens,
+                  }
+                : null,
+              startedAt: m.createdAt,
+              finishedAt: null,
+            }
+            s.restoredRunIds[m.runId] = true
+          }
+        }
+        // 快照里已经没有 streaming 消息 → 之前重建的 run 已经结束（run.end 在断线期间漏掉了）
+        for (const runId of Object.keys(runBucket)) {
+          if (!s.restoredRunIds[runId] || streamingRunIds.has(runId)) continue
+          delete runBucket[runId]
+          delete s.restoredRunIds[runId]
         }
       }),
 
@@ -391,7 +477,10 @@ export const useAppStore = create<AppState>()(
         s.messageIdsByConv[conversationId] = []
 
         const runIds = new Set(Object.keys(s.runsByConv[conversationId] ?? {}))
-        for (const runId of runIds) delete s.dispatchesByRunId[runId]
+        for (const runId of runIds) {
+          delete s.dispatchesByRunId[runId]
+          delete s.restoredRunIds[runId]
+        }
         for (const runId in s.dispatchesByRunId) {
           if (messageIds.has(s.dispatchesByRunId[runId].messageId)) {
             delete s.dispatchesByRunId[runId]
@@ -476,6 +565,7 @@ export const useAppStore = create<AppState>()(
 
     setPendingDispatchPlansForConversation: (conversationId, list) =>
       set((s) => {
+        const validPendingIds = new Set(list.map((p) => p.id))
         for (const pending of list) {
           if (pending.conversationId !== conversationId) continue
           const status: DispatchState['taskStatus'] = {}
@@ -492,6 +582,14 @@ export const useAppStore = create<AppState>()(
             reviewStatus: 'pending',
             pendingPlanId: pending.id,
           }
+        }
+        // 断线期间可能已经审批 / 拒绝：本地仍标 pending 的 dispatch 要以快照为准清掉
+        for (const dispatch of Object.values(s.dispatchesByRunId)) {
+          if (!dispatch.pendingPlanId || dispatch.reviewStatus !== 'pending') continue
+          if (validPendingIds.has(dispatch.pendingPlanId)) continue
+          if (s.messages[dispatch.messageId]?.conversationId !== conversationId) continue
+          delete dispatch.pendingPlanId
+          dispatch.reviewStatus = undefined
         }
       }),
 
@@ -573,6 +671,7 @@ export const useAppStore = create<AppState>()(
             return
 
           case 'run.start': {
+            delete s.restoredRunIds[event.runId]
             s.runsByConv[event.conversationId] ??= {}
             s.runsByConv[event.conversationId][event.runId] = {
               id: event.runId,
@@ -590,6 +689,7 @@ export const useAppStore = create<AppState>()(
           }
 
           case 'run.end': {
+            delete s.restoredRunIds[event.runId]
             const run = s.runsByConv[event.conversationId]?.[event.runId]
             if (run) {
               run.status = event.status
@@ -990,6 +1090,20 @@ function buildUnresolvedToolResult(status: 'failed' | 'aborted', error?: string)
     : '工具调用未完成：本次运行失败。'
 }
 
+/**
+ * GET 快照与 SSE 流式更新可能乱序到达：流式中的消息若被更旧的快照整条替换，
+ * 已渲染的 parts 会丢，后续 part.delta 因下标不存在而静默丢弃。
+ * 规则：终态快照权威；两边都流式时保留 parts 更多的一份。
+ */
+function mergeSnapshotMessage(existing: MessageRow, incoming: MessageRow): MessageRow {
+  if (existing.status === 'streaming' && incoming.status === 'streaming') {
+    return incoming.parts.length > existing.parts.length ? incoming : existing
+  }
+  if (existing.status === 'streaming') return incoming
+  if (incoming.status === 'streaming') return existing
+  return incoming
+}
+
 function areMessagesEquivalent(a: MessageRow, b: MessageRow): boolean {
   if (a === b) return true
   return (
@@ -1147,11 +1261,11 @@ export const useTopLevelRunningRuns = (conversationId: string) =>
 export const usePendingPlanReviewForConversation = (conversationId: string) =>
   useAppStore(
     useShallow((s): { planId: string; runId: string } | null => {
-      const runs = s.runsByConv[conversationId]
-      if (!runs) return null
-      for (const runId in runs) {
+      // 不依赖 runsByConv：刷新后 run 可能还没重建，而待审批计划已经由快照恢复
+      for (const runId in s.dispatchesByRunId) {
         const d = s.dispatchesByRunId[runId]
-        if (d?.reviewStatus === 'pending' && d.pendingPlanId) {
+        if (d.reviewStatus !== 'pending' || !d.pendingPlanId) continue
+        if (s.messages[d.messageId]?.conversationId === conversationId) {
           return { planId: d.pendingPlanId, runId }
         }
       }
@@ -1278,14 +1392,15 @@ export const useConversationUsageTotal = (conversationId: string | null): Conver
       byModel: {},
       runCount: 0,
     }
-    // 优先用 runs（实时性 + model 字段最准）；空则从 messages 兜底（刷新页面后唯一可用的源）
-    let hasRunUsage = false
+    // 两源合并：runs 实时且 model 最准；messages 覆盖刷新前的历史 run。
+    // 同一 run 只取一处，否则 run.usage 与 message.usage 会被重复累加。
+    let latestUsageAt = -1
+    const countedRuns = new Set<string>()
     if (runs) {
-      let latestRunWithUsage = -1
       for (const run of Object.values(runs)) {
         const u = run.usage
         if (!u) continue
-        hasRunUsage = true
+        countedRuns.add(run.id)
         result.inputTokens += u.inputTokens
         result.outputTokens += u.outputTokens
         result.cacheCreationTokens += u.cacheCreationTokens
@@ -1294,21 +1409,22 @@ export const useConversationUsageTotal = (conversationId: string | null): Conver
         const sub = u.inputTokens + u.outputTokens
         result.byAgent[run.agentId] = (result.byAgent[run.agentId] ?? 0) + sub
         if (u.model) result.byModel[u.model] = (result.byModel[u.model] ?? 0) + sub
-        if (run.startedAt > latestRunWithUsage) {
-          latestRunWithUsage = run.startedAt
+        if (run.startedAt > latestUsageAt) {
+          latestUsageAt = run.startedAt
           result.lastInputTokens = u.lastInputTokens ?? u.inputTokens
         }
       }
     }
 
-    if (!hasRunUsage && messageIds) {
-      // 走 messages 兜底：按 run_id 去重统计 runCount；按 message 累加 token；
-      // model 通过 agent.modelId 推断（messages 不存 model，跑过的模型若已切换无法准确还原）
+    if (messageIds) {
+      // 按 message 累加 token；按 run_id 去重 runCount；model 通过 agent.modelId 推断
+      // （messages 不存 model，跑过的模型若已切换无法准确还原）
       const seenRuns = new Set<string>()
-      let latestMsgCreatedAt = -1
       for (const mid of messageIds) {
         const m = messages[mid]
         if (!m || !m.usage || m.role !== 'agent') continue
+        // 该 run 已有实时 usage：跳过它的消息，避免和历史消息叠加
+        if (m.runId && countedRuns.has(m.runId)) continue
         const u = m.usage
         result.inputTokens += u.inputTokens
         result.outputTokens += u.outputTokens
@@ -1323,8 +1439,8 @@ export const useConversationUsageTotal = (conversationId: string | null): Conver
           const modelId = agents[m.agentId]?.modelId
           if (modelId) result.byModel[modelId] = (result.byModel[modelId] ?? 0) + sub
         }
-        if (m.createdAt > latestMsgCreatedAt) {
-          latestMsgCreatedAt = m.createdAt
+        if (m.createdAt > latestUsageAt) {
+          latestUsageAt = m.createdAt
           result.lastInputTokens = u.inputTokens
         }
       }

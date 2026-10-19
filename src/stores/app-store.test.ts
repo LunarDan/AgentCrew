@@ -37,6 +37,8 @@ function resetStore(): void {
     mobileSidebarOpen: false,
     highlightedMessageId: null,
     streamConnected: false,
+    resyncNonce: 0,
+    restoredRunIds: {},
   })
 }
 
@@ -217,5 +219,91 @@ describe('app-store run failure cleanup', () => {
     const message = useAppStore.getState().messages.msg_tool
     expect(message.status).toBe('aborted')
     expect(message.parts.filter((part) => part.type === 'tool_result')).toHaveLength(1)
+  })
+})
+
+describe('app-store message snapshot reconciliation', () => {
+  beforeEach(() => { resetStore() })
+
+  it('restores a running run from a streaming message and prunes it on the next snapshot', () => {
+    useAppStore.getState().setMessagesForConversation('conv_1', [
+      { ...agentMessage('msg_live', 'run_live', 10), status: 'streaming' },
+    ])
+    const running = useAppStore.getState().runsByConv.conv_1?.run_live
+    expect(running?.status).toBe('running')
+
+    // 下一次快照里该消息已 complete（run.end 在断线期间丢了）：重建的 run 要被清掉
+    useAppStore.getState().setMessagesForConversation('conv_1', [
+      agentMessage('msg_live', 'run_live', 10),
+    ])
+    expect(useAppStore.getState().runsByConv.conv_1?.run_live).toBeUndefined()
+  })
+
+  it('drops messages removed server-side but keeps local temp and streaming rows', () => {
+    useAppStore.getState().upsertMessage(agentMessage('msg_stale', 'run_old', 1))
+    useAppStore.getState().upsertMessage({ ...agentMessage('temp_1', 'run_new', 2) })
+    useAppStore.getState().applyEvent({
+      type: 'run.start',
+      conversationId: 'conv_1',
+      timestamp: 3,
+      runId: 'run_new',
+      agentId: 'ag_orchestrator',
+      triggerMessageId: 'msg_trigger',
+    })
+    useAppStore.getState().applyEvent({
+      type: 'message.start',
+      conversationId: 'conv_1',
+      timestamp: 3,
+      messageId: 'msg_streaming',
+      agentId: 'ag_orchestrator',
+      runId: 'run_new',
+    })
+
+    useAppStore.getState().setMessagesForConversation('conv_1', [
+      agentMessage('msg_kept', 'run_kept', 4),
+    ])
+
+    const state = useAppStore.getState()
+    expect(state.messages.msg_stale).toBeUndefined()
+    expect(state.messages.temp_1).toBeDefined()
+    expect(state.messages.msg_streaming).toBeDefined()
+    expect(state.messageIdsByConv.conv_1).toEqual([
+      'msg_kept',
+      'temp_1',
+      'msg_streaming',
+    ])
+  })
+
+  it('keeps live streaming parts when an older snapshot arrives', () => {
+    useAppStore.getState().applyEvent({
+      type: 'run.start',
+      conversationId: 'conv_1',
+      timestamp: 1,
+      runId: 'run_1',
+      agentId: 'ag_orchestrator',
+      triggerMessageId: 'msg_trigger',
+    })
+    useAppStore.getState().applyEvent({
+      type: 'message.start',
+      conversationId: 'conv_1',
+      timestamp: 2,
+      messageId: 'msg_1',
+      agentId: 'ag_orchestrator',
+      runId: 'run_1',
+    })
+    useAppStore.getState().applyEvent({
+      type: 'part.start',
+      conversationId: 'conv_1',
+      timestamp: 3,
+      messageId: 'msg_1',
+      partIndex: 0,
+      part: { type: 'text', content: 'hello' },
+    })
+
+    useAppStore.getState().setMessagesForConversation('conv_1', [
+      { ...agentMessage('msg_1', 'run_1', 2), status: 'streaming', parts: [] },
+    ])
+
+    expect(useAppStore.getState().messages.msg_1.parts).toHaveLength(1)
   })
 })
