@@ -215,7 +215,7 @@ write_artifact({
 
 **返回值**：`{ answers: Record<question, string> }`，其中 value 是用户选择的 label 列表与可选 freeform note 拼接后的文本。
 
-**运行机制**：handler 注册 `PendingQuestion`，通过 SSE 推 `ask_user.pending`；桌面端 `AskUserQuestionDialog` 与移动端 pending question UI 都可以提交答案。答案提交后 `pendingQuestions.answer()` 唤醒工具调用并继续 agent run。
+**运行机制**：handler 注册 `PendingQuestion`，通过 SSE 推 `ask_user.pending`；桌面端 `AskUserQuestionDialog` 与移动端 pending question UI 都可以提交答案。答案提交后 `pendingQuestions.answer()` 唤醒工具调用并继续 agent run。提交接口对答案做上限与归属校验（Desktop 与 mobile 共用 `validateAskUserAnswers`）：最多 4 个问题、每题最多 8 个选项、备注最多 4000 字；key 必须是原问题文本、label 必须在该题选项中，否则 400 —— 答案会原样进入工具结果与 LLM 上下文，不能接受任意大 / 任意 key 的输入。
 
 **装备与注入**：
 - Custom agent 只有 `toolNames` 包含 `ask_user` 才能调用；内置 agents 与新建自定义 agent 默认装备。
