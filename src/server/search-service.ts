@@ -132,7 +132,7 @@ function runFtsPath(
   }
 
   let total = rows.length
-  if (rows.length === limit) {
+  if (rows.length > 0) {
     const countRow = target.prepare(`
       SELECT COUNT(*) AS n FROM messages_fts
       JOIN messages m ON m.rowid = messages_fts.rowid
@@ -190,9 +190,26 @@ function runLikePath(
     limit, offset,
   ) as HitRow[]
 
+  // 分页时 rows.length 只是本页条数；total 必须是匹配总数，否则 UI 的「共 N 条」会随页码变化。
+  let total = 0
+  if (rows.length > 0) {
+    const countRow = target.prepare(`
+      SELECT COUNT(*) AS n
+      FROM messages m
+      WHERE m.parts LIKE '%' || ? || '%' ESCAPE '\\'
+        AND (? IS NULL OR m.conversation_id = ?)
+        AND (? IS NULL OR m.role = ?)
+    `).get(
+      likeQuery,
+      opts.conversationId ?? null, opts.conversationId ?? null,
+      opts.role ?? null, opts.role ?? null,
+    ) as { n: number }
+    total = countRow.n
+  }
+
   return {
     hits: rows.map((row) => ({ ...row, snippetHtml: escapeHtml(row.snippetHtml) })),
-    total: rows.length,
+    total,
     tookMs: Date.now() - start,
   }
 }

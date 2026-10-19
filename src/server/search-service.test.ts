@@ -133,6 +133,28 @@ describe('searchMessages (FTS5 path)', () => {
     expect(r.hits.length).toBe(2)
   })
 
+  it('reports the full match count on offset pages', async () => {
+    for (let i = 0; i < 5; i++) {
+      insertMessage(db, `m${i}`, 'c1', 'user', [{ type: 'text', content: 'bulk' }])
+    }
+    const r = await searchMessages({
+      query: 'bulk', limit: 2, offset: 4, db: db as Database.Database,
+    })
+    expect(r.hits.length).toBe(1)
+    expect(r.total).toBe(5)
+  })
+
+  it('LIKE fallback reports the full match count on offset pages', async () => {
+    for (let i = 0; i < 5; i++) {
+      insertMessage(db, `m${i}`, 'c1', 'user', [{ type: 'text', content: '共同目标' }])
+    }
+    const r = await searchMessages({
+      query: '共同', fallback: 'like', limit: 2, offset: 4, db: db as Database.Database,
+    })
+    expect(r.hits.length).toBe(1)
+    expect(r.total).toBe(5)
+  })
+
   it('returns error code for invalid FTS5 syntax', async () => {
     const r = await searchMessages({ query: '(unclosed', db: db as Database.Database })
     expect(r.hits).toEqual([])
