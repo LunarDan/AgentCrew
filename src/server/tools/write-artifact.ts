@@ -79,36 +79,51 @@ export const writeArtifactTool: ToolDef = {
       }
     }
 
-    let version = 1
-    let resolvedParent: string | null = null
-    if (parentArtifactId) {
-      const parent = await db.query.artifacts.findFirst({
-        where: eq(schema.artifacts.id, parentArtifactId),
-      })
-      if (!parent) {
-        return { ok: false, error: `parentArtifactId not found: ${parentArtifactId}` }
-      }
-      if (parent.conversationId !== ctx.conversationId) {
-        return { ok: false, error: 'parentArtifactId belongs to a different conversation' }
-      }
-      version = parent.version + 1
-      resolvedParent = parent.id
-    }
-
     const artifactId = newArtifactId()
     const createdAt = Date.now()
+    let version = 1
+    let resolvedParent: string | null = null
 
-    await db.insert(schema.artifacts).values({
-      id: artifactId,
-      conversationId: ctx.conversationId,
-      type,
-      title,
-      content: fullContent,
-      version,
-      parentArtifactId: resolvedParent,
-      createdByAgentId: ctx.agentId,
-      createdAt,
+    // 父版本读取与插入放在同一事务里：并发写同一父产物时 version 不会重复
+    const failure = db.transaction((tx) => {
+      let artifactVersion = 1
+      let parentId: string | null = null
+      if (parentArtifactId) {
+        const parent = tx
+          .select()
+          .from(schema.artifacts)
+          .where(eq(schema.artifacts.id, parentArtifactId))
+          .get()
+        if (!parent) {
+          return `parentArtifactId not found: ${parentArtifactId}`
+        }
+        if (parent.conversationId !== ctx.conversationId) {
+          return 'parentArtifactId belongs to a different conversation'
+        }
+        artifactVersion = parent.version + 1
+        parentId = parent.id
+      }
+
+      tx.insert(schema.artifacts)
+        .values({
+          id: artifactId,
+          conversationId: ctx.conversationId,
+          type,
+          title,
+          content: fullContent,
+          version: artifactVersion,
+          parentArtifactId: parentId,
+          createdByAgentId: ctx.agentId,
+          createdAt,
+        })
+        .run()
+
+      version = artifactVersion
+      resolvedParent = parentId
+      return null
     })
+
+    if (failure) return { ok: false, error: failure }
 
     return {
       ok: true,

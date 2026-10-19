@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
 import JSZip from 'jszip'
@@ -245,17 +245,32 @@ export function publishDeploymentToStaticDirectory(
   }
 
   const deploymentDir = getDeploymentDir(deploymentId, options)
-  rmSync(publishDir, { recursive: true, force: true })
-  mkdirSync(publishDir, { recursive: true })
+  // 先写临时目录再整体替换，避免复制中途失败时线上目录已被清空
+  const tempDir = path.join(
+    publishRoot,
+    `.publish-${deploymentId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  )
+  if (!isPathWithin(tempDir, publishRoot)) {
+    throw new Error(`Publish path escapes configured directory: ${tempDir}`)
+  }
+  mkdirSync(tempDir, { recursive: true })
 
-  for (const file of listPublicDeploymentFiles(deploymentDir)) {
-    const source = safeJoinDeploymentPath(deploymentDir, file)
-    const dest = path.join(publishDir, ...file.split('/'))
-    if (!isPathWithin(dest, publishDir)) {
-      throw new Error(`Publish file path escapes deployment directory: ${file}`)
+  try {
+    for (const file of listPublicDeploymentFiles(deploymentDir)) {
+      const source = safeJoinDeploymentPath(deploymentDir, file)
+      const dest = path.join(tempDir, ...file.split('/'))
+      if (!isPathWithin(dest, tempDir)) {
+        throw new Error(`Publish file path escapes deployment directory: ${file}`)
+      }
+      mkdirSync(path.dirname(dest), { recursive: true })
+      writeFileSync(dest, readFileSync(source))
     }
-    mkdirSync(path.dirname(dest), { recursive: true })
-    writeFileSync(dest, readFileSync(source))
+
+    rmSync(publishDir, { recursive: true, force: true })
+    renameSync(tempDir, publishDir)
+  } catch (err) {
+    rmSync(tempDir, { recursive: true, force: true })
+    throw err
   }
 
   return {
@@ -397,6 +412,25 @@ export function normalizeDeploymentFilePath(filePath: string): string | null {
   }
   if (segments[0]?.toLowerCase() === PRIVATE_DIR) return null
   return normalized
+}
+
+export function deleteDeploymentsForArtifact(
+  artifactId: string,
+  options: DeploymentOptions = {},
+): void {
+  const deploymentsRoot = getDeploymentsRoot(options)
+  if (!existsSync(deploymentsRoot)) return
+
+  for (const entry of readdirSync(deploymentsRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !isDeploymentId(entry.name)) continue
+    const manifest = readDeploymentManifest(entry.name, options)
+    if (manifest?.artifactId !== artifactId) continue
+    try {
+      rmSync(getDeploymentDir(entry.name, options), { recursive: true, force: true })
+    } catch (err) {
+      console.warn(`[deployment] failed to remove deployment dir ${entry.name}`, err)
+    }
+  }
 }
 
 export function isDeploymentId(value: string): boolean {

@@ -3,6 +3,7 @@ import { desc, eq, inArray } from 'drizzle-orm'
 import { db, schema } from '@/db/client'
 import type { ArtifactRow } from '@/db/schema'
 import { buildArtifactContent, describeArtifactContentError } from '@/server/artifact-content'
+import { deleteDeploymentsForArtifact } from '@/server/deployment-service'
 import { newArtifactId } from '@/server/ids'
 
 /**
@@ -57,6 +58,9 @@ export async function deleteArtifact(artifactId: string): Promise<void> {
   if (deleted.length === 0) {
     throw new Error(`Artifact not found: ${artifactId}`)
   }
+
+  // 本地部署目录按 artifactId 归属，产物删掉后不应还能被预览 / 下载
+  deleteDeploymentsForArtifact(artifactId)
 }
 
 export type CreateArtifactVersionResult =
@@ -76,36 +80,42 @@ export async function createArtifactVersion(
   rawContent: unknown,
   title?: string,
 ): Promise<CreateArtifactVersionResult> {
-  const parent = await db.query.artifacts.findFirst({
-    where: eq(schema.artifacts.id, parentArtifactId),
-  })
-  if (!parent) {
-    return { ok: false, error: `Artifact not found: ${parentArtifactId}`, status: 404 }
-  }
-
-  const content = buildArtifactContent(parent.type, rawContent)
-  if (!content) {
-    return {
-      ok: false,
-      error: describeArtifactContentError(parent.type, rawContent) ?? `Invalid content for type ${parent.type}`,
-      status: 400,
+  // 读版本号与插入放在同一事务里，避免并发提交生成重复 version
+  return db.transaction((tx) => {
+    const parent = tx
+      .select()
+      .from(schema.artifacts)
+      .where(eq(schema.artifacts.id, parentArtifactId))
+      .get()
+    if (!parent) {
+      return { ok: false, error: `Artifact not found: ${parentArtifactId}`, status: 404 } as const
     }
-  }
 
-  const [artifact] = await db
-    .insert(schema.artifacts)
-    .values({
-      id: newArtifactId(),
-      conversationId: parent.conversationId,
-      type: parent.type,
-      title: title?.trim() || parent.title,
-      content,
-      version: parent.version + 1,
-      parentArtifactId: parent.id,
-      createdByAgentId: parent.createdByAgentId,
-      createdAt: Date.now(),
-    })
-    .returning()
+    const content = buildArtifactContent(parent.type, rawContent)
+    if (!content) {
+      return {
+        ok: false,
+        error: describeArtifactContentError(parent.type, rawContent) ?? `Invalid content for type ${parent.type}`,
+        status: 400,
+      } as const
+    }
 
-  return { ok: true, artifact }
+    const artifact = tx
+      .insert(schema.artifacts)
+      .values({
+        id: newArtifactId(),
+        conversationId: parent.conversationId,
+        type: parent.type,
+        title: title?.trim() || parent.title,
+        content,
+        version: parent.version + 1,
+        parentArtifactId: parent.id,
+        createdByAgentId: parent.createdByAgentId,
+        createdAt: Date.now(),
+      })
+      .returning()
+      .get()
+
+    return { ok: true, artifact } as const
+  })
 }

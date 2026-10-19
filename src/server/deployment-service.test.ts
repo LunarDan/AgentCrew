@@ -12,6 +12,7 @@ import {
   buildDeploymentSourceZip,
   createLocalStaticDeployment,
   createWorkspaceStaticDeployment,
+  deleteDeploymentsForArtifact,
   publishDeploymentToStaticDirectory,
   readDeploymentAsset,
 } from './deployment-service'
@@ -99,6 +100,31 @@ describe('deployment-service', () => {
       .toMatchObject({ ok: false, status: 400 })
     expect(readDeploymentAsset('dep_assets123', ['assets', '..', 'index.html'], { dataDir }))
       .toMatchObject({ ok: false, status: 400 })
+  })
+
+  it('removes local deployment dirs when their artifact is deleted', () => {
+    const dataDir = tempDataDir()
+    createLocalStaticDeployment({
+      id: 'dep_delete1',
+      artifactId: 'art_delete1',
+      title: 'Delete me',
+      version: 1,
+      content: webAppContent,
+      dataDir,
+    })
+    createLocalStaticDeployment({
+      id: 'dep_keep1',
+      artifactId: 'art_keep1',
+      title: 'Keep me',
+      version: 1,
+      content: webAppContent,
+      dataDir,
+    })
+
+    deleteDeploymentsForArtifact('art_delete1', { dataDir })
+
+    expect(existsSync(path.join(dataDir, 'deployments', 'dep_delete1'))).toBe(false)
+    expect(existsSync(path.join(dataDir, 'deployments', 'dep_keep1'))).toBe(true)
   })
 
   it('rejects unsafe source file paths before writing outside the deployment root', () => {
