@@ -15,6 +15,7 @@ const ArgsSchema = z.object({
 
 // 文本类附件直接读 utf-8；超过这个上限会截断（防 prompt 爆炸）
 const MAX_TEXT_CHARS = 50_000
+const PDF_EXTRACTION_TIMEOUT_MS = 60_000
 
 const TEXT_MIME_PREFIXES = ['text/']
 const TEXT_MIME_FULL = new Set([
@@ -99,7 +100,7 @@ export const readAttachmentTool: ToolDef = {
         return { ok: false, error: 'PDF extraction aborted' }
       }
       try {
-        const extracted = await extractPdfText(absPath)
+        const extracted = await extractPdfText(absPath, ctx.abortSignal)
         if (ctx.abortSignal.aborted) {
           return { ok: false, error: 'PDF extraction aborted' }
         }
@@ -169,7 +170,10 @@ function truncateText(raw: string): { content: string; truncated: boolean } {
   return { content, truncated }
 }
 
-async function extractPdfText(absPath: string): Promise<{
+async function extractPdfText(
+  absPath: string,
+  signal: AbortSignal,
+): Promise<{
   content: string
   truncated: boolean
   pageCount: number
@@ -178,7 +182,7 @@ async function extractPdfText(absPath: string): Promise<{
   const { PDFParse } = await import('pdf-parse')
   const parser = new PDFParse({ data: readFileSync(absPath) })
   try {
-    const result = await parser.getText()
+    const result = await raceAbort(parser.getText(), signal, PDF_EXTRACTION_TIMEOUT_MS)
     const text = result.text.trim()
     const { content, truncated } = truncateText(text)
     return {
@@ -194,4 +198,37 @@ async function extractPdfText(absPath: string): Promise<{
   } finally {
     await parser.destroy().catch(() => undefined)
   }
+}
+
+/** pdf-parse 不支持取消：用 abort + 超时 race 让工具调用能及时返回，避免卡住整个 run。 */
+function raceAbort<T>(promise: Promise<T>, signal: AbortSignal, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new Error('PDF extraction aborted'))
+      return
+    }
+    const onAbort = () => {
+      cleanup()
+      reject(new Error('PDF extraction aborted'))
+    }
+    const timer = setTimeout(() => {
+      cleanup()
+      reject(new Error(`PDF extraction timed out after ${timeoutMs}ms`))
+    }, timeoutMs)
+    const cleanup = () => {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', onAbort)
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (value) => {
+        cleanup()
+        resolve(value)
+      },
+      (err: unknown) => {
+        cleanup()
+        reject(err instanceof Error ? err : new Error(String(err)))
+      },
+    )
+  })
 }
