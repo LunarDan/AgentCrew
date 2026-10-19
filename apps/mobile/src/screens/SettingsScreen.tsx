@@ -138,7 +138,12 @@ export function SettingsScreen({
 
         {error && <div className="error-banner">{error}</div>}
 
-        <button type="button" className="primary-action full" onClick={onTest}>
+        <button
+          type="button"
+          className="primary-action full"
+          disabled={loading}
+          onClick={onTest}
+        >
           {connectionOk ? (
             <CheckCircle2 className="button-icon" aria-hidden="true" />
           ) : (

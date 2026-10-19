@@ -47,8 +47,10 @@ export function App() {
   const snapshotSeq = useRef(0)
   const artifactSeq = useRef(0)
   const detailSeq = useRef(0)
-  const snapshotInFlight = useRef(false)
-  const detailInFlight = useRef(false)
+  /** 在途快照请求：轮询、SSE、手动刷新、操作后刷新共用，避免弱网下请求堆叠。 */
+  const snapshotPromise = useRef<Promise<void> | null>(null)
+  /** 在途详情请求所属的会话；按会话区分，切换会话不受上一个会话的慢请求影响。 */
+  const detailInFlight = useRef<string | null>(null)
   const busyRef = useRef(false)
 
   const api = useMemo(() => createMobileApiClient(connection), [connection])
@@ -85,10 +87,34 @@ export function App() {
     return next
   }, [api, applySnapshot])
 
+  /** 轮询 / SSE / 手动刷新 / 操作后刷新共用同一个在途请求。 */
+  const refreshMobileSnapshot = useCallback(async () => {
+    if (snapshotPromise.current) return snapshotPromise.current
+    const run = (async () => {
+      try {
+        await loadSnapshot()
+      } catch (err) {
+        // 连不上时状态页不能继续显示「在线」
+        setLastSuccessfulConnection(null)
+        setError(err instanceof Error ? err.message : String(err))
+      }
+    })()
+    snapshotPromise.current = run
+    try {
+      await run
+    } finally {
+      // 换 host 时可能已被清空/替换；只清自己这一份
+      if (snapshotPromise.current === run) snapshotPromise.current = null
+    }
+  }, [loadSnapshot])
+
   const selectConversation = useCallback((id: string | null) => {
     selectedConversationRef.current = id
     setSelectedConversationId(id)
-    if (id === null) setConversationDetail(null)
+    if (id === null) {
+      setConversationDetail(null)
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => {
@@ -99,6 +125,9 @@ export function App() {
   useEffect(() => {
     snapshotSeq.current++
     artifactSeq.current++
+    // 旧 host 在途的请求不该阻塞新 host 的第一次刷新（seq 守卫保证它不会回写状态）
+    snapshotPromise.current = null
+    detailInFlight.current = null
     setSnapshot(null)
     setConversationDetail(null)
     setArtifactPreview(null)
@@ -113,34 +142,12 @@ export function App() {
   useEffect(() => {
     if (!configured || activeView === 'settings') return
 
-    let cancelled = false
-
-    async function refreshMobileSnapshot() {
-      // 上一次还没回来（弱网 / 黑洞）就不要再叠一个请求
-      if (snapshotInFlight.current) return
-      snapshotInFlight.current = true
-      try {
-        await loadSnapshot()
-      } catch (err) {
-        if (!cancelled) {
-          // 连不上时状态页不能继续显示「在线」
-          setLastSuccessfulConnection(null)
-          setError(err instanceof Error ? err.message : String(err))
-        }
-      } finally {
-        snapshotInFlight.current = false
-      }
-    }
-
     const timer = window.setInterval(() => {
       void refreshMobileSnapshot()
     }, 3000)
 
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-    }
-  }, [activeView, configured, loadSnapshot])
+    return () => window.clearInterval(timer)
+  }, [activeView, configured, refreshMobileSnapshot])
 
   useEffect(() => {
     if (!configured || activeView === 'settings') return
@@ -153,7 +160,7 @@ export function App() {
       if (timer !== null) return
       timer = window.setTimeout(() => {
         timer = null
-        void loadSnapshot().catch(() => {})
+        void refreshMobileSnapshot()
       }, 500)
     }
 
@@ -169,7 +176,7 @@ export function App() {
       controller.abort()
       if (timer !== null) window.clearTimeout(timer)
     }
-  }, [activeView, api, configured, loadSnapshot])
+  }, [activeView, api, configured, refreshMobileSnapshot])
 
   useEffect(() => {
     if (!configured || !selectedConversationId) return
@@ -177,8 +184,9 @@ export function App() {
     const conversationId = selectedConversationId
 
     async function refreshConversationDetail() {
-      if (detailInFlight.current) return
-      detailInFlight.current = true
+      // 同一会话上一轮还没回来就跳过；不同会话互不阻塞
+      if (detailInFlight.current === conversationId) return
+      detailInFlight.current = conversationId
       const seq = ++detailSeq.current
       try {
         const next = await api.getConversation(conversationId)
@@ -193,7 +201,7 @@ export function App() {
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err))
       } finally {
-        detailInFlight.current = false
+        if (detailInFlight.current === conversationId) detailInFlight.current = null
       }
     }
 
@@ -215,10 +223,8 @@ export function App() {
     setLoading(true)
     setError(null)
     try {
-      await loadSnapshot()
-    } catch (err) {
-      setLastSuccessfulConnection(null)
-      setError(err instanceof Error ? err.message : String(err))
+      // 与轮询共用同一个在途请求：连点「测试连接」不会叠出多个快照
+      await refreshMobileSnapshot()
     } finally {
       setLoading(false)
     }
@@ -245,11 +251,7 @@ export function App() {
     }
     if (!succeeded) return false
     // 操作已经落库：后续刷新失败只提示，不能返回 false 让用户重试一次（会重复发送 / 重新生成）
-    try {
-      await loadSnapshot()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    }
+    await refreshMobileSnapshot()
     return true
   }
 
