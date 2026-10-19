@@ -375,9 +375,13 @@ async function executeRun(runId: string, signal: AbortSignal, args: RunArgs): Pr
     const msg = err instanceof Error ? err.message : String(err)
     return finalize(runId, args, 'failed', emptyRunExecutionResult(), msg)
   } finally {
-    // 进程级内存表：普通 run / orchestrator run 结束后都要清，否则长跑进程会一直累积
-    clearFileWrites(runId)
-    clearRunToolEvidence(runId)
+    // 子 run 的证据在父级评估完之前必须保留：runChildTaskAttempt 在子 promise 结束后才读
+    // getRunToolEvidence，冲突检测与 project 产物也都依赖它。子 run 的清理统一由
+    // executeDag 的 finally 负责（那里能看到所有子 runId）。
+    if (!args.parentRunId) {
+      clearFileWrites(runId)
+      clearRunToolEvidence(runId)
+    }
   }
 }
 
@@ -1123,13 +1127,20 @@ async function runChildTaskAttempt(
   })
 
   const raw = await promise
-  const verificationResults =
-    raw.status === 'aborted'
-      ? []
-      : await runRequiredCommands(task, childRunId, ctx)
-  const evidence = getRunToolEvidence(childRunId)
-  const result = evaluateChildTaskResult(task, raw, evidence)
-  return { rawResult: raw, result, evidence, verificationResults }
+  try {
+    const verificationResults =
+      raw.status === 'aborted'
+        ? []
+        : await runRequiredCommands(task, childRunId, ctx)
+    const evidence = getRunToolEvidence(childRunId)
+    const result = evaluateChildTaskResult(task, raw, evidence)
+    return { rawResult: raw, result, evidence, verificationResults }
+  } catch (err) {
+    // 子 run 的证据本来留给父级评估；评估中途抛错时没有其它路径会清它
+    clearFileWrites(childRunId)
+    clearRunToolEvidence(childRunId)
+    throw err
+  }
 }
 
 function evaluateChildTaskResult(
