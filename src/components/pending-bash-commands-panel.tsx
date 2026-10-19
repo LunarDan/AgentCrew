@@ -24,7 +24,10 @@ export function PendingBashCommandsPanel({ conversationId }: { conversationId: s
     let cancelled = false
     fetchPendingBashCommands(conversationId)
       .then((list) => {
-        if (!cancelled) setPendingBashCommandsForConversation(conversationId, list)
+        if (cancelled) return
+        // 请求期间 SSE 可能已经推来新的 pending；此时快照可能更旧，不能覆盖
+        if (useAppStore.getState().pendingBashCommandsByConv[conversationId]?.length) return
+        setPendingBashCommandsForConversation(conversationId, list)
       })
       .catch((err) => {
         console.warn('[PendingBashCommandsPanel] fetch failed', err)

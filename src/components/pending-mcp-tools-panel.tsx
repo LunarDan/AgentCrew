@@ -28,7 +28,10 @@ export function PendingMcpToolsPanel({ conversationId }: { conversationId: strin
     let cancelled = false
     fetchPendingMcpToolCalls(conversationId)
       .then((list) => {
-        if (!cancelled) setPendingMcpToolCallsForConversation(conversationId, list)
+        if (cancelled) return
+        // 请求期间 SSE 可能已经推来新的 pending；此时快照可能更旧，不能覆盖
+        if (useAppStore.getState().pendingMcpToolCallsByConv[conversationId]?.length) return
+        setPendingMcpToolCallsForConversation(conversationId, list)
       })
       .catch((err) => {
         console.warn('[PendingMcpToolsPanel] fetch failed', err)

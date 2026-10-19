@@ -32,7 +32,10 @@ export function PendingWritesPanel({ conversationId }: { conversationId: string 
     let cancelled = false
     fetchPendingWrites(conversationId)
       .then((list) => {
-        if (!cancelled) setPendingWritesForConversation(conversationId, list)
+        if (cancelled) return
+        // 请求期间 SSE 可能已经推来新的 pending；此时快照可能更旧，不能覆盖
+        if (useAppStore.getState().pendingWritesByConv[conversationId]?.length) return
+        setPendingWritesForConversation(conversationId, list)
       })
       .catch((err) => {
         console.warn('[PendingWritesPanel] fetch failed', err)

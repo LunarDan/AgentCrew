@@ -40,7 +40,10 @@ export function AskUserQuestionDialog({ conversationId }: { conversationId: stri
     let cancelled = false
     fetchPendingQuestions(conversationId)
       .then((list) => {
-        if (!cancelled) setPendingQuestionsForConversation(conversationId, list)
+        if (cancelled) return
+        // 请求期间 SSE 可能已经推来新的问题；此时快照可能更旧，不能覆盖
+        if (useAppStore.getState().pendingQuestionsByConv[conversationId]?.length) return
+        setPendingQuestionsForConversation(conversationId, list)
       })
       .catch((err) => {
         console.warn('[AskUserQuestionDialog] fetch failed', err)
@@ -90,6 +93,9 @@ function AskUserBody({
   queueSize: number
 }) {
   const agent = useAppStore((s) => s.agents[agentId])
+  const setPendingQuestionsForConversation = useAppStore(
+    (s) => s.setPendingQuestionsForConversation,
+  )
   const [draft, setDraft] = useState<Record<string, AskUserAnswer>>(() =>
     initialDraft(questions),
   )
@@ -100,6 +106,7 @@ function AskUserBody({
   useEffect(() => {
     setDraft(initialDraft(questions))
     setError(null)
+    setBusy(false)
   }, [questionId, questions])
 
   const allAnswered = useMemo(
@@ -173,7 +180,13 @@ function AskUserBody({
         }
       }
       await submitQuestionAnswers(conversationId, questionId, final)
-      // SSE 会把 pending 从 store 移除
+      // SSE 会把 pending 从 store 移除；这里本地也移除一次兜底，
+      // 否则断线 / 丢事件时弹窗会一直卡在提交中且无法关闭
+      const remaining = (
+        useAppStore.getState().pendingQuestionsByConv[conversationId] ?? []
+      ).filter((q) => q.id !== questionId)
+      setPendingQuestionsForConversation(conversationId, remaining)
+      setBusy(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       setBusy(false)
