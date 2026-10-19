@@ -169,7 +169,7 @@ write_artifact({
 
 **作用域**：只能读**当前会话**的 artifact（`WHERE conversation_id = ctx.conversationId`），防越权。
 
-**返回值**：`{ id, type, title, content, version }`，content 是完整的 `ArtifactContent`（可能很大，调用方自行决定塞回 LLM 多少）。
+**返回值**：`{ id, type, title, content, version }`，content 是 `ArtifactContent`。为防止整份产物把 prompt 撑爆，超过 50,000 字符时截断为字符串并追加 `truncated: true` 与 `note`；未超限时保持原结构（字符串或 JSON 对象）。
 
 ### read_attachment
 

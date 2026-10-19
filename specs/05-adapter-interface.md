@@ -200,10 +200,11 @@ DeepSeek 等支持思考链的模型在 stream 中会单独输出 `delta.reasoni
 
 ### Multimodal
 
-`buildMultimodalUserContent`（`custom-agent-adapter.ts:337-358`）：
+`buildMultimodalUserContent`（`custom-agent-adapter.ts`，OpenAI 路径）与 `buildAnthropicUserContent`（同文件，Anthropic 路径）：
 
-- agent `supportsVision=true` 且 attachments 含 `kind='image'`：把 prompt 包成 OpenAI content blocks 数组，图片走 `image_url` block（base64 data URI），mimeType 来自 attachment row
+- agent `supportsVision=true` 且 attachments 含 `kind='image'`：把 prompt 包成 content blocks 数组，图片走 `image_url` block（base64 data URI），mimeType 来自 attachment row
 - agent `supportsVision=false` 或无图片：纯文本字符串（沿用 OpenAI legacy 单字符串 content）
+- 两条路径共用同一套图片准入：只接受 `image/jpeg` / `image/png` / `image/gif` / `image/webp`，原图超过 5 MB 跳过。不满足的图直接略过并 warn，不让 provider 400 掉整个 run；单条消息最多 5 张图
 
 DeepSeek 的多模态模型（`deepseek-v4-flash`）走标准 OpenAI image_url 协议。
 
