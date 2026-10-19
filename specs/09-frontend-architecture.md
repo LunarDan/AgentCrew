@@ -261,6 +261,8 @@ app/page.tsx
 | `attachments` | 打开 `FileLibraryDialog` 时拉该会话列表；附件 chip 渲染时也按需拉 | 组件内 useState |
 
 附件删除成功后必须同时 `removePendingAttachment(conversationId, id)`：待发附件桶里留着一个已删附件，之后每次发送都会被服务端以「附件不存在」拒绝，而用户看不出原因。
+
+**产物编辑草稿**：web_app / document / diagram / ppt 四种可编辑视图的未提交草稿按 artifact id 存 `sessionStorage`（`agenthub:artifact-draft:<artifactId>`），切版本或关闭面板后恢复；保存成功与「重置」清除对应 key。否则切版本会静默丢掉用户正在写的内容，且旧的 `useEffect([content])` 重置会把它当成新版本内容。
 | `agents` / `conversations` | 应用启动时全量拉一次 | 同名 maps |
 
 **挂载兜底请求**：pending writes / bash commands / MCP tools / questions 在面板挂载时 GET 一次兜底，但若该会话的 store 桶已经有条目（说明 SSE 已推来更新的数据），必须跳过这次快照，不能用更旧的响应覆盖。消息首次加载失败时展示错误 + 重试，而不是误显示「还没有消息」。
@@ -302,7 +304,7 @@ app/page.tsx
 
 时间窗有一个反向风险：3s 等待期间用户（或另一端设备）可能又发了一条新 user message，按时间窗会被一起删掉。因此两条路径都在**删除事务内**重新检查：只要存在 `id != 被操作消息` 且 `created_at >= 触发消息.createdAt` 的 user 消息，就抛 `A newer user message arrived`（接口返回 409），不执行任何删除。
 
-**为什么走 SSE 广播**：桌面端与移动端可能同时打开同一会话，其它客户端要实时移除被撤回 / 重新生成掉的消息与产物，所以 service 在事务提交后发 `message.removed`（含 `messageIds` / `artifactIds`，详见 Spec 02）。发起操作的客户端按接口返回值直接更新 store，并对广播做幂等处理。
+**为什么走 SSE 广播**：桌面端与移动端可能同时打开同一会话，其它客户端要实时移除被撤回 / 重新生成掉的消息与产物，所以 service 在事务提交后发 `message.removed`（含 `messageIds` / `artifactIds`，详见 Spec 02）。发起操作的客户端按接口返回值直接更新 store，并对广播做幂等处理。广播删掉的 artifact id 记入 `removedArtifactIds`：产物库的本地 meta 列表来自一次 `fetchArtifacts`，不订阅 store，必须用这个集合剪枝，否则会一直显示别处已删除的版本。
 
 ---
 
