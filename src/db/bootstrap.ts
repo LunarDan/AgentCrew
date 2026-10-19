@@ -322,3 +322,22 @@ export function bootstrapDatabase(sqlite: Database.Database): void {
   ensureBuiltinAgents(sqlite)
   upgradeBuiltinAgents(sqlite)
 }
+
+/**
+ * 进程启动时收口上次异常退出留下的 run。
+ *
+ * runner 在进程内，重启后 `queued` / `running` 的行不可能再继续；不清理会让会话
+ * 永远显示「运行中」，删除会话 / 清空历史也会被 409 挡住。只从 instrumentation
+ * 调用（不在 bootstrapDatabase 里），避免 `pnpm test` 共享开发库时误伤正在跑的 run。
+ */
+export function reconcileInterruptedRuns(sqlite: Database.Database): void {
+  const now = Date.now()
+  sqlite
+    .prepare(
+      `UPDATE agent_runs
+          SET status = 'failed', error = ?, finished_at = ?
+        WHERE status IN ('queued', 'running')`,
+    )
+    .run('服务重启时中断：进程退出，run 无法继续', now)
+  sqlite.prepare(`UPDATE messages SET status = 'aborted' WHERE status = 'streaming'`).run()
+}
