@@ -110,7 +110,8 @@ export function ArtifactPreviewPanel() {
       if (!id) return
       const row = await createArtifactVersion(id, { content: rawContent, title })
       upsertArtifact(row)
-      openPreview(row.id)
+      // 请求期间用户可能已关面板 / 切到别的产物：不能把预览抢回来
+      if (useAppStore.getState().previewArtifactId === id) openPreview(row.id)
     },
     [id, upsertArtifact, openPreview],
   )
