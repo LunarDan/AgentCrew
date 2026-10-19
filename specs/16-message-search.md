@@ -239,6 +239,7 @@ export interface SearchOptions {
 
 export interface SearchResult {
   hits: SearchHit[]
+  /** 匹配总数（不是本页条数）；FTS 与 LIKE 两条路径都单独 COUNT，分页时保持稳定 */
   total: number
   tookMs: number
 }
