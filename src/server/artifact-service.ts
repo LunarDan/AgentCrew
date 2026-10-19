@@ -60,8 +60,13 @@ export async function deleteArtifact(artifactId: string): Promise<void> {
     throw new Error(`Artifact not found: ${artifactId}`)
   }
 
-  // 本地部署目录按 artifactId 归属，产物删掉后不应还能被预览 / 下载
-  deleteDeploymentsForArtifact(artifactId)
+  // 本地部署目录按 artifactId 归属，产物删掉后不应还能被预览 / 下载。
+  // DB 行已经删了：清理失败不能让请求变 500、更不能吞掉下面的广播。
+  try {
+    deleteDeploymentsForArtifact(artifactId)
+  } catch (err) {
+    console.warn(`[artifact] failed to clean deployments for ${artifactId}`, err)
+  }
 
   // 其它标签页 / 移动端的产物库各自缓存了一份 meta 列表，不广播就会一直显示这个已删版本
   eventBus.publish({
