@@ -457,11 +457,18 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
     const modelId = input.modelId
     if (!modelId) throw new Error('CustomAgentAdapter requires modelId')
     const clientConfig = resolveCustomProviderClientConfig('anthropic', input.apiKey, input.apiBaseUrl)
-    const client = new Anthropic({
-      apiKey: clientConfig.apiKey,
-      baseURL: clientConfig.baseURL,
-      maxRetries: MAX_API_RETRIES,
-    })
+    const client = clientConfig.authToken
+      ? new Anthropic({
+          apiKey: null,
+          authToken: clientConfig.apiKey,
+          baseURL: clientConfig.baseURL,
+          maxRetries: MAX_API_RETRIES,
+        })
+      : new Anthropic({
+          apiKey: clientConfig.apiKey,
+          baseURL: clientConfig.baseURL,
+          maxRetries: MAX_API_RETRIES,
+        })
 
     const tools: Anthropic.Tool[] = [
       ...toolDefs.map((tool) => ({

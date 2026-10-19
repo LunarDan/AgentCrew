@@ -10,6 +10,8 @@ const DEFAULT_VOLCANO_ARK_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
 export interface CustomProviderClientConfig {
   apiKey: string
   baseURL?: string
+  /** 凭据是 Bearer token（ANTHROPIC_AUTH_TOKEN）而不是 x-api-key */
+  authToken?: boolean
 }
 
 export function resolveCustomProviderClientConfig(
@@ -34,14 +36,15 @@ export function resolveCustomProviderClientConfig(
     }
   }
   if (provider === 'anthropic') {
-    const apiKey =
-      overrideKey?.trim() ||
-      process.env.ANTHROPIC_API_KEY ||
-      process.env.ANTHROPIC_AUTH_TOKEN
-    if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set and agent has no apiKey')
+    const override = overrideKey?.trim()
+    const credential =
+      override || process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN
+    if (!credential) throw new Error('ANTHROPIC_API_KEY not set and agent has no apiKey')
     return {
-      apiKey,
+      apiKey: credential,
       ...(apiBaseUrl?.trim() ? { baseURL: apiBaseUrl.trim() } : {}),
+      // 兼容网关通常只认 `Authorization: Bearer`；x-api-key 会直接 401
+      ...(override || process.env.ANTHROPIC_API_KEY ? {} : { authToken: true }),
     }
   }
   if (provider === 'openai') {

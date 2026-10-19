@@ -11,12 +11,16 @@ const ORIGINAL_ENV = {
   OPENAI_API_KEY: process.env.OPENAI_API_KEY,
   DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY,
   ARK_API_KEY: process.env.ARK_API_KEY,
+  ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+  ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN,
 }
 
 afterEach(() => {
   restoreEnv('OPENAI_API_KEY', ORIGINAL_ENV.OPENAI_API_KEY)
   restoreEnv('DEEPSEEK_API_KEY', ORIGINAL_ENV.DEEPSEEK_API_KEY)
   restoreEnv('ARK_API_KEY', ORIGINAL_ENV.ARK_API_KEY)
+  restoreEnv('ANTHROPIC_API_KEY', ORIGINAL_ENV.ANTHROPIC_API_KEY)
+  restoreEnv('ANTHROPIC_AUTH_TOKEN', ORIGINAL_ENV.ANTHROPIC_AUTH_TOKEN)
 })
 
 describe('resolveCustomProviderClientConfig', () => {
@@ -53,6 +57,26 @@ describe('resolveCustomProviderClientConfig', () => {
     process.env.OPENAI_API_KEY = 'env-openai-key'
 
     expect(resolveCustomProviderClientConfig('openai')).toEqual({ apiKey: 'env-openai-key' })
+  })
+
+  it('marks ANTHROPIC_AUTH_TOKEN as a bearer credential', () => {
+    delete process.env.ANTHROPIC_API_KEY
+    process.env.ANTHROPIC_AUTH_TOKEN = 'gateway-token'
+
+    expect(
+      resolveCustomProviderClientConfig('anthropic', null, 'https://gateway.example.com'),
+    ).toEqual({
+      apiKey: 'gateway-token',
+      baseURL: 'https://gateway.example.com',
+      authToken: true,
+    })
+  })
+
+  it('keeps an explicit ANTHROPIC_API_KEY as an x-api-key credential', () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-key'
+    delete process.env.ANTHROPIC_AUTH_TOKEN
+
+    expect(resolveCustomProviderClientConfig('anthropic')).toEqual({ apiKey: 'sk-ant-key' })
   })
 })
 
