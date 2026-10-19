@@ -1092,6 +1092,19 @@ async function regenerateLatestResponseLocked(
   })
   if (!latestUser) throw new Error('No user message to regenerate from')
 
+  // 先确认还有人能回答，再删除旧回复：否则 agent 被删光后会把上一轮删掉却起不了新 run。
+  const agentsInConv = await db.query.agents.findMany({
+    where: (a, { inArray }) => inArray(a.id, conv.agentIds),
+  })
+  const responders = decideResponders(conv, latestUser.mentionedAgentIds, agentsInConv)
+  if (responders.length === 0) {
+    throw new Error(
+      conv.mode === 'group'
+        ? '群聊缺少协调者：请 @ 一个 Agent，或先把 Orchestrator 加入群聊'
+        : 'No available agent in this conversation',
+    )
+  }
+
   // abort 任何还在跑的 run（不一定有）。边界用 >=：run 的 startedAt 可能与
   // 触发它的 user message 同一毫秒，严格 > 会把它漏在删除窗口之外继续写。
   const runsToAbort = await db.query.agentRuns.findMany({
@@ -1204,12 +1217,7 @@ async function regenerateLatestResponseLocked(
     artifactIds: [...artifactIds],
   })
 
-  // 重新决定 responders（沿用 sendMessage 的 decideResponders）
-  const agentsInConv = await db.query.agents.findMany({
-    where: (a, { inArray: inArr }) => inArr(a.id, conv.agentIds),
-  })
-  const responders = decideResponders(conv, latestUser.mentionedAgentIds, agentsInConv)
-
+  // responders 在删除之前已经确定（空列表会提前抛错）
   const newRunIds: string[] = []
   const { AgentRunner } = await getAgentRunner()
   for (const agentId of responders) {
