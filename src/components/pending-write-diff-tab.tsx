@@ -28,6 +28,7 @@ export function PendingWriteDiffTab({
   const pending = usePendingWrites(conversationId).find((p) => p.id === pendingId)
   const agent = useAppStore((s) => (pending ? s.agents[pending.agentId] : null))
   const closeFile = useAppStore((s) => s.closeFile)
+  const removePendingWrite = useAppStore((s) => s.removePendingWrite)
   const { resolvedTheme } = useTheme()
   const isDark = resolvedTheme === 'dark'
 
@@ -46,22 +47,25 @@ export function PendingWriteDiffTab({
     setError(null)
     try {
       await approvePendingWrite(conversationId, pendingId)
+      // 断线时 SSE 可能收不到 resolved，自行移除后由上面的 effect 关 tab
+      removePendingWrite(conversationId, pendingId)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       setBusy(null)
     }
-  }, [conversationId, pendingId])
+  }, [conversationId, pendingId, removePendingWrite])
 
   const handleReject = useCallback(async () => {
     setBusy('reject')
     setError(null)
     try {
       await rejectPendingWrite(conversationId, pendingId)
+      removePendingWrite(conversationId, pendingId)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       setBusy(null)
     }
-  }, [conversationId, pendingId])
+  }, [conversationId, pendingId, removePendingWrite])
 
   if (!pending) {
     return (

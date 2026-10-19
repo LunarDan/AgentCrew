@@ -75,12 +75,18 @@ export function ChatPanel() {
     }
   }, [conv, openFiles, pendingById, closeFile])
 
+  const convId = conv?.id
+
   useEffect(() => {
-    if (!conv) return
+    if (!convId) return
+    // 快照只能判死「请求发出时就已经在本地 pending 的计划」，否则会误清掉在途到达的新计划
+    const pruneCandidates = Object.values(useAppStore.getState().dispatchesByRunId)
+      .map((d) => d.pendingPlanId)
+      .filter((id): id is string => !!id)
     let cancelled = false
-    fetchPendingDispatchPlans(conv.id)
+    fetchPendingDispatchPlans(convId)
       .then((list) => {
-        if (!cancelled) setPendingDispatchPlansForConversation(conv.id, list)
+        if (!cancelled) setPendingDispatchPlansForConversation(convId, list, pruneCandidates)
       })
       .catch((err) => {
         console.warn('[ChatPanel] fetch pending dispatch plans failed', err)
@@ -88,7 +94,7 @@ export function ChatPanel() {
     return () => {
       cancelled = true
     }
-  }, [conv, resyncNonce, setPendingDispatchPlansForConversation])
+  }, [convId, resyncNonce, setPendingDispatchPlansForConversation])
 
   if (!conv) {
     return (

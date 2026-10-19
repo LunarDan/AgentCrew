@@ -69,6 +69,7 @@ function PendingWriteCard({
   pending: PendingWrite
 }) {
   const agent = useAppStore((s) => s.agents[pending.agentId])
+  const removePendingWrite = useAppStore((s) => s.removePendingWrite)
   const openFile = useAppStore((s) => s.openFile)
   const setActiveTab = useAppStore((s) => s.setActiveTab)
   const activeTab = useAppStore((s) => s.activeTabByConv[conversationId] ?? 'chat')
@@ -95,23 +96,25 @@ function PendingWriteCard({
     setError(null)
     try {
       await approveApi(conversationId, pending.id)
+      // 不能只等 SSE：断线 / 事件丢失时卡片会永远卡在「处理中」
+      removePendingWrite(conversationId, pending.id)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       setBusy(null)
     }
-    // 成功后 SSE 会移除，组件随之卸载，不需要 reset busy
-  }, [conversationId, pending.id])
+  }, [conversationId, pending.id, removePendingWrite])
 
   const handleReject = useCallback(async () => {
     setBusy('reject')
     setError(null)
     try {
       await rejectApi(conversationId, pending.id)
+      removePendingWrite(conversationId, pending.id)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       setBusy(null)
     }
-  }, [conversationId, pending.id])
+  }, [conversationId, pending.id, removePendingWrite])
 
   return (
     <div

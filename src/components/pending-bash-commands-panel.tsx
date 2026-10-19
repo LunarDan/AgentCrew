@@ -66,6 +66,7 @@ function PendingBashCommandCard({
   pending: PendingBashCommand
 }) {
   const agent = useAppStore((s) => s.agents[pending.agentId])
+  const removePendingBashCommand = useAppStore((s) => s.removePendingBashCommand)
   const [busy, setBusy] = useState<null | 'approve' | 'reject'>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -74,22 +75,25 @@ function PendingBashCommandCard({
     setError(null)
     try {
       await approvePendingBashCommand(conversationId, pending.id)
+      // 断线时 SSE 可能收不到 resolved，卡片要自己退场
+      removePendingBashCommand(conversationId, pending.id)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       setBusy(null)
     }
-  }, [conversationId, pending.id])
+  }, [conversationId, pending.id, removePendingBashCommand])
 
   const handleReject = useCallback(async () => {
     setBusy('reject')
     setError(null)
     try {
       await rejectPendingBashCommand(conversationId, pending.id)
+      removePendingBashCommand(conversationId, pending.id)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       setBusy(null)
     }
-  }, [conversationId, pending.id])
+  }, [conversationId, pending.id, removePendingBashCommand])
 
   return (
     <div

@@ -66,6 +66,7 @@ function PendingMcpToolCallCard({
   pending: PendingMcpToolCall
 }) {
   const agent = useAppStore((s) => s.agents[pending.agentId])
+  const removePendingMcpToolCall = useAppStore((s) => s.removePendingMcpToolCall)
   const [busy, setBusy] = useState<null | 'approve' | 'reject'>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -74,22 +75,25 @@ function PendingMcpToolCallCard({
     setError(null)
     try {
       await approvePendingMcpToolCall(conversationId, pending.id)
+      // 断线时 SSE 可能收不到 resolved，卡片要自己退场
+      removePendingMcpToolCall(conversationId, pending.id)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       setBusy(null)
     }
-  }, [conversationId, pending.id])
+  }, [conversationId, pending.id, removePendingMcpToolCall])
 
   const handleReject = useCallback(async () => {
     setBusy('reject')
     setError(null)
     try {
       await rejectPendingMcpToolCall(conversationId, pending.id)
+      removePendingMcpToolCall(conversationId, pending.id)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       setBusy(null)
     }
-  }, [conversationId, pending.id])
+  }, [conversationId, pending.id, removePendingMcpToolCall])
 
   const argsPreview = (() => {
     try {

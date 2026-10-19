@@ -44,6 +44,7 @@ function DispatchPlanReviewCard({
 }) {
   const [busy, setBusy] = useState<null | 'approve' | 'reject'>(null)
   const [error, setError] = useState<string | null>(null)
+  const resolveLocally = useAppStore((s) => s.resolveDispatchReviewLocally)
 
   const handleApprove = async () => {
     if (busy) return
@@ -51,6 +52,8 @@ function DispatchPlanReviewCard({
     setError(null)
     try {
       await approvePendingDispatchPlan(conversationId, pendingPlanId)
+      // 断线时 SSE 可能收不到 resolved：本地收起审批态，避免永远「待确认」
+      resolveLocally(dispatch.runId, 'approved')
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       setBusy(null)
@@ -63,6 +66,7 @@ function DispatchPlanReviewCard({
     setError(null)
     try {
       await rejectPendingDispatchPlan(conversationId, pendingPlanId)
+      resolveLocally(dispatch.runId, 'rejected')
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       setBusy(null)
