@@ -297,7 +297,7 @@ GET /api/mobile/events?streamToken=<short-lived-token>
 
 **桌面写接口的 CSRF 门**：桌面 API 虽只监听 loopback，浏览器仍可从任意网页发起跨站简单请求（例如无 body 的 `POST /api/settings/mobile-token` 会重置设备凭据）。**所有**桌面写接口（`src/app/api/**` 下除 `/api/mobile/*`、`/api/internal/*` 以外的 POST / PUT / PATCH / DELETE）统一经 `rejectCrossOriginWrite`：`Origin` 与请求 origin 不一致、或 `Sec-Fetch-Site` 为 `cross-site` / `same-site` 时返回 403；无这些头的非浏览器调用不受影响。`/api/mobile/*` 已由 Bearer 鉴权保护，跨站页面无法带上该头，因此不重复加这道门。
 
-事件流的生命周期必须完整：客户端断开（含反向代理一侧销毁）时通过 `ReadableStream.cancel` 退订 eventBus、停心跳并移除 abort 监听；鉴权是异步的，订阅建立后要再检查一次 `req.signal.aborted`。手机读得慢时按 `controller.desiredSize` 丢弃事件，不让服务端无界缓冲 —— 丢失的增量由重连后的快照补齐。
+事件流的生命周期必须完整：客户端断开（含反向代理一侧销毁）时通过 `ReadableStream.cancel` 退订 eventBus、停心跳并移除 abort 监听；鉴权是异步的，订阅建立后要再检查一次 `req.signal.aborted`。手机读得慢时按 `controller.desiredSize` 丢弃事件，不让服务端无界缓冲 —— 丢失的增量由重连后的快照补齐。并发也要有上限：每条流都常驻订阅全局 eventBus，因此 `/api/mobile/events` 按「凭据哈希 ≤2 条、全宿主 ≤8 条」限流（`src/server/mobile-stream-slots.ts`），超额返回 429；超出部分由手机端单流 + 轮询兜底，不需要多路并行。
 
 ### 6.4 操作 API
 
