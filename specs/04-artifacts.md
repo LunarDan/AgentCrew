@@ -167,7 +167,7 @@ store.previewArtifactId → ArtifactPreviewPanel
 `WebAppView`：
 - 上方 tab 切「预览 / 源码」
 - 预览：`<iframe src="/api/artifacts/:id/preview" sandbox="allow-scripts">`（**没有 allow-same-origin**，详见 CLAUDE.md §5.1）
-- 源码：选文件 dropdown + `<pre><code>` 显示（**TODO**：源码视图也走 shiki 高亮）
+- 源码：选文件 dropdown + CodeMirror 编辑器（`artifact-code-editor.tsx`，按文件名 / 产物类型选语言，github light/dark 主题，编辑与高亮同一层，不再另走 shiki）
 - `buildIframeHtml`：共享 helper，自动把 `style.css` / `script.js` 注入到 `index.html` 的 `</head>` / `</body>` 前；裸 HTML 片段会自动包成完整 doc
 
 ### 一键预览 URL
