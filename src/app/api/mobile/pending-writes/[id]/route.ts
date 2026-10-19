@@ -31,12 +31,18 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     return mobileJson(req, { error: 'Pending write not found' }, { status: 404 })
   }
 
-  const ok =
-    parsed.data.action === 'approve' ? pendingWrites.approve(id) : pendingWrites.reject(id)
-
-  if (!ok) {
-    return mobileJson(req, { error: 'Failed to process pending write' }, { status: 500 })
+  if (parsed.data.action === 'reject') {
+    return pendingWrites.reject(id)
+      ? mobileJson(req, { ok: true })
+      : mobileJson(req, { error: 'Pending write not found' }, { status: 404 })
   }
 
+  const result = pendingWrites.approve(id)
+  if (!result.ok) {
+    if (result.reason === 'not_found') {
+      return mobileJson(req, { error: 'Pending write not found' }, { status: 404 })
+    }
+    return mobileJson(req, { error: result.message }, { status: 500 })
+  }
   return mobileJson(req, { ok: true })
 }

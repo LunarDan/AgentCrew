@@ -25,14 +25,18 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     return NextResponse.json({ error: 'Pending write not found' }, { status: 404 })
   }
 
-  const ok =
-    parsed.data.action === 'approve'
-      ? pendingWrites.approve(pwId)
-      : pendingWrites.reject(pwId)
-
-  if (!ok) {
-    return NextResponse.json({ error: 'Failed to process pending write' }, { status: 500 })
+  if (parsed.data.action === 'reject') {
+    return pendingWrites.reject(pwId)
+      ? NextResponse.json({ ok: true })
+      : NextResponse.json({ error: 'Pending write not found' }, { status: 404 })
   }
 
+  const result = pendingWrites.approve(pwId)
+  if (!result.ok) {
+    if (result.reason === 'not_found') {
+      return NextResponse.json({ error: 'Pending write not found' }, { status: 404 })
+    }
+    return NextResponse.json({ error: result.message }, { status: 500 })
+  }
   return NextResponse.json({ ok: true })
 }

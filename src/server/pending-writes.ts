@@ -20,6 +20,12 @@ interface PendingDecision {
   error?: string
 }
 
+export type ApproveWriteResult =
+  | { ok: true }
+  | { ok: false; reason: 'not_found' }
+  /** approve 已消费该 pending（dialog 应关闭），但真正写盘失败，message 是真实原因 */
+  | { ok: false; reason: 'write_failed'; message: string }
+
 interface PendingEntry {
   write: PendingWrite
   workspace: WorkspaceRow
@@ -90,9 +96,9 @@ class PendingWritesStore {
       .sort((a, b) => a.createdAt - b.createdAt)
   }
 
-  approve(id: string): boolean {
+  approve(id: string): ApproveWriteResult {
     const entry = this.map.get(id)
-    if (!entry) return false
+    if (!entry) return { ok: false, reason: 'not_found' }
     if (!entry.skipWrite) {
       try {
         writeFileInWorkspace(entry.workspace, entry.write.path, entry.write.newContent)
@@ -101,11 +107,11 @@ class PendingWritesStore {
         const message = err instanceof Error ? err.message : String(err)
         console.error('[pendingWrites] approve write failed', err)
         this.finalize(id, false, message)
-        return false
+        return { ok: false, reason: 'write_failed', message }
       }
     }
     this.finalize(id, true)
-    return true
+    return { ok: true }
   }
 
   reject(id: string): boolean {
