@@ -262,6 +262,8 @@ dispatch.end      (parentRunId=r1, taskId=t3, status='skipped', error='Upstream 
 
 部署状态不单独建表；它是对一次消息输出的可视化状态记录。
 
+**run 终态写入顺序**：`agent_runs.status` 必须**最后**写。撤回 / 重新生成通过轮询 run.status 判断「已停止」，若先写终态，`[已中止]` 系统消息（`msg_err_<runId>`）可能尚未插入就被随后的删除窗口漏掉。顺序固定为：收尾 streaming 消息 → 错误可视化（含系统消息）→ `agent_runs` 终态 → `conversations.updatedAt` → 广播 `run.end`。
+
 ---
 
 ## 持久化 vs 透传
