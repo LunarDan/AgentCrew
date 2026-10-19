@@ -1588,8 +1588,8 @@ async function consumeStream(
     }
 
     if (event.type === 'deploy.status') {
-      // 不能以 `[]` 为基底写回：消息可能已结束（缓冲被清），那会把已落库的 parts 覆盖掉。
-      const parts = await getWritableParts(event.messageId, partsBuffer)
+      // 部署状态可能在消息结束后才更新：从 DB 回读 parts 再追加，避免以空缓冲覆盖已落库内容。
+      const parts = await getAppendableParts(event.messageId, partsBuffer)
       if (!parts) continue
       const partIndex = parts.length
       const deployPart: MessagePart = { type: 'deploy_status', deployment: event.deployment }
@@ -1671,6 +1671,25 @@ function mergeRunUsage(previous: RunUsageEvent | null, next: RunUsageEvent): Run
       : {}),
     ...(next.model || previous.model ? { model: next.model ?? previous.model } : {}),
   }
+}
+
+/**
+ * deploy.status 专用：允许在消息结束后仍追加（部署状态是异步更新的），
+ * 但必须以 DB 中已有的 parts 为基底，绝不能从 `[]` 写回。
+ */
+async function getAppendableParts(
+  messageId: string,
+  partsBuffer: Map<string, MessagePart[]>,
+): Promise<MessagePart[] | null> {
+  const buffered = partsBuffer.get(messageId)
+  if (buffered) return buffered
+
+  const row = await db.query.messages.findFirst({ where: eq(schema.messages.id, messageId) })
+  if (!row) return null
+
+  const parts = [...row.parts]
+  partsBuffer.set(messageId, parts)
+  return parts
 }
 
 async function persistEvent(
