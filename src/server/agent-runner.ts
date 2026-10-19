@@ -921,6 +921,9 @@ async function runChildTask(
     return result
   }
 
+  // 存在 try 外：runChildTask 抛错时也要能清掉此前几次 attempt 的内存证据
+  const attemptRunIds: string[] = []
+
   try {
     const basePrompt = await buildSubAgentPrompt(
       task,
@@ -935,7 +938,6 @@ async function runChildTask(
     let lastEvaluation: ChildAttemptEvaluation | null = null
     const aggregate: RunExecutionResult = emptyRunExecutionResult()
     const aggregateEvidence: RunToolEvidence = { fileWrites: [], commands: [] }
-    const attemptRunIds: string[] = []
 
     for (let attempt = 1; attempt <= MAX_CHILD_TASK_ATTEMPTS; attempt++) {
       if (ctx.signal.aborted) {
@@ -1022,6 +1024,13 @@ async function runChildTask(
     publishDispatchEnd(ctx, task.id, exhausted)
 
     return mergeAttemptAggregate(exhausted, aggregate)
+  } catch (err) {
+    // 这个 task 不会进入 results：DAG 的 finally 找不到它，证据必须现在清
+    for (const childRunId of attemptRunIds) {
+      clearFileWrites(childRunId)
+      clearRunToolEvidence(childRunId)
+    }
+    throw err
   } finally {
     release?.()
   }
@@ -1909,11 +1918,8 @@ async function finalize(
     await persistUnresolvedToolFailures(runId, args.conversationId, status, error, finishedAt)
   }
 
-  await db
-    .update(schema.agentRuns)
-    .set({ status, finishedAt, error: error ?? null })
-    .where(eq(schema.agentRuns.id, runId))
-
+  // 先把消息侧的收尾全部写完，再改 run 状态：waitForRunsToStop 只看 run.status，
+  // 若先标终态，撤回 / 重新生成会在 [已中止] 系统消息插入前就开始扫描并漏删它。
   await db
     .update(schema.messages)
     .set({
@@ -1926,6 +1932,11 @@ async function finalize(
   if (status === 'failed' || status === 'aborted') {
     await emitErrorVisualisation(runId, args, status, error, result.outputMessageIds)
   }
+
+  await db
+    .update(schema.agentRuns)
+    .set({ status, finishedAt, error: error ?? null })
+    .where(eq(schema.agentRuns.id, runId))
 
   await db
     .update(schema.conversations)
