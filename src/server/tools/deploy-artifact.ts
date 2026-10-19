@@ -122,14 +122,14 @@ export async function maybePublishExternally(local: DeployStatusRecord): Promise
       summaryInstruction: EXTERNAL_DEPLOYMENT_SUMMARY_INSTRUCTION,
     }
   } catch (error) {
+    // 异常里可能带宿主发布目录的绝对路径；该记录会进消息 part 并回给局域网设备
+    console.error('[deploy] external static publish failed', error)
     return {
       ...local,
       status: 'failed',
       deploymentType: 'external_static',
       localPreviewPath: local.previewPath,
-      error: `External static publish failed: ${
-        error instanceof Error ? error.message : 'Unknown error'
-      }`,
+      error: 'External static publish failed',
     }
   }
 }
