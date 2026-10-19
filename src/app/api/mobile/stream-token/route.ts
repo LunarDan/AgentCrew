@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server'
 
-import { getExpectedMobileToken, requireMobileAuth } from '@/server/mobile-auth'
+import { getBearerToken, requireMobileAuth } from '@/server/mobile-auth'
 import { mobileJson, mobileOptions } from '@/server/mobile-cors'
 import { issueMobileStreamToken, MOBILE_STREAM_TOKEN_TTL_MS } from '@/server/mobile-stream-tokens'
 
@@ -17,14 +17,15 @@ export async function POST(req: NextRequest) {
   const authError = await requireMobileAuth(req)
   if (authError) return authError
 
-  // 鉴权通过后 token 仍可能被清掉（关闭伴随模式）；此时签发的流 token 无意义。
-  const expectedToken = await getExpectedMobileToken()
-  if (!expectedToken) {
-    return mobileJson(req, { error: 'Mobile companion is not configured' }, { status: 503 })
+  // 流 token 绑定的是调用方这次实际使用的设备 token（可能是某台配对设备，
+  // 而不是全局 token）——否则设备吊销后一次性流 token 仍可换到新。
+  const deviceToken = getBearerToken(req)?.trim()
+  if (!deviceToken) {
+    return mobileJson(req, { error: 'Unauthorized' }, { status: 401 })
   }
 
   return mobileJson(req, {
-    token: issueMobileStreamToken(expectedToken),
+    token: issueMobileStreamToken(deviceToken),
     expiresInSeconds: Math.floor(MOBILE_STREAM_TOKEN_TTL_MS / 1000),
   })
 }

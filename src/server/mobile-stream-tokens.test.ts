@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { hashMobileDeviceToken } from './mobile-token-hash'
 import {
   clearMobileStreamTokensForTest,
   consumeMobileStreamToken,
@@ -14,42 +15,30 @@ afterEach(() => {
 })
 
 describe('mobile stream tokens', () => {
-  it('issues a token that can be consumed exactly once', () => {
+  it('issues a token bound to the device token, consumable exactly once', () => {
     const token = issueMobileStreamToken(DEVICE_TOKEN)
 
     expect(token.length).toBeGreaterThan(20)
-    expect(consumeMobileStreamToken(token, DEVICE_TOKEN)).toBe(true)
-    expect(consumeMobileStreamToken(token, DEVICE_TOKEN)).toBe(false)
+    expect(consumeMobileStreamToken(token)).toBe(hashMobileDeviceToken(DEVICE_TOKEN))
+    expect(consumeMobileStreamToken(token)).toBeNull()
   })
 
   it('rejects unknown tokens', () => {
-    expect(consumeMobileStreamToken('not-a-token', DEVICE_TOKEN)).toBe(false)
-  })
-
-  it('rejects tokens issued for a different device token', () => {
-    const token = issueMobileStreamToken(DEVICE_TOKEN)
-
-    expect(consumeMobileStreamToken(token, 'rotated-device-token')).toBe(false)
-    // 失败也消耗掉，避免拿旧 token 反复试探
-    expect(consumeMobileStreamToken(token, DEVICE_TOKEN)).toBe(false)
+    expect(consumeMobileStreamToken('not-a-token')).toBeNull()
   })
 
   it('rejects expired tokens', () => {
     const now = 1_000_000
     const token = issueMobileStreamToken(DEVICE_TOKEN, now)
 
-    expect(
-      consumeMobileStreamToken(token, DEVICE_TOKEN, now + MOBILE_STREAM_TOKEN_TTL_MS),
-    ).toBe(false)
+    expect(consumeMobileStreamToken(token, now + MOBILE_STREAM_TOKEN_TTL_MS)).toBeNull()
   })
 
   it('does not revive an expired token that was never consumed', () => {
     const now = 1_000_000
     const token = issueMobileStreamToken(DEVICE_TOKEN, now)
 
-    expect(
-      consumeMobileStreamToken(token, DEVICE_TOKEN, now + MOBILE_STREAM_TOKEN_TTL_MS + 1),
-    ).toBe(false)
-    expect(consumeMobileStreamToken(token, DEVICE_TOKEN, now)).toBe(false)
+    expect(consumeMobileStreamToken(token, now + MOBILE_STREAM_TOKEN_TTL_MS + 1)).toBeNull()
+    expect(consumeMobileStreamToken(token, now)).toBeNull()
   })
 })

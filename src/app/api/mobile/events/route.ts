@@ -1,8 +1,9 @@
 import type { NextRequest } from 'next/server'
 
 import { eventBus } from '@/server/event-bus'
-import { getExpectedMobileToken, requireMobileAuth } from '@/server/mobile-auth'
+import { getBearerToken, isMobileTokenHashValid, requireMobileAuth } from '@/server/mobile-auth'
 import { mobileCorsHeaders, mobileJson, mobileOptions } from '@/server/mobile-cors'
+import { hashMobileDeviceToken } from '@/server/mobile-token-hash'
 import { consumeMobileStreamToken } from '@/server/mobile-stream-tokens'
 
 /**
@@ -16,22 +17,22 @@ export const OPTIONS = mobileOptions
 
 export async function GET(req: NextRequest) {
   const streamToken = req.nextUrl.searchParams.get('streamToken')
+  let authorizedTokenHash: string | null = null
   if (streamToken) {
-    // 流 token 与设备 token 绑定：轮换后旧 token 直接判废。
-    const expected = await getExpectedMobileToken()
-    if (!expected || !consumeMobileStreamToken(streamToken, expected)) {
+    // 流 token 与设备 token 绑定：轮换 / 吊销后旧 token 直接判废。
+    const hash = consumeMobileStreamToken(streamToken)
+    if (!hash || !(await isMobileTokenHashValid(hash))) {
       return mobileJson(req, { error: 'Invalid or expired stream token' }, { status: 401 })
     }
+    authorizedTokenHash = hash
   } else {
     const authError = await requireMobileAuth(req)
     if (authError) return authError
+    const token = getBearerToken(req)?.trim()
+    if (!token) return mobileJson(req, { error: 'Unauthorized' }, { status: 401 })
+    authorizedTokenHash = hashMobileDeviceToken(token)
   }
-
-  // 连接期间定期用它比对：token 轮换 / 关闭伴随模式后必须让已建立的流失效。
-  const authorizedToken = await getExpectedMobileToken()
-  if (!authorizedToken) {
-    return mobileJson(req, { error: 'Mobile companion is not configured' }, { status: 503 })
-  }
+  const authorizedHash = authorizedTokenHash
 
   const encoder = new TextEncoder()
   // start 里创建，cancel 在别的闭包里调用：通过它退订，避免客户端断开后订阅泄漏。
@@ -88,9 +89,9 @@ export async function GET(req: NextRequest) {
       handles.heartbeat = setInterval(() => {
         if (closed || revalidating) return
         revalidating = true
-        void getExpectedMobileToken()
-          .then((current) => {
-            if (current !== authorizedToken) {
+        void isMobileTokenHashValid(authorizedHash)
+          .then((valid) => {
+            if (!valid) {
               close()
               return
             }
