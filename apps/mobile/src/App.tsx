@@ -412,8 +412,9 @@ export function App() {
 
   const content = selectedConversationId ? (
       <ConversationsScreen
-        connected={configured}
+        connected={connectionOk}
         loading={loading}
+        error={error}
         snapshot={snapshot}
         detail={detailForSelected}
         selectedConversationId={selectedConversationId}

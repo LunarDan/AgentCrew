@@ -41,6 +41,7 @@ import type {
 export function ConversationsScreen({
   connected,
   loading,
+  error,
   snapshot,
   detail,
   selectedConversationId,
@@ -52,8 +53,10 @@ export function ConversationsScreen({
   onRegenerate,
   busy,
 }: {
+  /** 只有「最近一次同步成功」才算已连接；仅填好地址并不代表能发请求。 */
   connected: boolean
   loading: boolean
+  error: string | null
   snapshot: MobileSnapshot | null
   detail: MobileConversationDetail | null
   selectedConversationId: string | null
@@ -121,7 +124,7 @@ export function ConversationsScreen({
 
   async function submitDraft() {
     const content = draft.trim()
-    if (!content || busy) return
+    if (!content || busy || !connected) return
     const ok = await onSendMessage(content)
     if (!ok) return // 发送失败时保留草稿，用户可以直接重试
     setDraft((current) => (current.trim() === content ? '' : current))
@@ -150,8 +153,9 @@ export function ConversationsScreen({
     bottomRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' })
   }
 
-  if (!connected) {
-    return <div className="empty-state">先在设置中配对桌面端。</div>
+  // 只读的旧消息可以继续看，但不能当作可操作状态；列表页没连上就直接说明原因。
+  if (!connected && !selectedConversationId) {
+    return <div className="empty-state">未连接桌面端。请检查网络，或在设置里重新连接。</div>
   }
 
   if (selectedConversationId) {
@@ -186,6 +190,11 @@ export function ConversationsScreen({
                 <ArrowDown className="button-icon" aria-hidden="true" />
               </button>
             )}
+            {(!connected || error) && (
+              <div className="error-banner">
+                {connected ? error : '未连接桌面端，消息只读且不会发送。'}
+              </div>
+            )}
             <form
               className="composer"
               onSubmit={(event) => {
@@ -197,11 +206,16 @@ export function ConversationsScreen({
                 ref={textareaRef}
                 value={draft}
                 rows={1}
-                placeholder="输入意见或追问…"
+                placeholder={connected ? '输入意见或追问…' : '未连接，暂停发送'}
                 onChange={(event) => handleDraftChange(event.target.value)}
                 onKeyDown={handleComposerKeyDown}
               />
-              <button type="submit" className="primary-action icon-action" aria-label="发送" disabled={!draft.trim() || busy}>
+              <button
+                type="submit"
+                className="primary-action icon-action"
+                aria-label="发送"
+                disabled={!draft.trim() || busy || !connected}
+              >
                 <Send className="button-icon" aria-hidden="true" />
               </button>
             </form>
