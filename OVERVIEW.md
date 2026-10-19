@@ -67,7 +67,7 @@ L1 Persistence                          src/db/**（Drizzle+SQLite） + workspac
 | 平台抽象（Win/POSIX） | ✅ | shell 选择 · 多盘符 DirPicker · 子进程清理 |
 | Electron 桌面版 | ✅ | DMG / EXE 打包 · userData 路径迁移 |
 | 全局 API Key 设置面板 | ✅ | app_settings 单行表 · 三层 key 优先级 |
-| 移动端伴随 App | ⏳ | 响应式 Web 已适配;Capacitor 原生壳脚手架已建;手动配对（地址 + 设备 token）可用并能跨桌面重启;事件流（`/api/mobile/events`）与 QR 配对码未实现 |
+| 移动端伴随 App | ⏳ | 响应式 Web 已适配;Capacitor 原生壳脚手架已建;手动配对（地址 + 设备 token）可用并能跨桌面重启;快照/会话/审批/提问/产物预览/停止运行中任务已接通;事件流（`/api/mobile/events`）与 QR 配对码未实现 |
 | 斜杠命令菜单 | ✅ | 输入 `/` 弹命令浮层（打开设置 / Agents 库等 UI 命令） |
 | 测试覆盖 | 🟡 | Vitest 纯函数（security / workspace-utils / dispatch-plan / artifact-content / ppt-export / ppt-theme / mock-adapter 编排契约）；Playwright **E2E 基建 + 核心 IM 流 + 产物预览/导出 + 群聊编排**（mock agent，见附录） |
 
@@ -175,6 +175,7 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 ## 附 · 当前现状（易过时,以代码为准）
 
 ### ✅ 近期完成（最新一批）
+- **移动端可停止运行中的任务（2026-10-20）**：新增 `POST /api/mobile/runs/:id/abort`（复用 `abortRun`），状态页列出 `runningRuns`（Agent 名 + 开始时间）并提供「停止」；此前移动端只能看到运行中计数，无法中止
 - **伴随模式远程暴露收口（2026-10-20）**：打包版此前在 companion 开启时把整个 Next server 绑到 `0.0.0.0:60646`，同一局域网任何设备都能直接 `GET /api/settings`（明文 provider key + 设备 token）、调用 `/api/conversations` 等桌面 API。现在 Next 固定 loopback + 系统端口，`0.0.0.0:60646` 改为只转发 `/api/mobile/*` 的反向代理，其余路径 404；移动端路由自身仍校验 Bearer token
 - **一批 UI / 移动端缺陷修复（2026-10-20）**：删除用过的 Agent 时把外键失败显示出来（此前只 console）；切换 provider 清空旧凭据与 Base URL；claude-code / anthropic 的 Base URL 做格式校验；name / description 输入加上限；设置面板开启伴随 / 重置 token 不再冲掉未保存的 key，读取失败时禁用保存；删除会话时同步清理客户端侧的产物与预览；移动端对未适配的产物类型与 `deploy_candidates` 给出说明而不是空白；移动端拒绝纯空白消息
 - **移动端鉴权改用设置表（2026-10-20）**：`/api/mobile/*` 的期望 token 此前只读 `AGENTHUB_MOBILE_TOKEN` 环境变量，而 token 实际存在 `app_settings.mobile_device_token` —— `pnpm dev` / 直接起 Next 时桌面一重启，设置面板里配好的 token 就全部 401/503。现在环境变量（dev / Electron bootstrap 注入）优先、否则读设置表，且 `companion_mode='off'` 时旧 token 不再放行；snapshot 的 `server.companionMode` 也改为读设置表（此前读一个从未写入的 `AGENTHUB_COMPANION_MODE`，永远报 `lan`）
