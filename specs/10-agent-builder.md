@@ -252,8 +252,40 @@ zod 校验 body 在每个 route 文件内。
 ## 待补功能 (TODO)
 
 - **自建 Orchestrator**：UI 不能创建带 `isOrchestrator=true` 的 agent；需要 plan_tasks 工具 + 群聊约束
-- **导入 / 导出 agent 配置**：JSON 格式导出，分享配置；导入时校验
 - **Anthropic 路径实装**：buildClient 不要 throw，接入 `@anthropic-ai/sdk` 的 messages API
+
+---
+
+## 导入 / 导出配置
+
+**格式**（`src/shared/agent-export.ts`，v1，严格校验）：
+
+```json
+{
+  "format": "agenthub-agent",
+  "version": 1,
+  "agent": {
+    "name": "TestBot",
+    "avatar": "🤖",
+    "description": "一句话描述",
+    "capabilities": ["testing"],
+    "systemPrompt": "...",
+    "adapterName": "custom",
+    "modelProvider": "deepseek",
+    "modelId": "deepseek-v4-flash",
+    "toolNames": ["fs_read", "web_fetch"],
+    "supportsVision": true
+  }
+}
+```
+
+- **导出不含**：`apiKey` / `apiBaseUrl` / `id` / `mcpServerIds` / `isBuiltin` / `isOrchestrator` / 时间戳。MCP server id 只在本机有效，不随配置分享。
+- `toolNames` 只保留创建弹窗可勾选的工具（`normalizeAgentToolNames`）；`plan_tasks` / `report_task_result` 等内部工具被丢弃。
+- `adapterName='custom'` 必须带 `modelProvider` + `modelId`；SDK adapter 的 `modelId` 可选。未知工具名、未知 adapter / provider、额外字段都视为无效（`strict`）。
+- **导入流程**：文件 → `parseAgentExport`（zod）→ 打开创建弹窗并预填 → 用户确认 / 补充 API key 后走原有 `POST /api/agents`。校验失败只在列表顶部显示可读错误，不创建任何行。
+- 文件名：`agenthub-agent-<name>.json`（名称中的非法字符替换为 `-`）。
+
+---
 
 ---
 

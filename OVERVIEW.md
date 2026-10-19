@@ -56,7 +56,7 @@ L1 Persistence                          src/db/**（Drizzle+SQLite） + workspac
 | CustomAgentAdapter | ✅ | OpenAI 兼容（DeepSeek/OpenAI/火山方舟）+ 自驱 tool loop |
 | MockAdapter | ✅ | 开发期不烧 token；E2E 假 agent（可演「真调 write_artifact 产产物」与 Orchestrator 三阶段） |
 | CodexAdapter | ✅ | @openai/codex-sdk + 线程续接 + AgentHub MCP bridge |
-| 自建 Agent | ✅ | 表单/对话式创建,自定义 prompt + 工具集 |
+| 自建 Agent | ✅ | 表单/对话式创建,自定义 prompt + 工具集 · emoji 头像 · JSON 配置导入 / 导出（不含密钥） |
 | Orchestrator 编排 | ✅ | 三阶段规划 + DAG 调度 + 级联中止 + 可视化卡 + 同波次代码冲突检测（检测+上报，不自动合并） |
 | 工具系统 | ✅ | write/deploy/read_artifact · read_attachment · fs_read/fs_write/bash · web_fetch（SSRF 防护） · plan_tasks · ask_user |
 | Artifact 预览/编辑 | ✅ | web_app(iframe + preview URL + 本地静态发布/源码包/容器包) / document(md) / image / 版本对比 diff（历史 diff 只读兼容） / **ppt(幻灯片分页预览 + 固定逻辑画布缩放 + 溢出角标 + 完整 theme token + 导出真 .pptx)** · code_file workspace 预览/编辑 · 版本链 v1↔v2 · 选区改写 · 面板内编辑(CodeMirror)→提交新版本 · 导出 |
@@ -175,6 +175,7 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 ## 附 · 当前现状（易过时,以代码为准）
 
 ### ✅ 近期完成（最新一批）
+- **Agent 配置导入 / 导出（2026-10-20）**：v1 JSON（`format: agenthub-agent`）由 `src/shared/agent-export.ts` 严格校验（zod `strict`）；导出只含身份 / prompt / adapter / model / 工具 / vision，**永不含** `apiKey` / `apiBaseUrl` / `id` / `mcpServerIds`；导入在 Agent 库触发，校验通过后打开创建弹窗预填，用户补 key 并确认才落库，失败在列表顶部显示可读错误
 - **Agent 头像选择器（2026-10-20）**：创建 / 编辑弹窗的基本信息页新增 emoji 预设（10 个）+ 自定义输入（≤ 8 字符），`PATCH /api/agents/:id` 与服务层同步支持 `avatar`（空串回落到 `🤖`）；此前只能使用 service 默认值。顺带清理 `specs/10` 中两条已过时的 TODO（删除二次确认已实现）
 - **POSIX 子进程清理补 SIGKILL 升级（2026-10-20）**：`killProcessTree` / `killProcessTreeByPid` 在发出 SIGTERM 后 5 秒对同一进程组 / 已收集的 pid 补发 SIGKILL（定时器 `unref()`），覆盖忽略优雅信号的 bash 子进程与 stdio MCP server；Windows 仍由 `taskkill /F /T` 一步强制
 - **内置工具 `web_fetch`（2026-10-20）**：抓取 http/https URL 的文本内容。SSRF 防护包括协议白名单、URL 内嵌凭据、`localhost` / `*.localhost`、IP 字面量与 DNS 解析结果的非公网判定（回环 / 私网 / link-local / 组播 / 保留段 / 云 metadata / IPv6 ULA 与内嵌 IPv4 形式），域名在建连时用自定义 `lookup` 复核（覆盖 DNS rebinding）；重定向手动跟随且每跳重校验；整体 20s 超时、2 MiB 上限、50,000 字符截断；非文本响应只返回元信息
@@ -209,4 +210,4 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 
 ---
 
-*最后更新：2026-10-20 · 记入 Agent 头像选择器、POSIX 子进程 SIGKILL 升级与内置 `web_fetch`（含 SSRF 防护）。同日更早记入了流式可靠性两处修复与 F2 的 live 验证结果。2026-10-19 记入外部 MCP P1（custom 自建 MCP 客户端 + 审批门扩展到 custom）与外部 MCP 连接失败可见（F2：`mcp_server.unavailable` + 持久系统提示）。2026-10-18 记入了 shell 工具按身份识别（Windows 上 SDK 的 shell 工具是 `PowerShell`，此前按 `Bash` 字面量匹配导致黑名单与审批分类器整条失效）。2026-10-13 记入了 Claude Code adapter 的隔离启动（`settingSources: []` + `strictMcpConfig: true`）与 F1 修复（`partIndex` 归一，`src/server/part-slots.ts`）及两个相邻未修缺陷（`persistEvent` 空缓冲兜底、claude-code adapter 非流式回退重复渲染）。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*
+*最后更新：2026-10-20 · 记入 Agent 配置导入 / 导出、头像选择器、POSIX 子进程 SIGKILL 升级与内置 `web_fetch`（含 SSRF 防护）。同日更早记入了流式可靠性两处修复与 F2 的 live 验证结果。2026-10-19 记入外部 MCP P1（custom 自建 MCP 客户端 + 审批门扩展到 custom）与外部 MCP 连接失败可见（F2：`mcp_server.unavailable` + 持久系统提示）。2026-10-18 记入了 shell 工具按身份识别（Windows 上 SDK 的 shell 工具是 `PowerShell`，此前按 `Bash` 字面量匹配导致黑名单与审批分类器整条失效）。2026-10-13 记入了 Claude Code adapter 的隔离启动（`settingSources: []` + `strictMcpConfig: true`）与 F1 修复（`partIndex` 归一，`src/server/part-slots.ts`）及两个相邻未修缺陷（`persistEvent` 空缓冲兜底、claude-code adapter 非流式回退重复渲染）。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*
