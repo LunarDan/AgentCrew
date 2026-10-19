@@ -214,7 +214,7 @@ store.previewArtifactId → ArtifactPreviewPanel
 
 若 `app_settings` 配置了外部静态发布目标，`deploy_artifact` / `deploy_workspace` 会额外把公开文件复制到 `<deployment_publish_dir>/<deploymentId>/`，并把 `previewPath` 设为 `deployment_public_base_url + deploymentId + '/'`。这种情况下 `localPreviewPath` 保留本地回退路径，`publishPath` 是实际写入目录。AgentHub 不启动外部托管服务，用户需要让 nginx / Caddy / Tailscale Serve / Pages 同步等服务指向该发布根目录。复制先写入发布根目录下的临时目录，全部成功后再替换旧目录：旧目录先重命名成备份，替换失败时恢复，避免 rename 失败把线上站点删没；复制失败时旧版本保持可用。
 
-删除产物、撤回消息、重新生成回复、删除会话时都会同步删除该 artifact 对应的本地部署目录（`deleteDeploymentsForArtifact`），`/deployments/:id` 不会继续提供已删除产物的站点。
+删除产物、撤回消息、重新生成回复、删除会话时都会同步删除该 artifact 对应的本地部署目录（`deleteDeploymentsForArtifact`），`/deployments/:id` 不会继续提供已删除产物的站点。`deploy_workspace` 产生的是 workspace 部署（`artifact_id = 'workspace:<path>'`），没有可级联的 artifact 行，因此按 `manifest.conversationId` 匹配：删除会话时调用 `deleteDeploymentsForConversation` 清掉该会话的全部 workspace 部署，避免 dataDir/deployments 无限堆积。
 
 `summaryInstruction` 只给 Agent 看，用于约束最终文字总结：本地发布时不得自造公网域名；外部发布时只能引用结构化返回的 `previewPath` / `publicUrl`，不得改写成其它 URL。UI 展示仍以结构化部署卡片为准。
 
@@ -290,7 +290,7 @@ AgentRunner 在普通 run 完成或 dispatch 子任务完成后读取 `dispatch-
 
 直接 `DELETE FROM artifacts WHERE id = ?`。**不删除引用该 artifact 的 message 里的 artifact_ref part**（part 仍存，前端 lazy fetch 时 404 显示墓碑）。
 
-删除同时调用 `deleteDeploymentsForArtifact`：扫描 dataDir/deployments 下的 manifest，删掉 `artifactId` 匹配的本地部署目录，避免已删除产物仍能通过预览 / 下载访问。发布到外部静态目录（`deploymentPublishDir`）的副本不受 AgentHub 管理，不在删除范围内。
+删除同时调用 `deleteDeploymentsForArtifact`：扫描 dataDir/deployments 下的 manifest，删掉 `artifactId` 匹配的本地部署目录，避免已删除产物仍能通过预览 / 下载访问。外部静态目录（`deploymentPublishDir`）里的副本如果由 AgentHub 发布过，manifest 会记录 `publishPath` / `publishRoot`，删除时一并移除 —— 但仅当 `path.basename(publishPath) === deploymentId` 且 `publishPath` 落在 `publishRoot` 子树内才 `rm -rf`。这是防止 manifest 被改写后把发布根目录外的任意目录当部署副本删掉；条件不满足时保留文件不动。
 
 会话级 cascade：删除 conversation → `artifacts` 表通过 FK `ON DELETE CASCADE` 自动清空。
 

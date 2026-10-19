@@ -301,6 +301,8 @@ compact 成功后，service 额外写一条 `role='system'` 的提示消息，�
 
 summary 行、系统消息、`conversations.updatedAt` 三者在同一 DB 事务内写入；任一失败则一起回滚，避免「摘要已推进覆盖边界、但用户看不到压缩提示」。事务内会复核 latest summary 未变化，并发 compact 请求后到者直接失败而不是插入第二份摘要。
 
+生成摘要的 LLM 调用在事务之外、可能持续数十秒，期间用户仍可撤回消息、重新生成或清空历史。因此进入事务前记下当时的消息条数，事务内再校验：`covered_until_message_id` 必须仍属于本会话，且当前条数不少于快照值（只增不减）。任一条不满足说明被总结的内容已经不存在，抛 `History changed during compaction; please retry`，不写入摘要 —— 否则摘要会把用户已经删掉的对话重新带回后续上下文。
+
 第一版不做自动压缩；自动阈值触发留到后续 Phase E.2。
 
 ---

@@ -81,6 +81,7 @@ interface Conversation {
 - 群聊里 `isOrchestrator: true` 的 Agent 最多 1 个
 - 创建 Conversation 时自动创建关联的 Workspace（1:1）
 - `pinnedMessageIds` 上限 **5 条**（常量 `PIN_LIMIT_PER_CONVERSATION` 定义在 `src/shared/constants.ts`，service 在超出时抛 `PIN_LIMIT_EXCEEDED`）。被 pin 的消息由 `agent-runner` 在拼 system prompt 时注入 `<pinned_messages>` 块。前端 UI 入口见 spec 09 `PinnedMessagesBar` 与 `MessageItem` 的 📌 按钮
+- **消息删除时必须同步修剪** `pinnedMessageIds` / `bookmarkedMessageIds`：撤回、重新生成、清空历史都在同一事务里把被删消息 id 从两个数组里剔除，否则会留下悬空 id（pinned 会被拼进 prompt 却取不到内容，收藏列表出现死条目）。toggle 接口同样只接受仍属于本会话的消息 id。`message.removed` 事件到达时前端 store 做同样的修剪，保证多端一致
 - 有 `queued` / `running` 的 AgentRun 时拒绝删除会话（同「清空历史」），避免级联删除后仍在运行的 run 写回已删除的行
 
 ---

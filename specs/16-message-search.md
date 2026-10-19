@@ -186,6 +186,10 @@ WHERE json_extract(value, '$.type') = 'text';
 
 迁移必须**幂等**（重跑不报错、不重复插入）。
 
+**运行时自动安装**：迁移逻辑放在 `runMessageSearchMigration(target: Database.Database)` 里，`bootstrapDatabase()` 在建表之后直接调用它 —— 已存在的库升级后无需人工跑脚本，新建库在同一路径上装好 FTS。CLI 入口（`node --experimental-strip-types src/db/migrate-add-message-search.ts`）保留，内部懒加载 `./client`，因此 `runMessageSearchMigration` 本身不持有默认连接。
+
+回填语句额外带 `WHERE NOT EXISTS (SELECT 1 FROM messages_fts)`：仅在 FTS 表为空时回填，避免「触发器已装 + 重新跑迁移」把每条消息再插一遍（触发器只在 DML 时同步，历史行不会自动回来，所以空表回填是必要的；非空时则跳过，防止重复）。
+
 ### 5.4 风险与边界
 
 | 风险 | 应对 |
@@ -267,12 +271,16 @@ SELECT
 FROM messages m
 JOIN conversations c ON c.id = m.conversation_id
 LEFT JOIN agents a ON a.id = m.agent_id
-WHERE m.parts LIKE '%' || ? || '%'
+WHERE m.parts LIKE '%' || ? || '%' ESCAPE '\'
   AND (? IS NULL OR m.conversation_id = ?)
   AND (? IS NULL OR m.role = ?)
 ORDER BY m.created_at DESC
 LIMIT ? OFFSET ?;
 ```
+
+用户输入里的 `\` / `%` / `_` 先转义成 `\\` / `\%` / `\_` 再作为 LIKE 模式传入（`instr` 的位置参数用原始 query），否则搜 `100%` 或 `a_b` 会变成通配匹配，命中大量无关消息。注意 TS 源码里写 `ESCAPE '\\'` —— 模板字符串中 `'\'` 会把引号吃掉，实际发出的是 `ESCAPE ''`，SQLite 会直接报 `ESCAPE expression must be a single character`。
+
+**FTS 表缺失时自动退回 LIKE**：`messages_fts` 由运行时 bootstrap 安装，理论上不会缺席；但若某个库（如只跑了建表脚本的旧库）缺表，FTS 路径的 `prepare` 会抛 `no such table: messages_fts`。service 捕获该错误后改走 LIKE 路径，而不是把 500 抛给搜索弹窗。
 
 ### 7.3 FTS5 主路径 SQL
 
