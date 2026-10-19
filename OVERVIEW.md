@@ -175,6 +175,8 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 ## 附 · 当前现状（易过时,以代码为准）
 
 ### ✅ 近期完成（最新一批）
+- **伴随模式远程暴露收口（2026-10-20）**：打包版此前在 companion 开启时把整个 Next server 绑到 `0.0.0.0:60646`，同一局域网任何设备都能直接 `GET /api/settings`（明文 provider key + 设备 token）、调用 `/api/conversations` 等桌面 API。现在 Next 固定 loopback + 系统端口，`0.0.0.0:60646` 改为只转发 `/api/mobile/*` 的反向代理，其余路径 404；移动端路由自身仍校验 Bearer token
+- **一批 UI / 移动端缺陷修复（2026-10-20）**：删除用过的 Agent 时把外键失败显示出来（此前只 console）；切换 provider 清空旧凭据与 Base URL；claude-code / anthropic 的 Base URL 做格式校验；name / description 输入加上限；设置面板开启伴随 / 重置 token 不再冲掉未保存的 key，读取失败时禁用保存；删除会话时同步清理客户端侧的产物与预览；移动端对未适配的产物类型与 `deploy_candidates` 给出说明而不是空白；移动端拒绝纯空白消息
 - **移动端鉴权改用设置表（2026-10-20）**：`/api/mobile/*` 的期望 token 此前只读 `AGENTHUB_MOBILE_TOKEN` 环境变量，而 token 实际存在 `app_settings.mobile_device_token` —— `pnpm dev` / 直接起 Next 时桌面一重启，设置面板里配好的 token 就全部 401/503。现在环境变量（dev / Electron bootstrap 注入）优先、否则读设置表，且 `companion_mode='off'` 时旧 token 不再放行；snapshot 的 `server.companionMode` 也改为读设置表（此前读一个从未写入的 `AGENTHUB_COMPANION_MODE`，永远报 `lan`）
 - **Custom adapter 支持 Anthropic（2026-10-20）**：`provider='anthropic'` 时走 `@anthropic-ai/sdk` Messages API（`messages.stream`），保留同一套 AgentHub 工具循环——`tool_use` / `tool_result` block、内置与外部 MCP 工具共用执行器、thinking/text 流式 part、缓存 token 用量；历史从 OpenAI ChatMessage 转换（只保留 user/assistant 文本、合并连续同角色）。key 回退 `agent.apiKey → ANTHROPIC_API_KEY → ANTHROPIC_AUTH_TOKEN`，Base URL 可指向兼容网关。已用本机 relay 做真实两轮 tool-loop 验证（模型 `claude-sonnet-4-6`）
 - **Agent 配置导入 / 导出（2026-10-20）**：v1 JSON（`format: agenthub-agent`）由 `src/shared/agent-export.ts` 严格校验（zod `strict`）；导出只含身份 / prompt / adapter / model / 工具 / vision，**永不含** `apiKey` / `apiBaseUrl` / `id` / `mcpServerIds`；导入在 Agent 库触发，校验通过后打开创建弹窗预填，用户补 key 并确认才落库，失败在列表顶部显示可读错误
@@ -206,10 +208,11 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 ### ⚠️ 关键约定（动手前必看）
 - 改实体字段 → 同步 `specs/01`;改事件 → 同步 `specs/02`;改 Bash 黑名单 → 同步 `specs/11` + `src/server/security.ts`（单一数据源）;改 MCP 支持矩阵 → `src/shared/mcp.ts`。
 - 所有 LLM 调用必带 `AbortSignal`;跨进程输入（API body / LLM 输出）必经 zod 校验;fs/bash 必过 Workspace 沙箱。
+- ⚠️ **伴随模式不要绑 0.0.0.0 整个 server**:`electron/server-bootstrap.ts` 让 Next 只监听 loopback，对外的 companion 端口是只放行 `/api/mobile/*` 的反向代理。把 Next 直接绑到 0.0.0.0 等于把未鉴权的 `/api/settings`(明文 key)与全部桌面 API 暴露给局域网。详见 `specs/14` §5.4。
 - ⚠️ **SDK adapter 以隔离模式启动**（`settingSources: []` + `strictMcpConfig: true`）：workspace 里的 `.claude/settings.json`、项目 hooks（在宿主执行命令）、`.mcp.json` 都不参与本次 run —— 这是「审批门 + Bash 黑名单」真正生效的前提，少了它一个 JSON 文件就能替 AgentHub 放行工具。代价：项目记忆只剩 `<effectiveCwd>/CLAUDE.md`（上限 50 000 字符）。详见 `CLAUDE.md §5.5`、`specs/11-platform.md`。
 - ⚠️ **外部 MCP server 不在上述沙箱保证内**:它们在 workspace 沙箱与命令黑名单之外运行(stdio 直接 spawn 任意命令);stdio 子进程**继承完整进程环境**,因此能读到 AgentHub 已存的 provider API Key 与内部 token。`trust='ask'` 审批门**对 Claude Code 与 custom 生效，对 Codex 不生效**。详见 `CLAUDE.md §5.5` 与 `specs/15`。
 - 完整协作规则见 `CLAUDE.md`。
 
 ---
 
-*最后更新：2026-10-20 · 记入移动端鉴权改用设置表（重启后 token 不失效 + snapshot 模式来源修正）、Custom adapter 的 Anthropic Messages API 支持、Agent 配置导入 / 导出、头像选择器、POSIX 子进程 SIGKILL 升级与内置 `web_fetch`（含 SSRF 防护）。同日更早记入了流式可靠性两处修复与 F2 的 live 验证结果。2026-10-19 记入外部 MCP P1（custom 自建 MCP 客户端 + 审批门扩展到 custom）与外部 MCP 连接失败可见（F2：`mcp_server.unavailable` + 持久系统提示）。2026-10-18 记入了 shell 工具按身份识别（Windows 上 SDK 的 shell 工具是 `PowerShell`，此前按 `Bash` 字面量匹配导致黑名单与审批分类器整条失效）。2026-10-13 记入了 Claude Code adapter 的隔离启动（`settingSources: []` + `strictMcpConfig: true`）与 F1 修复（`partIndex` 归一，`src/server/part-slots.ts`）及两个相邻未修缺陷（`persistEvent` 空缓冲兜底、claude-code adapter 非流式回退重复渲染）。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*
+*最后更新：2026-10-20 · 记入伴随模式远程暴露收口（companion 端口只代理 `/api/mobile/*`）、一批 UI / 移动端缺陷修复、移动端鉴权改用设置表（重启后 token 不失效 + snapshot 模式来源修正）、Custom adapter 的 Anthropic Messages API 支持、Agent 配置导入 / 导出、头像选择器、POSIX 子进程 SIGKILL 升级与内置 `web_fetch`（含 SSRF 防护）。同日更早记入了流式可靠性两处修复与 F2 的 live 验证结果。2026-10-19 记入外部 MCP P1（custom 自建 MCP 客户端 + 审批门扩展到 custom）与外部 MCP 连接失败可见（F2：`mcp_server.unavailable` + 持久系统提示）。2026-10-18 记入了 shell 工具按身份识别（Windows 上 SDK 的 shell 工具是 `PowerShell`，此前按 `Bash` 字面量匹配导致黑名单与审批分类器整条失效）。2026-10-13 记入了 Claude Code adapter 的隔离启动（`settingSources: []` + `strictMcpConfig: true`）与 F1 修复（`partIndex` 归一，`src/server/part-slots.ts`）及两个相邻未修缺陷（`persistEvent` 空缓冲兜底、claude-code adapter 非流式回退重复渲染）。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*
