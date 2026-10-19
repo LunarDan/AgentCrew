@@ -64,7 +64,7 @@
 - `claude-code`：使用 `@anthropic-ai/claude-agent-sdk`，`toolNames=[]`，SDK 内置工具集；Review 模式通过 `canUseTool` 桥到 AgentHub 审批。
 - `codex`：使用 `@openai/codex-sdk`，`toolNames=[]`，SDK 内置本地命令 / 文件变更 / MCP / 计划事件；Review 模式以 read-only sandbox 运行，Auto 模式以 workspace-write sandbox 运行；自定义 Base URL 必须支持 Codex/Responses，DeepSeek 没有 `/responses`，不能走 Codex adapter。
 
-**用户选 Anthropic 会发生什么**：创建 / 编辑成功（DB 行写入），但发消息时 Adapter throw → run 失败 → 错误消息显示在对话里。**TODO**：UI 应该在选 Anthropic 时给警告 banner，或者干脆暂时下掉这个选项。
+**用户选 Anthropic 会发生什么**：创建 / 编辑成功（DB 行写入），但发消息时 Adapter throw → run 失败 → 错误消息显示在对话里。为防止用户在不知情时踩到，编辑弹窗在 `adapterKind='custom'` 且 `provider='anthropic'` 时显示 amber 警告 banner，提示改用其它 provider 或 Claude Code adapter。真正支持需要接入 `@anthropic-ai/sdk` 的 messages API，仍列为待补功能。
 
 ---
 
