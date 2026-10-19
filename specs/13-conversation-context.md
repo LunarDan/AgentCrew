@@ -283,7 +283,7 @@ artifact 仍只记录 id/title，不内联全文；需要全文时 agent 继续�
 - 当前用户消息（adapter 自己追加）
 ```
 
-被 summary 覆盖的普通非 pinned 消息不再重复注入，避免摘要和原文双计 token。pinned messages 不受覆盖范围影响，仍按原契约注入。
+被 summary 覆盖的普通非 pinned 消息不再重复注入，避免摘要和原文双计 token。pinned messages 不受覆盖范围影响，仍按原契约注入。覆盖判定用 `created_at >= covered_until_created_at` 且排除 `covered_until_message_id` 本身：同一毫秒可能插入多条消息、id 又不是时间有序的，严格 `>` 会静默丢掉边界同毫秒的新消息。
 
 ### ClaudeCodeAdapter 边界
 
@@ -297,7 +297,9 @@ compact 成功后，service 额外写一条 `role='system'` 的提示消息，�
 已压缩早期上下文，覆盖 18 条消息。
 ```
 
-该系统消息只用于用户可见反馈，不参与 summary 表语义。
+该系统消息只用于用户可见反馈，不参与 summary 表语义。它通过 `message.added` 广播给其它已连接客户端。
+
+summary 行、系统消息、`conversations.updatedAt` 三者在同一 DB 事务内写入；任一失败则一起回滚，避免「摘要已推进覆盖边界、但用户看不到压缩提示」。事务内会复核 latest summary 未变化，并发 compact 请求后到者直接失败而不是插入第二份摘要。
 
 第一版不做自动压缩；自动阈值触发留到后续 Phase E.2。
 

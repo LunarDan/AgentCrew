@@ -189,7 +189,9 @@ useEffect(() => {
 
 **模块级 ref + refCount 的原因**：React 19 StrictMode dev 下会双 mount，普通 `useEffect` 单连接模式会立刻断开重连。用 refCount 跨 mount 共享同一连接，**全部** unmount 后才真正关闭。
 
-**重连**：`EventSource` 浏览器原生自动重连，`onerror` 仅更新 `streamConnected` 显示。前端不需要写重连循环。
+**重连**：`EventSource` 浏览器原生自动重连，`onerror` 仅更新 `streamConnected` 显示。前端不需要写重连循环。但服务端**不补发**断线期间的事件（无 Last-Event-ID replay），所以每次重连的 `onopen`（首次连接除外）会 `bumpResync()`：MessageList 重新拉消息快照，pending writes / bash / MCP / question 面板与待审批 dispatch plan 重新拉各自快照，并覆盖本地可能已过期的状态。
+
+**刷新恢复**：`run.start` 可能在页面加载前就已发出。`setMessagesForConversation` 会从仍处于 `streaming` 的消息重建 `runsByConv` 条目（`restoredRunIds` 标记），输入框的「中止」按钮与 plan 修订模式因此在刷新后仍可用；下一次快照中没有对应 streaming 消息时清掉重建条目。消息快照同时是**删除来源**：不在快照里、且不是 `temp_` / streaming / 快照之后创建的本地消息会被移除。
 
 **事件格式约定**（详见 Spec 02）：
 - 所有事件都用 `event: message`（默认），不分 `event: tool.call` 等命名事件

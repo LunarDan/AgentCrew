@@ -211,7 +211,7 @@ export interface SearchHit {
   agentName: string | null
   agentAvatar: string | null
   createdAt: number
-  /** 已含 <mark>...</mark> 标签的 HTML 片段；FTS5 路径生成，LIKE 路径不含高亮 */
+  /** 已转义的 HTML 片段；只有 <mark>...</mark> 是标签。FTS5 与 LIKE 两条路径都由服务端转义 */
   snippetHtml: string
 }
 ```
@@ -252,8 +252,8 @@ export async function countSearchMatches(query: string): Promise<number>
   - 含 `(` → 透传（让 FTS5 报语法错误，我们转成 `INVALID_QUERY`）
   - 其他 → 透传
   理由：plan 早期版本"全部用双引号包裹"是错的——会把 `render*` 变成字面 phrase，prefix 搜索失效；会把 `(unclosed` 错误地"修复"成合法 query，丢失 `INVALID_QUERY` 检测。LIKE 路径不需要这层处理（LIKE 是普通子串匹配）。
-- `snippetHtml` 在 SQL 里生成（`snippet(messages_fts, 0, '<mark>', '</mark>', '…', 12)`），前端用 `dangerouslySetInnerHTML` 渲染；源头是用户自己的消息内容（不是 LLM 输出），XSS 风险低
-- LIKE 兜底路径**不生成** `<mark>`（LIKE 没有 snippet 函数），snippet 是裸文本
+- `snippetHtml` 在 SQL 里用占位符生成（`snippet(messages_fts, 0, char(1), char(2), '…', 12)`），服务端整体 HTML 转义后再把占位符换回 `<mark>` / `</mark>`，前端用 `dangerouslySetInnerHTML` 渲染。**消息正文同样是不可信输入**（LLM 输出、用户粘贴的 HTML），不能直接注入 —— 早期版本因未转义存在存储型 XSS
+- LIKE 兜底路径**不生成** `<mark>`（LIKE 没有 snippet 函数），截取的裸文本同样在服务端转义
 
 ### 7.2 LIKE 兜底 SQL
 

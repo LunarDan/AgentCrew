@@ -212,7 +212,9 @@ store.previewArtifactId → ArtifactPreviewPanel
 
 `sourceType='artifact'` 的记录来自聊天内 `web_app` artifact；`sourceType='workspace'` 的记录来自本地 workspace 静态输出目录，`artifactId` 使用 `workspace:<workspacePath>` 占位，`version` 固定为 `0`。
 
-若 `app_settings` 配置了外部静态发布目标，`deploy_artifact` / `deploy_workspace` 会额外把公开文件复制到 `<deployment_publish_dir>/<deploymentId>/`，并把 `previewPath` 设为 `deployment_public_base_url + deploymentId + '/'`。这种情况下 `localPreviewPath` 保留本地回退路径，`publishPath` 是实际写入目录。AgentHub 不启动外部托管服务，用户需要让 nginx / Caddy / Tailscale Serve / Pages 同步等服务指向该发布根目录。复制先写入发布根目录下的临时目录，全部成功后再替换旧目录；复制失败时旧版本保持可用。
+若 `app_settings` 配置了外部静态发布目标，`deploy_artifact` / `deploy_workspace` 会额外把公开文件复制到 `<deployment_publish_dir>/<deploymentId>/`，并把 `previewPath` 设为 `deployment_public_base_url + deploymentId + '/'`。这种情况下 `localPreviewPath` 保留本地回退路径，`publishPath` 是实际写入目录。AgentHub 不启动外部托管服务，用户需要让 nginx / Caddy / Tailscale Serve / Pages 同步等服务指向该发布根目录。复制先写入发布根目录下的临时目录，全部成功后再替换旧目录：旧目录先重命名成备份，替换失败时恢复，避免 rename 失败把线上站点删没；复制失败时旧版本保持可用。
+
+删除产物、撤回消息、重新生成回复、删除会话时都会同步删除该 artifact 对应的本地部署目录（`deleteDeploymentsForArtifact`），`/deployments/:id` 不会继续提供已删除产物的站点。
 
 `summaryInstruction` 只给 Agent 看，用于约束最终文字总结：本地发布时不得自造公网域名；外部发布时只能引用结构化返回的 `previewPath` / `publicUrl`，不得改写成其它 URL。UI 展示仍以结构化部署卡片为准。
 
