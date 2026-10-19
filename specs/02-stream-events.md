@@ -31,7 +31,7 @@ type StreamEvent = BaseEvent & (
   | { type: 'message.start', messageId: string, agentId: string, runId: string }
   | { type: 'message.end',   messageId: string }
   | { type: 'message.added', message: Message }   // 用户消息：已落库后广播，让非发送方客户端实时插入
-  | { type: 'message.removed', messageIds: string[], artifactIds: string[] }  // 撤回/编辑/重新生成删除消息后广播
+  | { type: 'message.removed', messageIds: string[], artifactIds: string[] }  // 撤回/编辑/重新生成/清空历史删除消息后广播
 
   // —— Part 增量（核心，最高频）——
   | { type: 'part.start',  messageId: string, partIndex: number, part: MessagePart }
