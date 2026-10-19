@@ -128,6 +128,13 @@ class PendingWritesStore {
     this.map.delete(id)
   }
 
+  /** 运行结束时的兜底清理：任何收尾路径都不该把审批条目永久留在内存里。 */
+  cancelByRun(runId: string): void {
+    for (const [id, entry] of [...this.map]) {
+      if (entry.write.runId === runId) this.cancel(id)
+    }
+  }
+
   private finalize(id: string, applied: boolean, error?: string) {
     const entry = this.map.get(id)
     if (!entry) return

@@ -116,6 +116,13 @@ class PendingDispatchPlansStore {
     this.finalize(id, { approved: false })
   }
 
+  /** 运行结束时的兜底清理：任何收尾路径都不该把方案审批条目永久留在内存里。 */
+  cancelByRun(runId: string): void {
+    for (const [id, entry] of [...this.map]) {
+      if (entry.pendingPlan.runId === runId) this.cancel(id)
+    }
+  }
+
   private finalize(id: string, opts: { approved: boolean; revising?: boolean }): void {
     const entry = this.map.get(id)
     if (!entry) return

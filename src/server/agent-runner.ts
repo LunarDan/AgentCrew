@@ -63,7 +63,10 @@ import { newArtifactId, newRunId } from './ids'
 import { formatResolutionWarnings, formatUnavailableNotice } from './mcp-notices'
 import { resolveMcpServersForAgent } from './mcp-server-service'
 import { translatePartIndex, type PartSlotsByMessage } from './part-slots'
+import { pendingBashCommands } from './pending-bash-commands'
 import { pendingDispatchPlans, type PlanReviewOutcome } from './pending-dispatch-plans'
+import { pendingQuestions } from './pending-questions'
+import { pendingWrites } from './pending-writes'
 import { buildProjectFiles } from './project-artifact'
 import { getAppSettings } from './settings-service'
 import {
@@ -1925,6 +1928,13 @@ async function finalize(
   error?: string,
 ): Promise<RunResult> {
   const finishedAt = Date.now()
+
+  // 兜底：run 已结束，挂在它名下的审批 / 提问若还在等待（abort 之外的收尾路径），必须一并释放，
+  // 否则内存条目永远不消失，还会让会话看起来一直有待处理项。
+  pendingWrites.cancelByRun(runId)
+  pendingQuestions.cancelByRun(runId)
+  pendingBashCommands.cancelByRun(runId)
+  pendingDispatchPlans.cancelByRun(runId)
 
   if (status === 'failed' || status === 'aborted') {
     await persistUnresolvedToolFailures(runId, args.conversationId, status, error, finishedAt)

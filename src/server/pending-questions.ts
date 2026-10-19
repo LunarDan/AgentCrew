@@ -89,6 +89,13 @@ class PendingQuestionsStore {
     entry.resolver?.(null)
     this.map.delete(id)
   }
+
+  /** 运行结束时的兜底清理：任何收尾路径都不该把提问条目永久留在内存里。 */
+  cancelByRun(runId: string): void {
+    for (const [id, entry] of [...this.map]) {
+      if (entry.question.runId === runId) this.cancel(id)
+    }
+  }
 }
 
 const globalForPQ = globalThis as unknown as {
