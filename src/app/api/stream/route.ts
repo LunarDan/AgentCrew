@@ -32,6 +32,9 @@ export async function GET(req: NextRequest) {
 
       const send = (data: unknown) => {
         if (closed) return
+        // 客户端读得慢（挂起的标签页 / 卡住的本地消费者）时不能无限堆事件；
+        // 丢掉的增量由前端重连后的快照 + 轮询补齐（同移动端事件流）。
+        if (controller.desiredSize !== null && controller.desiredSize <= 0) return
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
         } catch {
