@@ -142,7 +142,15 @@ interface AdapterInput {
      openai-compatible → agent.apiBaseUrl（必填）
      anthropic   → throw (TODO)
    
-2. 初始化 messages:
+2. 外部 MCP（`AdapterInput.mcpServers` 非空时，见「外部 MCP server 接线」）:
+   custom 自己创建 MCP client（`@modelcontextprotocol/sdk`）:
+     - 每个 server 并行 connect + listTools（各自 30s 超时）
+     - 失败的 server 跳过，发 mcp_server.unavailable，run 继续
+     - 工具暴露为 mcp__<server>__<tool>，清洗到 OpenAI function name
+       约束 `^[A-Za-z0-9_-]{1,64}$`；路由用运行期 Map，不反解析名字
+     - 合并进下面的 tools 数组；与内置工具重名时内置优先
+   
+3. 初始化 messages:
    [
      { role: 'system', content: customConfig.systemPrompt },
      { role: 'user',   content: buildMultimodalUserContent(prompt, attachments) },
@@ -153,7 +161,7 @@ interface AdapterInput {
        [{ type: 'text', text }, { type: 'image_url', image_url: { url: 'data:<mime>;base64,...' } }, ...]
      - 否则纯文本字符串
    
-3. tool loop（最多 MAX_TURNS=8 轮）:
+4. tool loop（最多 MAX_TURNS=8 轮）:
    每轮：
      yield message.start (新 partIndex 重置)
      client.chat.completions.create({ model, messages, tools, stream: true })
@@ -165,12 +173,16 @@ interface AdapterInput {
      
      若无 tool_calls：跳出循环
      若有 tool_calls：
-       并行 toolRegistry.execute(name, args, ctx)
-       逐个 yield tool.result
+       内置工具 → 并行 toolRegistry.execute(name, args, ctx)
+       外部工具 → 审批门（trust='ask' 且本会话未批准 → 等审批）→ client.callTool(120s)
+       逐个 yield tool.result（外部调用失败 / 超时 / 被拒 → isError，loop 继续）
         write_artifact 检测 result.value.artifactId 存在 → yield artifact.create (拉 DB 详情)
         deploy_artifact / deploy_workspace 检测 DeployStatusRecord → yield deploy.status
        把 assistant 消息（含 tool_calls + reasoning_content）和 tool result 推回 messages
        继续下一轮
+
+5. 清理（finally，覆盖正常结束 / abort / 抛错）:
+   close 所有 MCP client；stdio 先按 pid 杀进程树（killProcessTreeByPid）
 ```
 
 ### Reasoning 内容（DeepSeek thinking mode）
@@ -518,17 +530,18 @@ mcp_servers（DB，L1）
   → agent-runner.buildAdapterInput()                 // L3：展开 ${ENV}、按 adapter 过滤 transport、记警告
   → AdapterInput.mcpServers（ResolvedMcpServer[]）    // L2 边界：plain config
   → ClaudeCodeAdapter / CodexAdapter                 // L2：只翻译成 SDK 配置
+  → CustomAgentAdapter                               // L2：自建 MCP client，见下
 ```
 
 `buildAdapterInput` 里的解析失败（server 被删、`${ENV}` 缺变量、transport 不兼容）**只丢弃该 server 并记一条警告，不 fail 整个 run**（`ResolvedMcpServer` 的 warning 语义，Spec 15 §6.4）。占位符在 **run 启动时**展开、不在写入时，因此 DB 只存占位文本。
 
-**两个 adapter 的形状映射**：
+**三个 adapter 的形状映射**：
 
-| transport | Claude Code（`mcpServers` option） | Codex（`config.mcp_servers.<name>`） |
-|---|---|---|
-| `stdio` | `{ type:'stdio', command, args, env? }` | `{ command, args, env? }` |
-| `sse` | `{ type:'sse', url, headers? }` | ❌ 不支持的 transport，L3 已过滤 |
-| `http` | `{ type:'http', url, headers? }` | `{ url, http_headers? }` |
+| transport | Claude Code（`mcpServers` option） | Codex（`config.mcp_servers.<name>`） | custom（MCP SDK transport） |
+|---|---|---|---|
+| `stdio` | `{ type:'stdio', command, args, env? }` | `{ command, args, env? }` | `StdioClientTransport({ command, args, env, cwd })` |
+| `sse` | `{ type:'sse', url, headers? }` | ❌ 不支持的 transport，L3 已过滤 | `SSEClientTransport(url, { requestInit })` |
+| `http` | `{ type:'http', url, headers? }` | `{ url, http_headers? }` | `StreamableHTTPClientTransport(url, { requestInit })` |
 
 - **Claude Code**：`mcpServers: { agenthub: <in-process bridge>, ...<每个外部 server> }`，与现有 `agenthub` 并列传入 `query()`；stdio 子进程由 SDK 自管。同一次 `query()` 还带 `strictMcpConfig: true`，因此 MCP server **只**来自这个 map —— workspace 里的 `.mcp.json` 不会被加载（见「ClaudeCodeAdapter / 项目记忆」）。
 - **Codex**：写进 `config.mcp_servers`，与 `agenthub` 并列。Codex **靠 `command` / `url` 的存在推断传输方式，没有 `type` 字段**；可选字段（`env` / `headers`）必须**缺省而不是传 `null`** —— SDK 的 TOML 序列化器遇 `null` 会抛。Codex 侧只接受 `stdio` / `http`（无 SSE）。
@@ -536,17 +549,17 @@ mcp_servers（DB，L1）
 
 **transport 支持矩阵**（前后端共用 `src/shared/mcp.ts` 一份）：
 
-| transport | Claude Code | Codex |
-|---|---|---|
-| `stdio` | ✅ | ✅ |
-| `http`（streamable） | ✅ | ✅ |
-| `sse` | ✅ | ❌ |
+| transport | Claude Code | Codex | custom |
+|---|---|---|---|
+| `stdio` | ✅ | ✅ | ✅ |
+| `http`（streamable） | ✅ | ✅ | ✅ |
+| `sse` | ✅ | ❌ | ✅ |
 
 不支持的 pairing 在 **L3 过滤时就打个警告并跳过**，绝不会带病传给 SDK。
 
-**审批（仅 Claude Code）**：外部工具名 `mcp__<server>__<tool>` 在 `bridgePermission` 里排在默认放行之前（见「ClaudeCodeAdapter / canUseTool 桥」第 5 步）：`trust='always'` 或本会话已批准过该工具 → 直接 allow；否则弹审批（`mcp_tool.pending` / `mcp_tool.resolved`），批准后按 per-tool-per-conversation 记忆（`src/server/mcp-approvals.ts`）。Codex 有自己的一套审批策略与沙箱，AgentHub 拦截不到它的工具决策，故 `trust` 对 Codex 只是**建议性**的。该审批门同样以「隔离启动」为前提：CLI 先求值项目设置的 `permissions.allow`，命中就不会回调 `canUseTool`（见「canUseTool 桥」的提示）。
+**审批（Claude Code + custom）**：外部工具名 `mcp__<server>__<tool>` 在 `bridgePermission` 里排在默认放行之前（见「ClaudeCodeAdapter / canUseTool 桥」第 5 步）：`trust='always'` 或本会话已批准过该工具 → 直接 allow；否则弹审批（`mcp_tool.pending` / `mcp_tool.resolved`），批准后按 per-tool-per-conversation 记忆（`src/server/mcp-approvals.ts`）。custom 的 tool loop 在调用 `client.callTool` 之前走**同一套**队列与记忆，因此两个 adapter 的审批语义一致；被拒的调用返回 `isError` 结果，模型被明确要求不要重试。Codex 有自己的一套审批策略与沙箱，AgentHub 拦截不到它的工具决策，故 `trust` 对 Codex 只是**建议性**的。Claude Code 的审批门以「隔离启动」为前提：CLI 先求值项目设置的 `permissions.allow`，命中就不会回调 `canUseTool`（见「canUseTool 桥」的提示）。
 
-`custom` adapter 目前**不接**外部 MCP（需新建 MCP 客户端层，P1 未实现）；`mock` 同样不支持。
+**custom 的连接与清理**：每个 `stream()` 创建自己的 `McpClients`，对所有 server 并行 `connect` + `listTools`（30s 超时），失败者跳过并发 `mcp_server.unavailable`；run 结束 / abort 的 `finally` 中先按 `transport.pid` 杀 stdio 进程树（`killProcessTreeByPid`，因为 SDK 的 stdio 子进程不是 `detached`，拿不到进程组），再 `close()` 所有 client。stdio 以 `{ ...buildChildProcessEnv(), ...server.env }` 为环境、workspace 路径为 `cwd`。`mock` adapter 不支持外部 MCP。
 
 ---
 

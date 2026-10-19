@@ -16,10 +16,10 @@
 
 ## 2. Docs（commit 2）
 
-- [ ] 2.1 `specs/15-external-mcp.md` — §4 adapter 接入、§6.2 trust 门范围、§7 生命周期、§9 影响面、§10 P1 状态、§12 追加带日期的实现记录（保留原文）。
-- [ ] 2.2 `specs/05-adapter-interface.md` — CustomAgentAdapter 高层流程补 MCP 建连/路由/清理；transport 矩阵行加 custom。
-- [ ] 2.3 `CLAUDE.md §5.5` — `trust='ask'` 的适用范围改为 Claude Code + custom；Codex 仍不受约束（§6.2 已讨论）。
-- [ ] 2.4 `OVERVIEW.md` — 功能矩阵与「近期完成」+ footer。
+- [x] 2.1 `specs/15-external-mcp.md` — §4 adapter 接入、§6.2 trust 门范围、§7 生命周期、§9 影响面、§10 P1 状态、§12 追加带日期的实现记录（保留原文）。
+- [x] 2.2 `specs/05-adapter-interface.md` — CustomAgentAdapter 高层流程补 MCP 建连/路由/清理；transport 矩阵行加 custom。
+- [x] 2.3 `CLAUDE.md §5.5` — `trust='ask'` 的适用范围改为 Claude Code + custom；Codex 仍不受约束（§6.2 已讨论）。
+- [x] 2.4 `OVERVIEW.md` — 功能矩阵与「近期完成」+ footer。
 
 ## 3. Implementation（commit 3）
 
