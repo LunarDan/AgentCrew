@@ -93,9 +93,10 @@ export function MessageList({ conversationId }: { conversationId: string }) {
   // SSE 重连后补拉一次快照，修复断线期间漏掉的 message.end / message.removed
   useEffect(() => {
     if (resyncNonce === 0) return
-    fetchedConversationsRef.current.delete(conversationId)
+    // 断线影响所有缓存过的会话：只失效当前会话会让切回去的旧会话继续显示过期消息
+    fetchedConversationsRef.current.clear()
     setRetryNonce((n) => n + 1)
-  }, [resyncNonce, conversationId])
+  }, [resyncNonce])
 
   useEffect(() => {
     if (fetchedConversationsRef.current.has(conversationId)) {
