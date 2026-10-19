@@ -102,6 +102,24 @@ AgentHub MUST append usage guidance and concrete examples for the AgentHub-manag
 - **THEN** the injected guidance tells the agent to prefer direct workspace file/command tools for project source work
 - **AND** tells the agent not to use `write_artifact` for source files that should be written to disk.
 
+### Requirement: Network fetch tools SHALL prevent SSRF
+
+AgentHub MUST provide a `web_fetch` tool that fetches `http` / `https` URLs only. It MUST reject URLs with embedded credentials and MUST refuse to connect when the hostname or any resolved address is loopback, private, link-local, multicast, reserved, or a cloud metadata address. Redirect targets MUST be re-validated with the same rules on every hop. Responses MUST be capped in size and truncation MUST be reported; non-text content MUST NOT be downloaded.
+
+#### Scenario: Agent targets a private or local URL
+- **WHEN** an agent calls `web_fetch` with `http://localhost:3000`, `http://127.0.0.1/`, `http://169.254.169.254/latest/meta-data/`, or a `file://` URL
+- **THEN** the tool returns an error
+- **AND** no outbound request is made to that target.
+
+#### Scenario: Public URL redirects to a private address
+- **WHEN** a fetch response redirects to a host that resolves to a private address
+- **THEN** the redirect is rejected before connecting.
+
+#### Scenario: Response exceeds the text limit
+- **WHEN** the fetched response is larger than the tool's size cap
+- **THEN** the tool returns the leading content with a truncation marker
+- **AND** the result states that it was truncated.
+
 ### Requirement: Agents SHALL be able to ask structured user questions
 
 AgentHub MUST provide an `ask_user` tool for finite user choices. The tool SHALL accept 1-4 questions, each with 2-4 options, and SHALL suspend the run until the user answers or the run is aborted.
