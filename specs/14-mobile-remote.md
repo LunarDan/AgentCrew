@@ -202,6 +202,8 @@ P0 同时支持 QR 和手输，QR 是主路径，手输是兜底。
 
 **实现约束（2026-10-20）**：打包版不要把整个 Next server 绑到 `0.0.0.0` —— 那等于把 `/api/settings`（含明文 provider key 与设备 token）、`/api/conversations` 等全部桌面 API 暴露给同一局域网。`electron/server-bootstrap.ts` 的做法是：Next 固定 `HOSTNAME=127.0.0.1` + 系统分配端口；companion 开启时另起 `0.0.0.0:<companionPort>` 的 HTTP 反向代理，仅放行路径前缀 `/api/mobile/`（含 CORS 预检），其余一律 404。移动端每条路由仍自行校验 Bearer token。
 
+路径判定必须**归一化后**再比较：`/api/mobile/../settings` 原始前缀命中，但 Next 会把它解析成 `/api/settings`。`electron/companion-proxy.ts` 先做百分号解码、再按 POSIX 规则归一化，归一化结果必须与解码结果完全一致且仍以 `/api/mobile/` 开头；`..`、`.`、重复斜杠、反斜杠与非法转义一律拒绝。
+
 移动端 API 不得返回：
 
 - `agents.apiKey`

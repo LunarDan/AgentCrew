@@ -35,6 +35,11 @@ When companion mode is enabled, the desktop MUST NOT expose unauthenticated desk
 - **WHEN** a peer on the companion interface requests `/api/settings` or `/api/conversations`
 - **THEN** the request is refused without reaching the Next server.
 
+#### Scenario: A peer disguises a desktop API with traversal
+- **WHEN** a peer requests a path such as `/api/mobile/../settings` or its percent-encoded form
+- **THEN** the request is refused before proxying
+- **AND** the allowlist compares the decoded, normalized path rather than the raw prefix.
+
 #### Scenario: A paired phone requests a mobile API
 - **WHEN** a phone sends an authenticated request to `/api/mobile/snapshot`
 - **THEN** the companion listener forwards it to the loopback server
