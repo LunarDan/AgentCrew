@@ -270,7 +270,7 @@ dispatch.end      (parentRunId=r1, taskId=t3, status='skipped', error='Upstream 
 |---|---|---|
 | `run.*` | ✅ 落到 `agent_runs` 表 | start/end 更新 status |
 | `message.start` | ✅ 创建 message 记录（parts=[]） | |
-| `message.end` | ✅ 更新 status='complete' | |
+| `message.end` | ✅ 更新 status='complete' | 主动中止的 adapter **不得**发 `message.end`：留给 `run.end` 把 streaming 消息标成 `aborted`。错误可视化消息同样不发 `message.end`，由随后的 `run.end` 落到 `error` / `aborted` |
 | `message.added` | ❌ 透传 | user 消息已由 `sendMessage` 落库；此事件仅广播给其它客户端，前端按 id 幂等 upsert（详见下方「用户消息广播」） |
 | `message.removed` | ❌ 透传 | 撤回/编辑/重新生成已在服务端删库；此事件仅广播 messageIds/artifactIds 让其它客户端幂等移除 |
 | `part.start` | ✅ 写入 `messages.parts[i]` | `i` 是**归一化后**的下标（见「partIndex 的归一化」）；parts 整体作为 JSON 更新 |

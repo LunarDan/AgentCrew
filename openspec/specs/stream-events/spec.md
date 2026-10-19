@@ -17,12 +17,21 @@ All agent output, tool activity, artifact creation, pending approvals, dispatch 
 
 ### Requirement: Message streaming SHALL be bracketed
 
-Each agent message MUST begin with `message.start` and finish with `message.end`, with part and tool events associated to the message id between those boundaries.
+Each agent message MUST begin with `message.start` with part and tool events associated to the message id inside the message. A message that completes normally MUST finish with `message.end`. A message belonging to a run that is aborted or fails MUST NOT be closed with `message.end`; its final status is derived from `run.end`.
 
 #### Scenario: Run completes normally
 - **WHEN** the final adapter event has been consumed
 - **THEN** the message status is updated to `complete`
 - **AND** the run ends with status `complete`.
+
+#### Scenario: Run is aborted mid-stream
+- **WHEN** the run's abort signal fires while a message is streaming
+- **THEN** no `message.end` is emitted for that message
+- **AND** `run.end` with status `aborted` marks the streaming message `aborted`.
+
+#### Scenario: Tool calls inside a message
+- **WHEN** an adapter executes tools before finishing a message
+- **THEN** all `tool.call` and `tool.result` events are emitted before `message.end`.
 
 ### Requirement: User messages SHALL be broadcast to all clients
 

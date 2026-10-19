@@ -253,13 +253,15 @@ const result = await toolRegistry.execute(name, args, ctx)
 
 ## Token usage 采集
 
-所有 adapter 在 run 结束前 yield 一次 `run.usage` 事件（见 Spec 02），AgentRunner 收到后写入 `agent_runs.usage` JSON 列（见 Spec 08）。
+所有 adapter 在 run 结束前 yield 一次 `run.usage` 事件（见 Spec 02），AgentRunner 收到后写入 `agent_runs.usage` JSON 列（见 Spec 08）。AgentRunner 对同一 runId 的多次 `run.usage` 做**累加**，因此 adapter 可以按 turn 报告增量；`CustomAgentAdapter` 在每个 turn 的模型流结束后、执行工具之前就发出该 turn 的 `message.usage` 与 `run.usage` —— plan 阶段会在 `plan_tasks` 的 `tool.call` 处提前结束，晚发就永远发不出去。
+
+**Claude Code 的错误结果**：SDK `result` 消息带 `subtype`（`error_max_turns` 等）、`is_error`、`errors[]`。adapter 在采集 usage 后必须检查这些字段，非成功结果抛错，让 run 以 `failed` 结束并把 SDK 的 `errors` 作为错误信息，不能静默 `message.end` 成一次正常回答。
 
 | Adapter | usage 来源 |
 |---|---|
 | `ClaudeCodeAdapter` | `SDKResultMessage.usage`（success / error 都有）+ `modelUsage` 拿实际模型 id |
 | `CodexAdapter` | `runStreamed()` 的 `turn.completed.usage` |
-| `CustomAgentAdapter` | 调用时设 `stream_options: { include_usage: true }`，stream 末尾会有一个携 `usage` 的特殊 chunk；跨 turn 累加（一个 run 内可能 ≤ MAX_TURNS=8 次 chat.completions.create） |
+| `CustomAgentAdapter` | 调用时设 `stream_options: { include_usage: true }`，stream 末尾会有一个携 `usage` 的特殊 chunk；**每个 turn 流结束后立即报告该 turn 增量**（`run.usage` 可多次，Runner 累加），不再等整个 run 结束 |
 | `MockAdapter` | 不上报 usage（agent_runs.usage = null） |
 
 **字段映射**（OpenAI 协议 → 我们的 `RunUsage`）：
