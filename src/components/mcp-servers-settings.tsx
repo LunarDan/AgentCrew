@@ -43,6 +43,8 @@ interface FormState {
   trust: McpTrust
   enabled: boolean
   trusted: boolean
+  /** 打开编辑时的 transport；切 transport 才允许顺带清空旧密钥。 */
+  originalTransport: McpTransport | null
 }
 
 const EMPTY_FORM: FormState = {
@@ -58,6 +60,7 @@ const EMPTY_FORM: FormState = {
   // 默认停用：注册（写进 DB）与启用（允许在任何 run 中启动）是两次独立的决定。
   enabled: false,
   trusted: false,
+  originalTransport: null,
 }
 
 export function McpServersSettings() {
@@ -105,6 +108,11 @@ export function McpServersSettings() {
         headers: form.transport === 'stdio' ? null : parseKeyValueLines(form.headersText),
         trust: form.trust,
         enabled: form.enabled,
+      }
+      // 编辑时两个密钥框留空 = 不改动已存密钥（服务端 merge 语义），不能把 null 发出去当「清空」。
+      if (form.id && form.originalTransport === form.transport) {
+        if (!form.envText.trim()) delete body.env
+        if (!form.headersText.trim()) delete body.headers
       }
       if (form.id) await updateMcpServer(form.id, body)
       else await createMcpServer(body)
@@ -451,6 +459,7 @@ function formFromServer(server: McpServerView): FormState {
     trust: server.trust,
     enabled: server.enabled,
     trusted: true,
+    originalTransport: server.transport,
   }
 }
 
