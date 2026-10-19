@@ -1,7 +1,13 @@
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 
 /** Trigger onRefresh when the user pulls down past a threshold while scrolled to the top. */
 export function usePullToRefresh(onRefresh: () => void, enabled: boolean) {
+  // 轮询会频繁重渲染；监听器不能跟着回调重建，否则手势进行到一半就被重置
+  const callbackRef = useRef(onRefresh)
+  useEffect(() => {
+    callbackRef.current = onRefresh
+  }, [onRefresh])
+
   useEffect(() => {
     if (!enabled) return
 
@@ -23,7 +29,7 @@ export function usePullToRefresh(onRefresh: () => void, enabled: boolean) {
       const delta = event.touches[0].clientY - startY
       if (delta > threshold) {
         pulling = false
-        onRefresh()
+        callbackRef.current()
       }
     }
 
@@ -39,5 +45,5 @@ export function usePullToRefresh(onRefresh: () => void, enabled: boolean) {
       window.removeEventListener("touchmove", handleMove)
       window.removeEventListener("touchend", handleEnd)
     }
-  }, [onRefresh, enabled])
+  }, [enabled])
 }

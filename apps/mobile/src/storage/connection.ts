@@ -24,7 +24,11 @@ export function loadConnection(): ConnectionConfig {
 }
 
 export function saveConnection(config: ConnectionConfig): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(config))
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(config))
+  } catch {
+    // 存储被禁用 / 配额满时不该让每次输入都抛错；本会话内仍然可用
+  }
 }
 
 export function loadRecentHosts(): string[] {
@@ -47,7 +51,11 @@ export function rememberRecentHost(baseUrl: string): string[] {
     0,
     MAX_RECENT_HOSTS,
   )
-  localStorage.setItem(RECENT_HOSTS_KEY, JSON.stringify(next))
+  try {
+    localStorage.setItem(RECENT_HOSTS_KEY, JSON.stringify(next))
+  } catch {
+    // 同上：最近地址只是便利功能，写不进去就返回内存里的结果
+  }
   return next
 }
 

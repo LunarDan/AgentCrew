@@ -794,7 +794,9 @@ function toMessagePartScrollKey(part: MobileMessagePart): string {
   }
 }
 
-function isNearWindowBottom(threshold = 420): boolean {
+// 自动跟随和「回到底部」按钮共用同一阈值，否则用户往上翻 200px 时按钮说「已离开底部」、
+// 自动滚动却继续把视图拽回最下面。
+function isNearWindowBottom(threshold = 160): boolean {
   const scrollPosition = window.scrollY + window.innerHeight
   return document.documentElement.scrollHeight - scrollPosition <= threshold
 }

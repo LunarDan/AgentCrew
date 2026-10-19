@@ -61,6 +61,8 @@ export function StatusScreen({
           {(snapshot?.runningRuns ?? []).map((run) => {
             const agentName =
               snapshot?.agents.find((agent) => agent.id === run.agentId)?.name ?? "Agent"
+            const stopping = busyRunId === run.id
+            // 其他操作在跑时全局禁用，避免 busyRef 直接丢弃点击；只有本 run 显示「停止中」
             const busy = busyRunId !== null
             return (
               <article key={run.id} className="approval-card">
@@ -75,7 +77,7 @@ export function StatusScreen({
                     disabled={busy}
                     onClick={() => onAbortRun(run.id)}
                   >
-                    {busy ? "停止中" : "停止"}
+                    {stopping ? "停止中" : "停止"}
                   </button>
                 </div>
               </article>

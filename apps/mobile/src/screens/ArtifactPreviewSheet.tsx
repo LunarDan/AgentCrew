@@ -135,7 +135,19 @@ function WebAppArtifact({ content }: { content: Extract<MobileArtifactContent, {
 function DocumentArtifact({ content }: { content: Extract<MobileArtifactContent, { type: 'document' }> }) {
   return (
     <article className="artifact-document mobile-markdown">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content.content}</ReactMarkdown>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          // 和聊天消息一致：链接不能把伴随 App 自身导航走
+          a: ({ href, children }) => (
+            <a href={href} target="_blank" rel="noreferrer">
+              {children}
+            </a>
+          ),
+        }}
+      >
+        {content.content}
+      </ReactMarkdown>
     </article>
   )
 }
@@ -170,17 +182,32 @@ function DiffArtifact({ content }: { content: Extract<MobileArtifactContent, { t
   )
 }
 
+/** diff 产物没有文件级上限，整份铺进 DOM 会让 WebView 卡死；与审批预览同量级截断。 */
+const MAX_ARTIFACT_DIFF_LINES = 600
+
 function hunksToDiffLines(hunks: Extract<MobileArtifactContent, { type: 'diff' }>['hunks']): DiffLine[] {
   const lines: DiffLine[] = []
+  let omitted = 0
+
   for (const hunk of hunks) {
+    if (lines.length >= MAX_ARTIFACT_DIFF_LINES) {
+      omitted += 1 + hunk.lines.length
+      continue
+    }
     lines.push({
       kind: 'hunk',
       text: `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`,
     })
     for (const raw of hunk.lines) {
+      if (lines.length >= MAX_ARTIFACT_DIFF_LINES) {
+        omitted += 1
+        continue
+      }
       lines.push({ kind: classifyHunkLine(raw), text: raw.replace(/^[+\- ]/, '') })
     }
   }
+
+  if (omitted > 0) lines.push({ kind: 'hunk', text: `… 省略 ${omitted} 行（diff 过大）` })
   return lines
 }
 
@@ -213,25 +240,31 @@ function buildIframeHtml(files: Record<string, string>, entry: string): string {
   const css = files['style.css'] ?? files['styles.css'] ?? ''
   const js = files['script.js'] ?? files['main.js'] ?? files['app.js'] ?? ''
 
-  const styleTag = css ? `<style>\n${css}\n</style>` : ''
-  const scriptTag = js ? `<script>(function(){\n${js}\n})();<` + '/script>' : ''
+  let out = html
 
-  if (/<\/head>/i.test(html)) {
-    return html.replace(/<\/head>/i, `${styleTag}\n</head>`).replace(/<\/body>/i, `${scriptTag}\n</body>`)
+  // CSS 与 JS 各自独立注入：LLM 生成的 HTML 经常省略 </body> 或 </head>，
+  // 不能因为缺一个闭合标签就把另一个也丢掉。
+  if (css) {
+    const styleTag = `<style>\n${css}\n</style>`
+    if (/<\/head>/i.test(out)) {
+      out = out.replace(/<\/head>/i, `${styleTag}\n</head>`)
+    } else if (/<body[^>]*>/i.test(out)) {
+      out = out.replace(/<body[^>]*>/i, (tag) => `${styleTag}\n${tag}`)
+    } else {
+      out = `${styleTag}\n${out}`
+    }
   }
 
-  return [
-    '<!doctype html>',
-    '<html lang="zh-CN">',
-    '<head>',
-    '<meta charset="utf-8">',
-    '<meta name="viewport" content="width=device-width,initial-scale=1">',
-    styleTag,
-    '</head>',
-    '<body>',
-    html,
-    scriptTag,
-    '</body>',
-    '</html>',
-  ].join('\n')
+  if (js) {
+    const scriptTag = `<script>(function(){\n${js}\n})();<` + '/script>'
+    if (/<\/body>/i.test(out)) {
+      out = out.replace(/<\/body>/i, `${scriptTag}\n</body>`)
+    } else if (/<\/html>/i.test(out)) {
+      out = out.replace(/<\/html>/i, `${scriptTag}\n</html>`)
+    } else {
+      out = `${out}\n${scriptTag}`
+    }
+  }
+
+  return out
 }

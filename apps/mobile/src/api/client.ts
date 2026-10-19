@@ -169,7 +169,7 @@ export async function pairMobileDevice(
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({ code: code.trim(), deviceName }),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: mergeTimeoutSignal(null, REQUEST_TIMEOUT_MS),
   }).catch((err) => {
     const message = err instanceof Error ? err.message : String(err)
     throw new Error(`Cannot reach ${baseUrl}: ${message}`)
@@ -204,7 +204,7 @@ function mergeTimeoutSignal(
   signal: AbortSignal | null | undefined,
   timeoutMs: number,
 ): AbortSignal {
-  const timeout = AbortSignal.timeout(timeoutMs)
+  const timeout = createTimeoutSignal(timeoutMs)
   if (!signal) return timeout
   const anyOf = (
     AbortSignal as unknown as { any?: (signals: AbortSignal[]) => AbortSignal }
@@ -219,6 +219,17 @@ function mergeTimeoutSignal(
     signal.addEventListener('abort', abort, { once: true })
     timeout.addEventListener('abort', abort, { once: true })
   }
+  return controller.signal
+}
+
+/** iOS 14 / Chromium < 103 的 WebView 没有 AbortSignal.timeout，缺失时整个 API 都会不可用。 */
+function createTimeoutSignal(timeoutMs: number): AbortSignal {
+  const timeoutFn = (
+    AbortSignal as unknown as { timeout?: (ms: number) => AbortSignal }
+  ).timeout
+  if (typeof timeoutFn === 'function') return timeoutFn(timeoutMs)
+  const controller = new AbortController()
+  setTimeout(() => controller.abort(), timeoutMs)
   return controller.signal
 }
 
