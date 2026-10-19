@@ -113,3 +113,22 @@ The agent info popover MUST resolve selected server ids to display names so a us
 - **WHEN** the agent has non-empty `mcpServerIds`
 - **THEN** the popover lists the resolved server names
 - **AND** an id with no matching row is not rendered as a raw id.
+
+### Requirement: Agent configurations SHALL be exportable and importable without secrets
+
+AgentHub MUST export an agent configuration as a versioned JSON document and MUST import such a document by validating it before use. Exports MUST NOT contain `apiKey`, `apiBaseUrl`, installation-local ids (agent id, MCP server ids), or runtime flags. Import MUST open the create form prefilled with the validated configuration so the user can review it and supply any required credentials before saving.
+
+#### Scenario: Exporting an agent with a per-agent key
+- **WHEN** the user exports an agent whose row has `apiKey` and `apiBaseUrl`
+- **THEN** the JSON contains identity, prompt, adapter, model, tool names, and vision settings
+- **AND** it contains no API key or base URL.
+
+#### Scenario: Importing a malformed file
+- **WHEN** the selected file is not valid JSON, uses an unknown format/version, or fails schema validation
+- **THEN** the import is rejected with a readable error
+- **AND** no agent is created.
+
+#### Scenario: Importing a valid file
+- **WHEN** the user imports a valid v1 document
+- **THEN** the create dialog opens prefilled with its fields
+- **AND** no agent exists until the user submits the form.
