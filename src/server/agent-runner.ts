@@ -282,19 +282,46 @@ export const AgentRunner = {
 }
 
 // ─── 主入口 ────────────────────────────────────────────────
+/**
+ * insertRun 之前就失败（agent / workspace / trigger message 缺失）：
+ * run 行写不进去，但客户端仍然需要 run.start 来配对后续的 run.end。
+ */
+function failBeforeRunStart(
+  runId: string,
+  args: RunArgs,
+  agentId: string,
+  error: string,
+): Promise<RunResult> {
+  publish({
+    type: 'run.start',
+    conversationId: args.conversationId,
+    timestamp: Date.now(),
+    runId,
+    agentId,
+    triggerMessageId: args.triggerMessageId,
+    parentRunId: args.parentRunId,
+  })
+  return finalizeFailed(runId, args, error)
+}
+
 async function executeRun(runId: string, signal: AbortSignal, args: RunArgs): Promise<RunResult> {
   const agent = await db.query.agents.findFirst({
     where: eq(schema.agents.id, args.agentId),
   })
   if (!agent) {
-    return finalizeFailed(runId, args, `Agent not found: ${args.agentId}`)
+    return failBeforeRunStart(runId, args, args.agentId, `Agent not found: ${args.agentId}`)
   }
 
   const workspace = await db.query.workspaces.findFirst({
     where: eq(schema.workspaces.conversationId, args.conversationId),
   })
   if (!workspace) {
-    return finalizeFailed(runId, args, `Workspace not found for conversation: ${args.conversationId}`)
+    return failBeforeRunStart(
+      runId,
+      args,
+      agent.id,
+      `Workspace not found for conversation: ${args.conversationId}`,
+    )
   }
 
   const triggerMessage = await db.query.messages.findFirst({
@@ -304,7 +331,12 @@ async function executeRun(runId: string, signal: AbortSignal, args: RunArgs): Pr
     ),
   })
   if (!triggerMessage) {
-    return finalizeFailed(runId, args, `Trigger message not found: ${args.triggerMessageId}`)
+    return failBeforeRunStart(
+      runId,
+      args,
+      agent.id,
+      `Trigger message not found: ${args.triggerMessageId}`,
+    )
   }
 
   const prompt = args.overridePrompt ?? extractTextFromParts(triggerMessage.parts)
