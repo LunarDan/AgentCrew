@@ -20,4 +20,12 @@ describe('classifyBashApproval', () => {
     })
     expect(classifyBashApproval('ls -la', 'posix')).toEqual({ required: false, reason: '' })
   })
+
+  it('catches abbreviated PowerShell removal flags', () => {
+    expect(classifyBashApproval('Remove-Item -Rec -Fo C:\\tmp', 'windows')).toMatchObject({
+      required: true,
+    })
+    expect(classifyBashApproval('rm -r -fo C:\\tmp', 'windows')).toMatchObject({ required: true })
+    expect(classifyBashApproval('ri -rec -fo C:\\tmp', 'windows')).toMatchObject({ required: true })
+  })
 })

@@ -34,7 +34,11 @@ export function classifyBashApproval(command: string, platform: Platform): BashA
 
   if (platform === 'windows') {
     checks.push(
-      [/\bRemove-Item\b[\s\S]*-(?:Recurse|Force)\b/i, 'PowerShell recursive or forced removal'],
+      [
+        // PowerShell 接受无歧义前缀（-Rec / -Fo），别名也走同一条
+        /\b(?:remove-item|ri|rm|rmdir|del|erase|rd)\b[\s\S]*-(?:r|rec(?:urse)?|fo(?:rce)?)\b/i,
+        'PowerShell recursive or forced removal',
+      ],
       [
         /\b(?:npm|pnpm|yarn|bun)\.cmd\s+(?:install|i|ci|add|remove|rm|uninstall|update|upgrade)\b/i,
         'package manager changes dependencies or downloads packages',

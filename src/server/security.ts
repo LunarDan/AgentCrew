@@ -24,17 +24,17 @@ const POSIX_BANNED: RegExp[] = [
   /\bexec\b\s+/,
 ]
 
+// PowerShell 接受无歧义参数前缀：`-r` / `-Rec` / `-Fo` 与全称等价
+const PS_RECURSIVE = '-(?:r|rec(?:urse)?)\\b'
+const PS_FORCE = '-fo(?:rce)?\\b'
+// PowerShell 上 Remove-Item 的别名；del/erase/rd 在 cmd 与 PowerShell 里都常见
+const PS_DELETE_VERB = '(?:remove-item|ri|rm|rmdir|del|erase|rd)'
+
 const WINDOWS_BANNED: RegExp[] = [
   /\b(del|erase)\s+\/[fsq\s/"']*[a-z]:[\\/]?/i,
-  /\brd\s+\/[sq\s/"']*[a-z]:[\\/]?/i,
-  /\bRemove-Item\b[^|;]*-Recurse[^|;]*-Force/i,
-  /\bRemove-Item\b[^|;]*-Force[^|;]*-Recurse/i,
-  /\bri\b[^|;]*-Recurse[^|;]*-Force/i,
-  // PowerShell 上 `rm` / `rmdir` / `erase` 都是 Remove-Item 的 alias，单独拦 —— ri 已在上方
-  /\brm\b[^|;]*-Recurse[^|;]*-Force/i,
-  /\brm\b[^|;]*-Force[^|;]*-Recurse/i,
-  /\brmdir\b[^|;]*-Recurse[^|;]*-Force/i,
-  /\brmdir\b[^|;]*-Force[^|;]*-Recurse/i,
+  /\b(rd|rmdir)\s+\/[sq\s/"']*[a-z]:[\\/]?/i,
+  new RegExp(`\\b${PS_DELETE_VERB}\\b[^|;]*${PS_RECURSIVE}[^|;]*${PS_FORCE}`, 'i'),
+  new RegExp(`\\b${PS_DELETE_VERB}\\b[^|;]*${PS_FORCE}[^|;]*${PS_RECURSIVE}`, 'i'),
   /\bformat\s+[a-z]:/i,
   /\bshutdown\b/i,
   /\brestart-computer\b/i,
