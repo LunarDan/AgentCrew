@@ -9,7 +9,7 @@ interface RouteContext {
 
 const SendBody = z
   .object({
-    content: z.string().default(''),
+    content: z.string().max(12000).default(''),
     mentionedAgentIds: z.array(z.string()).optional(),
     parentMessageId: z.string().optional(),
     attachmentIds: z.array(z.string()).optional(),

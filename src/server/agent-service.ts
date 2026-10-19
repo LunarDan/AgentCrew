@@ -149,7 +149,9 @@ export async function updateCustomAgent(agentId: string, patch: UpdateAgentPatch
   const updates: Record<string, unknown> = {}
   const nextAdapterName: AdapterName = patch.adapterName ?? agent.adapterName
   const nextModelProvider = patch.modelProvider ?? agent.modelProvider
-  const nextModelId = patch.modelId ?? agent.modelId
+  // 校验必须用「真正会落库的值」：显式 null 会把 modelId 清空，不能被 ?? 回退成旧值掩盖
+  const nextModelId =
+    patch.modelId !== undefined ? patch.modelId?.trim() || null : agent.modelId
   const nextApiBaseUrl =
     patch.apiBaseUrl !== undefined ? patch.apiBaseUrl?.trim() || null : agent.apiBaseUrl
   const nextApiKey = patch.apiKey !== undefined ? patch.apiKey?.trim() || null : agent.apiKey

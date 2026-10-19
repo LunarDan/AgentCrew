@@ -5,6 +5,7 @@ import { and, desc, eq } from 'drizzle-orm'
 
 import { db, schema } from '@/db/client'
 import type { MessageInsert, MessageRow } from '@/db/schema'
+import { eventBus } from '@/server/event-bus'
 import { newMessageId } from '@/server/ids'
 import { deployArtifactForConversation } from '@/server/tools/deploy-artifact'
 import { deployWorkspaceForConversation } from '@/server/tools/deploy-workspace'
@@ -212,6 +213,14 @@ async function insertSystemMessage(args: {
     .update(schema.conversations)
     .set({ updatedAt: now })
     .where(eq(schema.conversations.id, args.conversationId))
+
+  // 部署结果要广播：命令可能来自移动端 / 另一个标签页，其它客户端不能等下次全量刷新才看到
+  eventBus.publish({
+    type: 'message.added',
+    conversationId: args.conversationId,
+    timestamp: now,
+    message: message as MessageRow,
+  })
 
   return message as MessageRow
 }

@@ -325,8 +325,31 @@ async function executeRun(runId: string, signal: AbortSignal, args: RunArgs): Pr
     }
   }
 
-  // 写 run 记录 + 发 run.start
-  await insertRun(runId, args, agent.id)
+  // 写 run 记录 + 发 run.start。落库失败时也要给客户端一个收尾事件，
+  // 否则发起方只看到消息永远没有回答，UI 也没有错误卡片。
+  try {
+    await insertRun(runId, args, agent.id)
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err)
+    publish({
+      type: 'run.start',
+      conversationId: args.conversationId,
+      timestamp: Date.now(),
+      runId,
+      agentId: agent.id,
+      triggerMessageId: args.triggerMessageId,
+      parentRunId: args.parentRunId,
+    })
+    publish({
+      type: 'run.end',
+      conversationId: args.conversationId,
+      timestamp: Date.now(),
+      runId,
+      status: 'failed',
+      error: `Failed to persist run: ${reason}`,
+    })
+    throw err
+  }
   publish({
     type: 'run.start',
     conversationId: args.conversationId,
@@ -351,6 +374,10 @@ async function executeRun(runId: string, signal: AbortSignal, args: RunArgs): Pr
     }
     const msg = err instanceof Error ? err.message : String(err)
     return finalize(runId, args, 'failed', emptyRunExecutionResult(), msg)
+  } finally {
+    // 进程级内存表：普通 run / orchestrator run 结束后都要清，否则长跑进程会一直累积
+    clearFileWrites(runId)
+    clearRunToolEvidence(runId)
   }
 }
 
