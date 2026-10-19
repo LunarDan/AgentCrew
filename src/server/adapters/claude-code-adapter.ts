@@ -664,6 +664,9 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
         if (m.type === 'result') {
           // 终止信号 —— 顺便采集 usage（success / error subtypes 都带 usage 字段）
           const resultMsg = m as unknown as {
+            subtype?: string
+            is_error?: boolean
+            errors?: string[]
             usage?: {
               input_tokens?: number
               output_tokens?: number
@@ -706,6 +709,14 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
                 model,
               },
             }) as StreamEvent
+          }
+
+          // SDK 把 max turns / 执行错误也放在 result 里：不能当成正常完成。
+          if (resultMsg.is_error || resultMsg.subtype?.startsWith('error')) {
+            const details = resultMsg.errors?.filter((item) => item.trim()).join('; ')
+            throw new Error(
+              details || `Claude Code finished with ${resultMsg.subtype ?? 'an error result'}`,
+            )
           }
           break
         }
