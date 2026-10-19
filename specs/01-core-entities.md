@@ -263,12 +263,13 @@ interface Attachment {
 ```
 
 **约束**：
-- 物理文件存于 `workspace.rootPath/attachments/<id>-<fileName>`
+- 物理文件存于 `workspace.rootPath/uploads/<id><ext>`（`filePath` 列存 `uploads/<id><ext>` 相对路径）
 - 删除 Conversation 级联删除 attachments 行（物理文件随 workspace 目录一起被删）
 - 单会话累计上限：100 MB / 1000 文件（与 workspace 共享配额）
 - 单个 attachment 可被同会话内多条 message 引用，删除 attachment 不删除引用它的 message.parts（前端 lazy fetch 时显示「附件已删除」墓碑）
 - 上传先写 workspace 文件、再插 attachments 行；插库失败时删除已落盘文件，避免孤儿文件
 - `sendMessage` 的 `attachmentIds` 必须全部存在且属于该会话；任一不存在时整个请求失败（不静默丢弃），且不允许落一条没有任何 part 的用户消息
+- `GET /api/attachments/:id` 只对 jpeg / png / gif / webp 使用 `Content-Disposition: inline`；SVG 等 active content 一律 `attachment` 下载。响应带 `X-Content-Type-Options: nosniff` 与 `Content-Security-Policy: sandbox` —— mimeType 是上传者自报值，不能让它在应用同源下被当成页面执行
 
 ---
 
