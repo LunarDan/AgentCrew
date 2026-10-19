@@ -14,9 +14,28 @@ The mobile app MUST connect to a desktop AgentHub host over trusted LAN or Tails
 - **WHEN** a user enters or scans a pairing token
 - **THEN** the host authorizes the device session before exposing conversation data.
 
+### Requirement: Mobile client pairing SHALL use short-lived single-use codes
+
+A desktop user MUST be able to issue a pairing code for a new device. The code MUST live only in process memory, expire within 5 minutes, be usable exactly once, be invalidated after a small number of failed attempts, and failed attempts MUST be rate-limited. Successful pairing MUST create a device session and return a device token once; the server MUST persist only a hash of that token. Pairing MUST be refused while companion mode is off. A paired device MUST be revocable, and a revoked device MUST stop authorizing requests immediately.
+
+#### Scenario: A device pairs with a valid code
+- **WHEN** a mobile client submits the current pairing code and a device name to `/api/mobile/pair`
+- **THEN** it receives a device token exactly once
+- **AND** the host stores only the token hash in `device_sessions`.
+
+#### Scenario: A pairing code is guessed repeatedly
+- **WHEN** a client submits wrong codes
+- **THEN** the active code is invalidated after the attempt limit
+- **AND** further failures are rate-limited.
+
+#### Scenario: A paired device is revoked
+- **WHEN** the desktop revokes a device session
+- **THEN** subsequent requests with that device token are rejected
+- **AND** any open event stream for it is closed on the next revalidation.
+
 ### Requirement: Mobile authentication SHALL use the persisted companion settings
 
-The companion token and companion mode saved through the settings API MUST remain the source of truth for `/api/mobile/*` authorization. A process environment token MAY override the stored token for development and packaged bootstrap, but a desktop restart MUST NOT invalidate a stored token, and turning companion mode off MUST stop the stored token from authorizing requests. The snapshot's reported companion mode MUST come from the same saved settings rather than a separate environment variable.
+The companion token and companion mode saved through the settings API MUST remain the source of truth for `/api/mobile/*` authorization. A process environment token MAY override the stored token for development and packaged bootstrap, but a desktop restart MUST NOT invalidate a stored token, and turning companion mode off MUST stop the stored token from authorizing requests. Authorization MUST also accept an unrevoked device session created through pairing; when companion mode is off, neither the stored token nor a device session may authorize. The snapshot's reported companion mode MUST come from the same saved settings rather than a separate environment variable.
 
 #### Scenario: The host restarts with companion mode enabled
 - **WHEN** a mobile client presents the token stored in `app_settings`
@@ -47,7 +66,7 @@ When companion mode is enabled, the desktop MUST NOT expose unauthenticated desk
 
 ### Requirement: Mobile event streaming SHALL be authenticated
 
-The mobile event stream MUST require the same authorization as other `/api/mobile/*` routes. A bearer token MAY be sent directly on the streaming request; when the client cannot send headers, a short-lived (30 seconds) single-use stream token MAY be exchanged for it and MUST be invalid after one use or expiry.
+The mobile event stream MUST require the same authorization as other `/api/mobile/*` routes. A bearer token MAY be sent directly on the streaming request; when the client cannot send headers, a short-lived (30 seconds) single-use stream token MAY be exchanged for it and MUST be invalid after one use or expiry. The stream token MUST bind to the credential that requested it (the persisted token or the paired device token), so rotating that credential or revoking the device invalidates the stream.
 
 #### Scenario: A mobile client subscribes with a bearer token
 - **WHEN** the client opens `/api/mobile/events` with a valid `Authorization` header
@@ -58,7 +77,7 @@ The mobile event stream MUST require the same authorization as other `/api/mobil
 - **THEN** the events endpoint rejects the request with 401.
 
 #### Scenario: The device token is rotated while a stream is open
-- **WHEN** the stored mobile token changes or companion mode is turned off while a client is subscribed
+- **WHEN** the stored mobile token changes, the paired device is revoked, or companion mode is turned off while a client is subscribed
 - **THEN** the open stream is closed on the next revalidation instead of continuing to deliver events.
 
 ### Requirement: Mobile APIs SHALL expose conversation snapshots

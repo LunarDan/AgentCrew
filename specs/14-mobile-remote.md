@@ -167,6 +167,8 @@ device_sessions {
 }
 ```
 
+**实现状态（2026-10-20）**：表已落地（`src/db/schema.ts` / `bootstrap.ts`，`token_hash` 唯一索引），服务在 `src/server/device-sessions.ts`：一设备一 token，DB 只存 sha256；`last_seen_at` 按分钟节流更新；吊销幂等。鉴权同时接受旧的全局 token（`app_settings.mobile_device_token` / env）与未吊销的设备会话，关闭伴随模式后两者都失效。设备名去控制字符并限 64 字符。
+
 ### 5.3 配对流程
 
 P0 同时支持 QR 和手输，QR 是主路径，手输是兜底。
@@ -194,10 +196,11 @@ P0 同时支持 QR 和手输，QR 是主路径，手输是兜底。
 - 错误次数限速；
 - 只暂存内存，不落库。
 
+**实现状态（2026-10-20）**：配对码（6 位数字，`src/server/pairing-codes.ts`）与 `POST /api/mobile/pair` 已实现；桌面设置页「移动端连接」可生成配对码、查看已配对设备并吊销（`POST /api/settings/pairing-code`、`GET/DELETE /api/settings/devices`，写接口带同源校验）。限流为「单码错 5 次作废 + 每分钟最多 20 次失败」，`companion_mode = 'off'` 时拒绝配对。**尚未实现**：QR 图片渲染与手机端扫码 —— 需要摄像头 / 扫码依赖（按 §6.2 先讨论），当前以手输地址 + 配对码为主路径。
+
 ### 5.4 API 鉴权边界
 
 所有 `/api/mobile/*` 必须鉴权，除 `/api/mobile/pair`。
-
 现有桌面 Web API 可以保持 loopback 无鉴权，但 companion mode 打开后，远程访问路径必须走 mobile API 或 middleware 保护后的 API。不要让局域网设备直接调用未鉴权的 `/api/conversations`、`/api/agents`、`/api/settings`。
 
 **实现约束（2026-10-20）**：打包版不要把整个 Next server 绑到 `0.0.0.0` —— 那等于把 `/api/settings`（含明文 provider key 与设备 token）、`/api/conversations` 等全部桌面 API 暴露给同一局域网。`electron/server-bootstrap.ts` 的做法是：Next 固定 `HOSTNAME=127.0.0.1` + 系统分配端口；companion 开启时另起 `0.0.0.0:<companionPort>` 的 HTTP 反向代理，仅放行路径前缀 `/api/mobile/`（含 CORS 预检），其余一律 404。移动端每条路由仍自行校验 Bearer token。
@@ -286,7 +289,7 @@ GET /api/mobile/events?streamToken=<short-lived-token>
 
 `streamToken` 30 秒内有效、一次性，用于 WebView 不支持 fetch streaming 而必须使用 `EventSource` 的平台。token 在签发时绑定当时的设备 token 哈希（内存表里不存设备 token 明文）：消费时要求当前设备 token 与签发时一致，轮换后旧流 token 立即作废；消费失败同样删除，避免反复试错。
 
-**实现状态（2026-10-20）**：`GET /api/mobile/events`（Bearer）与 `POST /api/mobile/stream-token`（30 秒一次性 token，`GET /api/mobile/events?streamToken=...`）已实现。移动端 App 用事件流触发快照刷新（500ms 去抖），同时保留 2–3s 轮询作为 WebView 不支持 fetch streaming 时的兜底。事件流每 15s 心跳时重新读取设置表比对期望 token：轮换 token 或关闭 companion mode 会主动关闭已建立的连接，吊销对长连接同样生效。
+**实现状态（2026-10-20）**：`GET /api/mobile/events`（Bearer）与 `POST /api/mobile/stream-token`（30 秒一次性 token，`GET /api/mobile/events?streamToken=...`）已实现。移动端 App 用事件流触发快照刷新（500ms 去抖），同时保留 2–3s 轮询作为 WebView 不支持 fetch streaming 时的兜底。一次性流 token 绑定的是**请求它时实际使用的凭据**（全局 token 或某台配对设备 token）的哈希，心跳按哈希复核：全局 token 轮换、设备被吊销或关闭 companion mode 都会主动关闭已建立的连接。
 
 **事件负载最小化**：手机侧只需要「有事发生」的信号。事件流只转发 `{ type, conversationId, timestamp }`，不转发原始事件里的 host 绝对路径、文件内容、工具参数与结果（`fs_write.pending.absolutePath`、`tool.call.args` 等）。原始事件只走本机 SSE；手机要详情时走已脱敏的 snapshot / detail 接口。
 
