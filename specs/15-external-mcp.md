@@ -234,7 +234,7 @@ P0 落地时对着工作树逐条核查,发现原稿有四处与代码事实不�
 ### 其他落地细节
 
 - **`${ENV_NAME}` 占位在 run 启动时展开**,不在写入时:DB 只存占位文本,`.env.local` 改了立刻生效,且明文密钥不落库。变量缺失时**带变量名抛错**,让坏 server 在 spawn 前被诊断出来。
-- **MCP 密钥读接口一律脱敏**:`env` / `headers` 只返回 `{ masked: '••••abcd' }` 或 `{ placeholder: 'NAME' }`;更新走**合并**语义(省略=不动,字面=覆盖,`null`=清除)。前端编辑表单**不回填**脱敏预览,避免「改个名字」把密钥写成 `••••abcd`。
+- **MCP 密钥读接口一律脱敏**:`env` / `headers` 只返回 `{ masked: '••••abcd' }` 或 `{ placeholder: 'NAME' }`;更新走**合并**语义(省略=不动,字面=覆盖,`null`=清除)。前端编辑表单**不回填**脱敏预览,避免「改个名字」把密钥写成 `••••abcd`。表单里留空 = **省略字段**,不能发 `null`(那会清空整个 map);只有 transport 变更才顺带丢弃旧 map,删单个 key 用 `KEY=` 形式。
 - **`mcpServerIds` 与 `toolNames` 的规则不同**:SDK adapter 下 `toolNames` 会被强制清空(内置工具集才是它们的工具来源),`mcpServerIds` **必须保留** —— 那正是 SDK agent 拿到用户自选工具的唯一途径。`agent-service.ts` 里这条处理刻意放在 custom/SDK 分支**之外**。
 - **server 名校验**除 `^[a-z0-9_]+$` 外**禁止包含 `__`**:工具名分隔符是 `__`,名字里带它会破坏 `mcp__<server>__<tool>` 的解析。
 - **Codex 的配置翻译**:SDK 的 `config` 是自由格式,会被拍平成点号 TOML(`-c mcp_servers.<n>.command=...`)。**值为 `null` 会抛**,所以可选字段(`env` / `headers`)必须缺省而不是传 `null`。Codex 靠 `command` / `url` 的存在推断传输方式,没有 `type` 字段。

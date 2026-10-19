@@ -35,6 +35,10 @@ Orchestrator 是「特殊 Agent」（详见 Spec 01）：
 
 **蕴含规则**：群聊里有人 @ 时跳过 Orchestrator。用户的显式选择优先于自动调度。
 
+**校验先于落库**：`sendMessage` 在写入 user message 之前就算好 responders。群聊既没有 Orchestrator、也没有**有效** @（被 @ 的 Agent 都不在 `agentIds` 里）时直接抛错，不落库、不广播 —— 否则历史里会留下一条永远没有 run、没有回复的孤儿消息，用户只能看到「发了没人理」。
+
+**待审计划的修订反馈**：`reviseDispatchPlan` 先写反馈消息再交回 pending plan。若计划已被其它客户端批准 / 拒绝 / 修订（`revise` 返回 false），会把刚写入的消息删除并广播 `message.removed`，不让没人消费的反馈留在上下文里。
+
 ---
 
 ## 三阶段工作流
@@ -480,6 +484,8 @@ PLAN → EXECUTE → (有失败/冲突 且未达上限?) → REPLAN(补救) → 
    for each wave:
      Promise.allSettled(ready.map(task => ...))   // 单个子任务抛错时也要等同波次其它子任务收尾
      // 波次结束（含抛错路径，finally）统一清除该波次子 run 的 fileWrites / run evidence 内存记录
+     // 注意：子 run 自己的 finally **不能**清证据 —— 父级在 await 结束后才读它做 report 校验、
+     // project 产物与同波次冲突检测；清理只能由 executeDag 的 finally 负责
      wait global sub-agent semaphore, then AgentRunner.run(subAgent, ..., parentRunId=orchRunId)
      ))
 10. 所有子 run 结束 → AgentRunner 回到 Orchestrator，

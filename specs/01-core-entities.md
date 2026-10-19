@@ -114,6 +114,7 @@ interface Message {
 - 用户消息没有 `runId`，但群聊里用户消息会触发 1 个或多个 `AgentRun`
 - `parentMessageId` 仅用于「引用回复」UI，不影响上下文构建逻辑
 - 错误降级消息的 id 以 `msg_err_` 前缀生成（由 `AgentRunner.emitErrorVisualisation`，用于在对话里显示 run 失败）
+- 用户消息正文上限 `MAX_MESSAGE_CHARS = 12000`（`src/shared/constants.ts`），由 `sendMessage` 统一校验；桌面发送 / 编辑与移动端发送 / 编辑的 zod schema 引用同一常量。service 层校验先于落库，编辑路径先于撤回，避免「撤回成功、发送被拒」留下半个操作
 
 ---
 

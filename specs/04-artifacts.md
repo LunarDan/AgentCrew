@@ -168,6 +168,7 @@ store.previewArtifactId → ArtifactPreviewPanel
 - 上方 tab 切「预览 / 源码」
 - 预览：`<iframe src="/api/artifacts/:id/preview" sandbox="allow-scripts">`（**没有 allow-same-origin**，详见 CLAUDE.md §5.1）
 - 源码：选文件 dropdown + CodeMirror 编辑器（`artifact-code-editor.tsx`，按文件名 / 产物类型选语言，github light/dark 主题，编辑与高亮同一层，不再另走 shiki）
+- 导出（`GET /api/artifacts/:id/export`）：`web_app` 打包成 ZIP。ZIP 条目名来自 `content.files` 的 key，而 key 来自 LLM / 用户输入，**导出时必须做与部署相同的路径校验**（`normalizeDeploymentFilePath`：拒绝绝对路径、`..` 段、`.agenthub`）—— 否则会产出带 `../../` 条目的 zip-slip 包，用不设防的解压工具展开即可写出目标目录。遇到非法 key 直接 400，不静默丢弃内容。
 - `buildIframeHtml`：共享 helper，自动把 `style.css` / `script.js` 注入到 `index.html` 的 `</head>` / `</body>` 前；裸 HTML 片段会自动包成完整 doc
 
 ### 一键预览 URL

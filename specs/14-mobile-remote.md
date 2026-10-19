@@ -288,6 +288,8 @@ GET /api/mobile/events?streamToken=<short-lived-token>
 
 **实现状态（2026-10-20）**：`GET /api/mobile/events`（Bearer）与 `POST /api/mobile/stream-token`（30 秒一次性 token，`GET /api/mobile/events?streamToken=...`）已实现。移动端 App 用事件流触发快照刷新（500ms 去抖），同时保留 2–3s 轮询作为 WebView 不支持 fetch streaming 时的兜底。事件流每 15s 心跳时重新读取设置表比对期望 token：轮换 token 或关闭 companion mode 会主动关闭已建立的连接，吊销对长连接同样生效。
 
+**错误面收敛**：`/api/mobile/*` 的错误响应不得把内部字符串（宿主绝对路径、SQLite 错误、errno）回给局域网设备。`src/server/mobile-errors.ts` 是统一出口：`mobileErrorJson` 只放行 `MobileNotFoundError`，其余记日志后返回 `Internal error` + 500；`mobileUserErrorJson` 额外放行会话服务里用户可理解、可操作的输入错误（撤回非最新消息、内容为空 / 超长、附件不存在等）。写盘审批失败在桌面端仍返回真实原因（便于排查），移动端只回通用文案。
+
 事件流的生命周期必须完整：客户端断开（含反向代理一侧销毁）时通过 `ReadableStream.cancel` 退订 eventBus、停心跳并移除 abort 监听；鉴权是异步的，订阅建立后要再检查一次 `req.signal.aborted`。手机读得慢时按 `controller.desiredSize` 丢弃事件，不让服务端无界缓冲 —— 丢失的增量由重连后的快照补齐。
 
 ### 6.4 操作 API
