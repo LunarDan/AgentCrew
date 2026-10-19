@@ -109,14 +109,29 @@ export function writeFileInWorkspace(
   const absPath = assertPathWithinWorkspace(workspace, target)
 
   if (workspace.mode === 'sandbox') {
+    // 覆盖已有文件时，旧内容会被替换而不是叠加：配额只按增量算。
+    let existingBytes = 0
+    let existingFile = false
+    try {
+      const existing = statSync(absPath)
+      if (existing.isFile()) {
+        existingBytes = existing.size
+        existingFile = true
+      }
+    } catch {
+      // 目标尚不存在
+    }
+    const deltaBytes = bytes - existingBytes
+    const deltaFiles = existingFile ? 0 : 1
+
     const usage = scanWorkspaceUsage(workspace.rootPath)
-    if (usage.bytes + bytes > SANDBOX_TOTAL_BYTES) {
+    if (usage.bytes + deltaBytes > SANDBOX_TOTAL_BYTES) {
       throw new Error(
-        `Workspace quota exceeded (${(usage.bytes / 1024 / 1024).toFixed(1)} MB used + ${(bytes / 1024).toFixed(1)} KB > 100 MB cap)`,
+        `Workspace quota exceeded (${(usage.bytes / 1024 / 1024).toFixed(1)} MB used + ${(deltaBytes / 1024).toFixed(1)} KB > 100 MB cap)`,
       )
     }
-    if (usage.files + 1 > SANDBOX_TOTAL_FILES) {
-      throw new Error(`Workspace file count exceeded (${usage.files} + 1 > 1000 cap)`)
+    if (usage.files + deltaFiles > SANDBOX_TOTAL_FILES) {
+      throw new Error(`Workspace file count exceeded (${usage.files} + ${deltaFiles} > 1000 cap)`)
     }
   }
 
