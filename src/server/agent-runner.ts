@@ -2371,6 +2371,16 @@ function buildAgentHubToolGuidance(
     ])
   }
 
+  if (tools.has('web_fetch')) {
+    add([
+      '### web_fetch',
+      '用途：读取公网 http(s) 页面的文本内容；HTML 原样返回，不转 Markdown。它只抓取指定 URL，不提供搜索。',
+      '正确案例：web_fetch({ url: "https://example.com/docs" })，然后自行从 HTML 中提取正文。',
+      '限制：仅公网 http/https；localhost、内网 IP、云 metadata 地址与 file:// 会被拒绝；单次内容上限 50,000 字符。',
+      '错误案例：用 web_fetch 访问 http://localhost:3000 查看本地服务，或传 file:// 路径。',
+    ])
+  }
+
   if (tools.has('plan_tasks')) {
     add([
       '### plan_tasks',

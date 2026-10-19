@@ -10,6 +10,7 @@ import { readArtifactTool } from './read-artifact'
 import { readAttachmentTool } from './read-attachment'
 import { reportTaskResultTool } from './report-task-result'
 import type { ToolContext, ToolDef, ToolResult } from './types'
+import { webFetchTool } from './web-fetch'
 import { writeArtifactTool } from './write-artifact'
 
 /**
@@ -72,6 +73,7 @@ function buildRegistry(): ToolRegistry {
   reg.register(fsReadTool)
   reg.register(fsWriteTool)
   reg.register(bashTool)
+  reg.register(webFetchTool)
   reg.register(askUserTool)
   return reg
 }
