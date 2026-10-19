@@ -69,7 +69,7 @@ export async function createCustomAgent(args: CreateAgentArgs) {
     apiBaseUrl: args.apiBaseUrl?.trim() || null,
     // SDK adapter 走各自内置工具集，不消费 toolNames；强制空数组避免 UI 残留
     toolNames: adapterName === 'custom' ? args.toolNames : [],
-    // 外部 MCP 不套用上面的规则：SDK adapter 才需要它（custom 的 MCP 客户端是 P1）
+    // 外部 MCP 不套用上面的规则：SDK adapter 与 custom 都会消费它（由 resolver 按 adapter 过滤 transport）
     mcpServerIds: args.mcpServerIds ?? [],
     isBuiltin: false,
     isOrchestrator: false,

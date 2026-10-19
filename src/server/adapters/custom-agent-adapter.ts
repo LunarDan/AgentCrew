@@ -3,10 +3,19 @@ import { readFileSync } from 'node:fs'
 import OpenAI from 'openai'
 
 import { newMessageId } from '@/server/ids'
+import { isToolApproved, waitForMcpToolApproval } from '@/server/mcp-approvals'
 import { toolRegistry } from '@/server/tools/registry'
 import type { ToolContext } from '@/server/tools/types'
 import type { DeployStatusRecord, ModelProvider, StreamEvent } from '@/shared/types'
 
+import {
+  callMcpTool,
+  closeMcpConnections,
+  connectMcpServers,
+  type ConnectedMcpServer,
+  type ConnectMcpServersResult,
+} from './custom-mcp-client'
+import { buildMcpToolTable, type ExposedMcpTool } from './custom-mcp-tools'
 import { resolveCustomProviderClientConfig } from './custom-provider-client'
 import type { AdapterAttachment, AdapterInput, AgentPlatformAdapter } from './types'
 
@@ -41,15 +50,60 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
     if (!input.modelId) {
       throw new Error('CustomAgentAdapter requires modelId')
     }
-    const { modelProvider, supportsVision } = input.customConfig
+
+    // 外部 MCP 连接必须早于 message.start：连接失败只降级为事件，不打断 run（spec 15 §6.4）。
+    const mcp = await connectMcpServers(input.mcpServers ?? [], {
+      signal,
+      workspacePath: input.workspacePath,
+    })
+    try {
+      if (mcp.unavailable.length > 0) {
+        yield baseEvent(input, {
+          type: 'mcp_server.unavailable',
+          runId: input.runId,
+          servers: mcp.unavailable,
+        })
+      }
+      if (signal.aborted) return
+      yield* this.runToolLoop(input, signal, mcp)
+    } finally {
+      // 正常结束 / abort / 抛错都走这里，避免泄漏 stdio 子进程。
+      await closeMcpConnections(mcp.servers)
+    }
+  }
+
+  private async *runToolLoop(
+    input: AdapterInput,
+    signal: AbortSignal,
+    mcp: ConnectMcpServersResult,
+  ): AsyncIterable<StreamEvent> {
+    const customConfig = input.customConfig
+    if (!customConfig) {
+      throw new Error('CustomAgentAdapter requires customConfig')
+    }
+    const { modelProvider, supportsVision } = customConfig
     const modelId = input.modelId
+    if (!modelId) {
+      throw new Error('CustomAgentAdapter requires modelId')
+    }
     const systemPrompt = input.systemPrompt
     const apiKey = input.apiKey
 
     const client = buildClient(modelProvider, apiKey, input.apiBaseUrl)
 
     const toolDefs = toolRegistry.resolve(input.toolNames)
-    const apiTools = toolDefs.map(toApiTool)
+    const mcpToolTable = buildMcpToolTable({
+      servers: input.mcpServers ?? [],
+      toolsByServer: new Map(mcp.servers.map((server) => [server.server.name, server.tools])),
+      reservedNames: toolDefs.map((tool) => tool.name),
+    })
+    const connectionsByName = new Map(
+      mcp.servers.map((connection) => [connection.server.name, connection]),
+    )
+    const apiTools = [
+      ...toolDefs.map(toApiTool),
+      ...mcpToolTable.tools.map(toMcpApiTool),
+    ]
 
     const ctx: ToolContext = {
       conversationId: input.conversationId,
@@ -265,20 +319,34 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
           args,
         })
 
-        const result = await toolRegistry.execute(tc.name, args, ctx)
-        const value = result.ok ? result.value : { error: result.error }
+        const mcpTool = mcpToolTable.byExposedName.get(tc.name)
+        let toolOk: boolean
+        let value: unknown
+        if (mcpTool) {
+          const outcome = await executeMcpTool(mcpTool, args, {
+            input,
+            signal,
+            connection: connectionsByName.get(mcpTool.serverName),
+          })
+          toolOk = outcome.ok
+          value = outcome.value
+        } else {
+          const result = await toolRegistry.execute(tc.name, args, ctx)
+          toolOk = result.ok
+          value = result.ok ? result.value : { error: result.error }
+        }
 
         yield baseEvent(input, {
           type: 'tool.result',
           messageId,
           callId: tc.id,
           result: value,
-          isError: !result.ok,
+          isError: !toolOk,
         })
 
         // 工具结果含 artifactId 视为「创建了产物」的约定，统一由 adapter 发布
         // artifact.create 事件，让上层 AgentRunner 注入 artifact_ref part。
-        if (tc.name === 'write_artifact' && result.ok && hasArtifactId(value)) {
+        if (tc.name === 'write_artifact' && toolOk && hasArtifactId(value)) {
           const artifactId = (value as { artifactId: string }).artifactId
           const { db, schema } = await import('@/db/client')
           const { eq } = await import('drizzle-orm')
@@ -305,7 +373,7 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
 
         if (
           (tc.name === 'deploy_artifact' || tc.name === 'deploy_workspace') &&
-          result.ok &&
+          toolOk &&
           isDeployStatusRecord(value)
         ) {
           yield baseEvent(input, {
@@ -372,6 +440,59 @@ function toApiTool(t: {
       parameters: t.parameters,
     },
   }
+}
+
+function toMcpApiTool(t: ExposedMcpTool): OpenAI.Chat.Completions.ChatCompletionTool {
+  return {
+    type: 'function',
+    function: {
+      name: t.exposedName,
+      description: t.description || `External MCP tool ${t.serverName}/${t.toolName}`,
+      parameters: t.inputSchema,
+    },
+  }
+}
+
+/** 审批门与调用都在这里：被拒 / server 已断开 / 调用失败都变成 isError 结果，不中断 loop。 */
+async function executeMcpTool(
+  tool: ExposedMcpTool,
+  args: unknown,
+  deps: {
+    input: AdapterInput
+    signal: AbortSignal
+    connection: ConnectedMcpServer | undefined
+  },
+): Promise<{ ok: boolean; value: unknown }> {
+  const { input, signal, connection } = deps
+
+  if (tool.trust === 'ask' && !isToolApproved(input.conversationId, tool.exposedName)) {
+    const approved = await waitForMcpToolApproval({
+      conversationId: input.conversationId,
+      agentId: input.agentId,
+      runId: input.runId,
+      serverName: tool.serverName,
+      toolName: tool.exposedName,
+      toolArgs: args,
+      signal,
+    })
+    if (!approved) {
+      return {
+        ok: false,
+        value: {
+          error: `User rejected the external MCP tool call "${tool.exposedName}" (server "${tool.serverName}"). Do not retry it; continue without it or ask the user how to proceed.`,
+        },
+      }
+    }
+  }
+
+  if (!connection) {
+    return {
+      ok: false,
+      value: { error: `External MCP server "${tool.serverName}" is not connected.` },
+    }
+  }
+
+  return callMcpTool(connection, tool.toolName, args, signal)
 }
 
 function hasArtifactId(value: unknown): value is { artifactId: string } {

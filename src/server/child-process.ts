@@ -5,7 +5,7 @@
  * 杀不掉孙进程，必须 taskkill /T；POSIX 上要用进程组（负 pid），依赖 spawn 时
  * `detached: true`。两处都必须用同一份实现，否则总有一处会漏杀。
  */
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 
 import type { Platform } from '@/server/platform'
 
@@ -33,4 +33,56 @@ export function killProcessTree(
     }
   }
   child.kill(signal)
+}
+
+/**
+ * 按 pid 杀进程树。MCP SDK 的 stdio transport 以 `detached: false` 启动，拿不到进程组，
+ * 所以不能复用上面按负 pid 的实现。
+ */
+export function killProcessTreeByPid(
+  pid: number,
+  platform: Platform,
+  signal: NodeJS.Signals = 'SIGTERM',
+): void {
+  if (!Number.isInteger(pid) || pid <= 0) return
+
+  if (platform === 'windows') {
+    const killer = spawn('taskkill', ['/F', '/T', '/PID', String(pid)], { windowsHide: true })
+    killer.on('error', () => {})
+    return
+  }
+
+  const childrenByParent = new Map<number, number[]>()
+  const listed = spawnSync('ps', ['-Ao', 'pid=,ppid='], { encoding: 'utf8' })
+  if (!listed.error && typeof listed.stdout === 'string') {
+    for (const line of listed.stdout.split('\n')) {
+      const [pidText, ppidText] = line.trim().split(/\s+/)
+      const childPid = Number(pidText)
+      const parentPid = Number(ppidText)
+      if (!Number.isInteger(childPid) || !Number.isInteger(parentPid)) continue
+      const siblings = childrenByParent.get(parentPid)
+      if (siblings) siblings.push(childPid)
+      else childrenByParent.set(parentPid, [childPid])
+    }
+  }
+
+  // 先收集后代再由深到浅杀：父进程先退出会让子进程被 reparent，之后 `ps` 就找不到了。
+  const descendants: number[] = []
+  const stack = [pid]
+  while (stack.length > 0) {
+    const current = stack.pop()
+    if (current === undefined) continue
+    for (const childPid of childrenByParent.get(current) ?? []) {
+      descendants.push(childPid)
+      stack.push(childPid)
+    }
+  }
+
+  for (const target of [...descendants.reverse(), pid]) {
+    try {
+      process.kill(target, signal)
+    } catch {
+      // 进程可能已退出；清理是尽力而为。
+    }
+  }
 }

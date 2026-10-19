@@ -61,7 +61,7 @@ L1 Persistence                          src/db/**（Drizzle+SQLite） + workspac
 | 工具系统 | ✅ | write/deploy/read_artifact · read_attachment · fs_read/fs_write/bash · plan_tasks · ask_user |
 | Artifact 预览/编辑 | ✅ | web_app(iframe + preview URL + 本地静态发布/源码包/容器包) / document(md) / image / 版本对比 diff（历史 diff 只读兼容） / **ppt(幻灯片分页预览 + 固定逻辑画布缩放 + 溢出角标 + 完整 theme token + 导出真 .pptx)** · code_file workspace 预览/编辑 · 版本链 v1↔v2 · 选区改写 · 面板内编辑(CodeMirror)→提交新版本 · 导出 |
 | Workspace 沙箱 | ✅ | sandbox/local 双模式 · fs_write 审批(Review/Auto) · 双平台 shell 黑名单（按工具身份识别，Windows 的 `PowerShell` 同样覆盖）· SDK 隔离启动（workspace 的项目设置 / hooks / `.mcp.json` 不参与 run） |
-| 外部 MCP server | ✅ | P0：设置面板登记（stdio/sse/http + 测试连接）+ Agent 勾选 · claude-code/codex 接线 · `ask` 审批门（仅 Claude Code）· ⚠️ **在沙箱与命令黑名单之外运行**（见「关键约定」） |
+| 外部 MCP server | ✅ | P0/P1：设置面板登记（stdio/sse/http + 测试连接）+ Agent 勾选 · claude-code/codex 接线 · custom 自建 MCP client（per-run 连接 + loop 路由）· `ask` 审批门（Claude Code + custom）· ⚠️ **在沙箱与命令黑名单之外运行**（见「关键约定」） |
 | Token 计量 | ✅ | per-run/per-message · cache 命中率 · 全局分析 Tab |
 | 跨 run 对话记忆 | ✅ | 历史序列化注入 · token 预算 · 群聊跨 agent 可见 · 手动压缩 |
 | 平台抽象（Win/POSIX） | ✅ | shell 选择 · 多盘符 DirPicker · 子进程清理 |
@@ -128,7 +128,7 @@ L1 Persistence                          src/db/**（Drizzle+SQLite） + workspac
 | 产物服务 | `artifact-service.ts` · `deployment-service.ts` · `ppt-export.ts` | 产物 CRUD + 版本链（parentArtifactId）· 本地静态发布与下载包 · slides JSON → 真 .pptx（pptxgenjs） |
 | Agent / 附件 / 文件 | `agent-service.ts` · `attachment-service.ts` · `fs-service.ts` | |
 | 审批中转 store | `pending-writes.ts` · `pending-questions.ts` · `pending-mcp-tools.ts` | fs_write 审批 / ask_user / 外部 MCP 工具审批的内存中转 |
-| 外部 MCP server | `mcp-server-service.ts` · `mcp-approvals.ts` | 登记/校验/脱敏 + 按 agent 解析（`${ENV}` 展开）· `trust='ask'` 审批门（`specs/15`） |
+| 外部 MCP server | `mcp-server-service.ts` · `mcp-approvals.ts` · `adapters/custom-mcp-{client,tools}.ts` | 登记/校验/脱敏 + 按 agent 解析（`${ENV}` 展开）· `trust='ask'` 审批门 · custom 的建连/工具表/路由（`specs/15`） |
 | 设置 / Key | `settings-service.ts` | 三层 key 优先级解析 |
 | 安全 / 平台 / 沙箱 | `security.ts`（黑名单 `getBannedPatterns`） · `platform.ts`（shell 选择） · `workspace-utils.ts`（路径校验/配额） | `specs/11` |
 | ID 生成 | `ids.ts` | |
@@ -175,6 +175,7 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 ## 附 · 当前现状（易过时,以代码为准）
 
 ### ✅ 近期完成（最新一批）
+- **外部 MCP 工具接入 P1**（`specs/15`）：custom adapter 自建 MCP 客户端层 —— 每个 `stream()` 并行 connect + listTools（stdio/sse/http）、工具清洗为 `mcp__*` 并合并进 OpenAI function list（内置优先、运行期 Map 路由）、`trust='ask'` 审批门复用现有队列、`mcp_server.unavailable` 上报建连失败、`finally` 关闭连接并杀 stdio 进程树。`CLAUDE.md §5.5` 的审批门适用范围已扩展为 Claude Code + custom
 - **MCP 连接失败可见（F2）**：claude-code adapter 从 SDK init 消息读取 `mcp_servers` 状态，对 `failed` / `needs-auth` / `disabled` 发 `mcp_server.unavailable`；解析阶段与 spawn 阶段失败统一由 AgentRunner 写成会话内一条持久的 `role='system'` 提示（`msg_mcp_<runId>`），点名 server 与状态 —— 此前只有 `console.warn`，用户看到的是「已启用、已勾选、就是没有」。Codex 的 spawn 状态仍无 SDK 信号可读
 - **F1 修复（`partIndex` 归一）**：新增 `src/server/part-slots.ts`，在 `agent-runner.ts` 的 `consumeStream` 入口把适配器的「流内序号」翻译成 `parts` 真实下标 —— 此前 `part.start` 按下标赋值、`tool.call` 按 push 追加，两套写入协议混用会让**工具调用之后到来的文本覆盖 `tool_use` 槽位**（持久化形状变 `["text","tool_result"]`，工具卡片闪现即消失、刷新也不复现）。Runner 从此是唯一索引权威（`specs/02`）；`StreamEvent` 形状不变，客户端零改动。E2E 回归见 `e2e/chat.spec.ts`
 - **PPT 预览/导出一致性修复**：预览改为固定逻辑画布（768×432）+ `transform: scale()` 适配面板，版式不再随面板宽度变形、全屏是真放大；去掉预览侧 7/6/4 与导出侧 8/6/3/4 的条数硬上限（不再静默吃内容），排不下时预览显示「本页内容超出画布，导出会被截断」角标；全屏元素改为整个 deck（翻页/退出按钮随之进入全屏）
@@ -187,8 +188,7 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 - 斜杠命令菜单（`/` 浮层）
 
 ### 📋 待办
-- 外部 MCP P1：custom adapter 的 MCP 客户端层（连接 / listTools / loop 路由 / 清理）
-- 外部 MCP P2：Codex 的审批门、OAuth 鉴权的远程 server、per-conversation 连接池
+- 外部 MCP P2：Codex 的审批门（边界说明 + UI 如实标注）、OAuth 鉴权的远程 server、per-conversation 连接池
 - PPT 深化：辅色语义着色（正面↑ / 警示↓）+ 数据页卡片化
 - 冲突检测盲区：bash / SDK adapter 写入（可加波次快照补全）
 - Codex 写盘审批 hook（当前 Review 模式用 read-only sandbox）
@@ -202,9 +202,9 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 - 改实体字段 → 同步 `specs/01`;改事件 → 同步 `specs/02`;改 Bash 黑名单 → 同步 `specs/11` + `src/server/security.ts`（单一数据源）;改 MCP 支持矩阵 → `src/shared/mcp.ts`。
 - 所有 LLM 调用必带 `AbortSignal`;跨进程输入（API body / LLM 输出）必经 zod 校验;fs/bash 必过 Workspace 沙箱。
 - ⚠️ **SDK adapter 以隔离模式启动**（`settingSources: []` + `strictMcpConfig: true`）：workspace 里的 `.claude/settings.json`、项目 hooks（在宿主执行命令）、`.mcp.json` 都不参与本次 run —— 这是「审批门 + Bash 黑名单」真正生效的前提，少了它一个 JSON 文件就能替 AgentHub 放行工具。代价：项目记忆只剩 `<effectiveCwd>/CLAUDE.md`（上限 50 000 字符）。详见 `CLAUDE.md §5.5`、`specs/11-platform.md`。
-- ⚠️ **外部 MCP server 不在上述沙箱保证内**:它们在 workspace 沙箱与命令黑名单之外运行(stdio 直接 spawn 任意命令);stdio 子进程**继承完整进程环境**,因此能读到 AgentHub 已存的 provider API Key 与内部 token。`trust='ask'` 审批门**只对 Claude Code 生效**。详见 `CLAUDE.md §5.5` 与 `specs/15`。
+- ⚠️ **外部 MCP server 不在上述沙箱保证内**:它们在 workspace 沙箱与命令黑名单之外运行(stdio 直接 spawn 任意命令);stdio 子进程**继承完整进程环境**,因此能读到 AgentHub 已存的 provider API Key 与内部 token。`trust='ask'` 审批门**对 Claude Code 与 custom 生效，对 Codex 不生效**。详见 `CLAUDE.md §5.5` 与 `specs/15`。
 - 完整协作规则见 `CLAUDE.md`。
 
 ---
 
-*最后更新：2026-10-19 · 记入外部 MCP 连接失败可见（F2：`mcp_server.unavailable` + 持久系统提示）。2026-10-18 记入了 shell 工具按身份识别（Windows 上 SDK 的 shell 工具是 `PowerShell`，此前按 `Bash` 字面量匹配导致黑名单与审批分类器整条失效）。2026-10-13 记入了 Claude Code adapter 的隔离启动（`settingSources: []` + `strictMcpConfig: true`）与 F1 修复（`partIndex` 归一，`src/server/part-slots.ts`）及两个相邻未修缺陷（`persistEvent` 空缓冲兜底、claude-code adapter 非流式回退重复渲染）。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*
+*最后更新：2026-10-19 · 记入外部 MCP P1（custom 自建 MCP 客户端 + 审批门扩展到 custom）。同日稍早记入了外部 MCP 连接失败可见（F2：`mcp_server.unavailable` + 持久系统提示）。2026-10-18 记入了 shell 工具按身份识别（Windows 上 SDK 的 shell 工具是 `PowerShell`，此前按 `Bash` 字面量匹配导致黑名单与审批分类器整条失效）。2026-10-13 记入了 Claude Code adapter 的隔离启动（`settingSources: []` + `strictMcpConfig: true`）与 F1 修复（`partIndex` 归一，`src/server/part-slots.ts`）及两个相邻未修缺陷（`persistEvent` 空缓冲兜底、claude-code adapter 非流式回退重复渲染）。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*

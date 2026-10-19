@@ -66,10 +66,14 @@ describe('adapterSupportsTransport', () => {
     expect(adapterSupportsTransport('codex', 'stdio')).toBe(true)
     expect(adapterSupportsTransport('codex', 'http')).toBe(true)
     expect(adapterSupportsTransport('codex', 'sse')).toBe(false)
+
+    // custom uses the MCP SDK's own transports, so it matches Claude Code.
+    expect(adapterSupportsTransport('custom', 'stdio')).toBe(true)
+    expect(adapterSupportsTransport('custom', 'sse')).toBe(true)
+    expect(adapterSupportsTransport('custom', 'http')).toBe(true)
   })
 
-  it('reports no external MCP support for the deferred adapters', () => {
-    expect(adapterSupportsTransport('custom', 'stdio')).toBe(false)
+  it('reports no external MCP support for the mock adapter', () => {
     expect(adapterSupportsTransport('mock', 'stdio')).toBe(false)
   })
 })
