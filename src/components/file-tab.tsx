@@ -47,15 +47,18 @@ export function FileTab({
     setState((s) => ({ ...s, loading: true, error: null }))
     try {
       const result = await workspaceReadFile(conversationId, relPath)
+      const saved = readDraft(conversationId, relPath)
+      const hasDraft = saved !== null && saved !== result.content
       setState({
         loading: false,
         saving: false,
         content: result.content,
-        draft: result.content,
+        draft: hasDraft ? saved : result.content,
         truncated: result.truncated,
         error: null,
         size: result.size,
       })
+      if (hasDraft) setEditing(true)
     } catch (err) {
       setState((s) => ({
         ...s,
@@ -78,6 +81,7 @@ export function FileTab({
     setState((s) => ({ ...s, saving: true, error: null }))
     try {
       await workspaceWriteFile(conversationId, relPath, state.draft)
+      clearDraft(conversationId, relPath)
       setState((s) => ({ ...s, saving: false, content: s.draft }))
       setEditing(false)
     } catch (err) {
@@ -140,6 +144,7 @@ export function FileTab({
             if (editing) {
               // 退出编辑：如果有 dirty 提示丢弃
               if (dirty && !window.confirm('放弃未保存的修改？')) return
+              clearDraft(conversationId, relPath)
               setState((s) => ({ ...s, draft: s.content }))
               setEditing(false)
             } else {
@@ -172,7 +177,11 @@ export function FileTab({
         {editing ? (
           <textarea
             value={state.draft}
-            onChange={(e) => setState((s) => ({ ...s, draft: e.target.value }))}
+            onChange={(e) => {
+              const value = e.target.value
+              setState((s) => ({ ...s, draft: value }))
+              writeDraft(conversationId, relPath, value)
+            }}
             onKeyDown={(e) => {
               if ((e.metaKey || e.ctrlKey) && e.key === 's') {
                 e.preventDefault()
@@ -196,4 +205,33 @@ function guessLanguage(relPath: string): string {
   const ext = relPath.split('.').pop()?.toLowerCase() ?? ''
   // normalizeLang 接受文件扩展名 alias，覆盖大部分场景
   return normalizeLang(ext)
+}
+
+// 草稿按会话 + 路径存本标签页，切换 tab / 重挂载后仍能恢复；保存或放弃时清掉
+function draftKey(conversationId: string, relPath: string): string {
+  return `agenthub:file-draft:${conversationId}:${relPath}`
+}
+
+function readDraft(conversationId: string, relPath: string): string | null {
+  try {
+    return window.sessionStorage.getItem(draftKey(conversationId, relPath))
+  } catch {
+    return null
+  }
+}
+
+function writeDraft(conversationId: string, relPath: string, value: string): void {
+  try {
+    window.sessionStorage.setItem(draftKey(conversationId, relPath), value)
+  } catch {
+    // 存储不可用时退化为仅内存草稿
+  }
+}
+
+function clearDraft(conversationId: string, relPath: string): void {
+  try {
+    window.sessionStorage.removeItem(draftKey(conversationId, relPath))
+  } catch {
+    // ignore
+  }
 }

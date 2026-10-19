@@ -239,7 +239,7 @@ export function ChatPanel() {
       ) : isDiffTabId(activeTab) ? (
         <PendingWriteDiffTab conversationId={conv.id} pendingId={diffTabPendingId(activeTab)} />
       ) : (
-        <FileTab conversationId={conv.id} relPath={activeTab} />
+        <FileTab key={`${conv.id}:${activeTab}`} conversationId={conv.id} relPath={activeTab} />
       )}
 
       <AddAgentDialog
