@@ -58,13 +58,14 @@ function renderSnippetHtml(raw: string): string {
  * Conditional FTS5 quoting:
  * - ends with `*` → pass through (FTS5 prefix matching)
  * - contains `(` → pass through (let FTS5 raise a syntax error we surface as INVALID_QUERY)
- * - contains `-` → wrap in double quotes (otherwise FTS5 reads it as a column-restricted query)
+ * - contains `-` / `:` / `"` → wrap in double quotes（否则 FTS5 会把 `-` 当成 NOT、
+ *   把 `:` 当成列名限定、把引号当成未闭合字符串，普通搜索直接报错）
  * - else → pass through
  */
 function maybeQuote(s: string): string {
   if (s.endsWith('*')) return s
   if (s.includes('(')) return s
-  if (s.includes('-')) return `"${s.replace(/"/g, '""')}"`
+  if (/[-:"]/.test(s)) return `"${s.replace(/"/g, '""')}"`
   return s
 }
 
@@ -125,15 +126,19 @@ function runFtsPath(
     if (err instanceof Error && /no such table: messages_fts/.test(err.message)) {
       return runLikePath(target, q, limit, offset, opts)
     }
-    if (err instanceof Error && (/(?:fts5|SQLITE_ERROR)/.test(err.message))) {
+    // better-sqlite3 的 SqliteError 带 code；FTS5 语法错误一律是 SQLITE_ERROR。
+    // 只靠 message 正则不够：`no such column: http`（查询里带 `:`）不含 fts5 字样。
+    if (
+      err instanceof Error &&
+      ((err as { code?: string }).code === 'SQLITE_ERROR' || /(?:fts5|SQLITE_ERROR)/.test(err.message))
+    ) {
       return { hits: [], total: 0, tookMs: 0, error: 'INVALID_QUERY' }
     }
     throw err
   }
 
-  let total = rows.length
-  if (rows.length > 0) {
-    const countRow = target.prepare(`
+  // 即使本页为空（offset 越过末尾）也要查总数，否则 UI 会显示「0 条」并失去上一页。
+  const countRow = target.prepare(`
       SELECT COUNT(*) AS n FROM messages_fts
       JOIN messages m ON m.rowid = messages_fts.rowid
       WHERE messages_fts MATCH ?
@@ -144,8 +149,7 @@ function runFtsPath(
       opts.conversationId ?? null, opts.conversationId ?? null,
       opts.role ?? null, opts.role ?? null,
     ) as { n: number }
-    total = countRow.n
-  }
+  const total = countRow.n
 
   return {
     hits: rows.map((row) => ({ ...row, snippetHtml: renderSnippetHtml(row.snippetHtml) })),
@@ -190,10 +194,8 @@ function runLikePath(
     limit, offset,
   ) as HitRow[]
 
-  // 分页时 rows.length 只是本页条数；total 必须是匹配总数，否则 UI 的「共 N 条」会随页码变化。
-  let total = 0
-  if (rows.length > 0) {
-    const countRow = target.prepare(`
+  // 同上：本页为空时也要返回匹配总数。
+  const countRow = target.prepare(`
       SELECT COUNT(*) AS n
       FROM messages m
       WHERE m.parts LIKE '%' || ? || '%' ESCAPE '\\'
@@ -204,8 +206,7 @@ function runLikePath(
       opts.conversationId ?? null, opts.conversationId ?? null,
       opts.role ?? null, opts.role ?? null,
     ) as { n: number }
-    total = countRow.n
-  }
+  const total = countRow.n
 
   return {
     hits: rows.map((row) => ({ ...row, snippetHtml: escapeHtml(row.snippetHtml) })),

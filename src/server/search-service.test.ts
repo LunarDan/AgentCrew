@@ -161,6 +161,45 @@ describe('searchMessages (FTS5 path)', () => {
     expect(r.error).toBe('INVALID_QUERY')
   })
 
+  it('reports the full match count when the offset is past the last match', async () => {
+    for (let i = 0; i < 5; i++) {
+      insertMessage(db, `m${i}`, 'c1', 'user', [{ type: 'text', content: 'bulk' }])
+    }
+    const r = await searchMessages({
+      query: 'bulk', limit: 2, offset: 5, db: db as Database.Database,
+    })
+    expect(r.hits.length).toBe(0)
+    expect(r.total).toBe(5)
+  })
+
+  it('LIKE fallback reports the full match count past the last match', async () => {
+    for (let i = 0; i < 5; i++) {
+      insertMessage(db, `m${i}`, 'c1', 'user', [{ type: 'text', content: '共同目标' }])
+    }
+    const r = await searchMessages({
+      query: '共同', fallback: 'like', limit: 2, offset: 5, db: db as Database.Database,
+    })
+    expect(r.hits.length).toBe(0)
+    expect(r.total).toBe(5)
+  })
+
+  it('searches a URL literally instead of treating the colon as a column filter', async () => {
+    insertMessage(db, 'm1', 'c1', 'user', [
+      { type: 'text', content: 'see http://localhost:3000/docs' },
+    ])
+    const r = await searchMessages({
+      query: 'http://localhost:3000', db: db as Database.Database,
+    })
+    expect(r.error).toBeUndefined()
+    expect(r.total).toBe(1)
+  })
+
+  it('treats an unterminated quote as literal text instead of failing FTS5', async () => {
+    const r = await searchMessages({ query: '"search terms', db: db as Database.Database })
+    expect(r.error).toBeUndefined()
+    expect(r.hits).toEqual([])
+  })
+
   it('LIKE fallback matches short Chinese query', async () => {
     insertMessage(db, 'm1', 'c1', 'user', [
       { type: 'text', content: '模型切换问题' },
