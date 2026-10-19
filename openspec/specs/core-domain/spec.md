@@ -51,3 +51,21 @@ Each agent execution MUST create an AgentRun record with trigger message, parent
 - **WHEN** an adapter stream fails
 - **THEN** the AgentRun status becomes `failed`
 - **AND** the user sees an error message in the conversation.
+
+### Requirement: Destructive operations SHALL respect active work and references
+
+Deleting a conversation MUST be rejected while it has queued or running agent runs. Sending a message with attachment ids that do not exist in that conversation MUST be rejected instead of silently dropping them. Deleting a custom agent MUST remove its id from `conversations.agentIds`.
+
+#### Scenario: User deletes a conversation mid-run
+- **WHEN** the conversation has a `queued` or `running` agent run
+- **THEN** deletion fails with a clear error
+- **AND** no rows or workspace files are removed.
+
+#### Scenario: Message references a foreign attachment
+- **WHEN** a send request includes an attachment id from another conversation or an unknown id
+- **THEN** the request is rejected
+- **AND** no user message is inserted.
+
+#### Scenario: User deletes a custom agent used by group chats
+- **WHEN** the agent is removed
+- **THEN** every conversation's `agentIds` no longer contains that id.

@@ -73,7 +73,7 @@ When an agent run successfully writes files into a conversation workspace throug
 - **WHEN** a completed dispatch child run has one or more applied file writes inside the workspace
 - **THEN** the system creates a `project` artifact for that task
 - **AND** publishes an `artifact.create` event for the artifact
-- **AND** does not append an `artifact_ref` message part solely for that system-created project.
+- **AND** appends an `artifact_ref` part to the run's last output message so withdraw / regenerate removes the system-created project together with the message.
 
 #### Scenario: User previews a project artifact
 - **WHEN** a user opens a `project` artifact
@@ -104,9 +104,22 @@ Every artifact created by an agent MUST record the originating conversation and 
 
 ### Requirement: Artifact edits SHALL be append-only
 
-Editing an artifact SHALL create a new artifact version linked to the previous version instead of mutating historical content when edit flows are implemented.
+Editing an artifact SHALL create a new artifact version linked to the previous version instead of mutating historical content when edit flows are implemented. Version assignment and insertion MUST happen in one transaction so concurrent edits cannot produce duplicate version numbers.
 
 #### Scenario: Future edit creates a version
 - **WHEN** an artifact edit flow is implemented
 - **THEN** it creates a new row with `parentArtifactId`
 - **AND** increments `version`.
+
+#### Scenario: Two edits race
+- **WHEN** two edit requests target the same parent artifact concurrently
+- **THEN** each inserted version number is unique (serialized by the SQLite transaction).
+
+### Requirement: Deleting an artifact SHALL remove its local deployments
+
+Deleting an artifact MUST remove local deployment directories whose manifest references that artifact, so a deleted artifact can no longer be previewed or downloaded. Copies published to an external static directory are outside AgentHub's control and are not removed.
+
+#### Scenario: User deletes a deployed artifact
+- **WHEN** `DELETE /api/artifacts/{id}` succeeds
+- **THEN** deployment directories with a matching `manifest.artifactId` are removed from the data directory
+- **AND** other artifacts' deployments are untouched.

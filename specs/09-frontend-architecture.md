@@ -84,7 +84,7 @@ interface AppState {
 | `heartbeat` | 无变更（仅作连接保活信号，由 SSE 端定期发） |
 | `run.start` | `runsByConv[convId][runId] = { ...event, status: 'running', usage: null }` |
 | `run.end` | 更新 run 的 `status` / `finishedAt` / `error`；当 status 为 `failed` / `aborted` 时，把同 run 的 streaming 消息改为 `error` / `aborted`，并为未配对 `tool_result` 的 `tool_use` 补本地错误结果，避免工具卡停在「调用中」 |
-| `run.usage` | 更新 run 的 `usage` 字段（input/output/cache tokens）；派生 hook `useConversationUsageTotal` 据此聚合 |
+| `run.usage` | adapter 每轮发的是**增量**；reducer 把 input/output/cache tokens 累加到 run 的 `usage` 上（`lastInputTokens` / `model` 取最新），与服务端 `agent_runs.usage` 的累计语义一致；派生 hook `useConversationUsageTotal` 据此聚合 |
 | `message.start` | 在 `messages[messageId]` 创建空 parts 的 streaming agent 消息，挂入 `messageIdsByConv` |
 | `message.end` | `messages[messageId].status = 'complete'`；若用户不在该会话（`activeConversationId !== conversationId`）则 `unreadByConv[conversationId] +1`。**不在 message.start 计未读**——claude-code-adapter 整 run 只发一次 message.start，那时用户通常仍在该会话被抑制，后续切走再无 +1 机会 |
 | `part.start` | `messages[messageId].parts[partIndex] = event.part`（按 index 插入，不 push）。**`partIndex` 是服务端归一化后的下标**，前端不做任何索引换算（见 Spec 02「partIndex 的归一化」） |

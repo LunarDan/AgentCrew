@@ -212,7 +212,7 @@ store.previewArtifactId → ArtifactPreviewPanel
 
 `sourceType='artifact'` 的记录来自聊天内 `web_app` artifact；`sourceType='workspace'` 的记录来自本地 workspace 静态输出目录，`artifactId` 使用 `workspace:<workspacePath>` 占位，`version` 固定为 `0`。
 
-若 `app_settings` 配置了外部静态发布目标，`deploy_artifact` / `deploy_workspace` 会额外把公开文件复制到 `<deployment_publish_dir>/<deploymentId>/`，并把 `previewPath` 设为 `deployment_public_base_url + deploymentId + '/'`。这种情况下 `localPreviewPath` 保留本地回退路径，`publishPath` 是实际写入目录。AgentHub 不启动外部托管服务，用户需要让 nginx / Caddy / Tailscale Serve / Pages 同步等服务指向该发布根目录。
+若 `app_settings` 配置了外部静态发布目标，`deploy_artifact` / `deploy_workspace` 会额外把公开文件复制到 `<deployment_publish_dir>/<deploymentId>/`，并把 `previewPath` 设为 `deployment_public_base_url + deploymentId + '/'`。这种情况下 `localPreviewPath` 保留本地回退路径，`publishPath` 是实际写入目录。AgentHub 不启动外部托管服务，用户需要让 nginx / Caddy / Tailscale Serve / Pages 同步等服务指向该发布根目录。复制先写入发布根目录下的临时目录，全部成功后再替换旧目录；复制失败时旧版本保持可用。
 
 `summaryInstruction` 只给 Agent 看，用于约束最终文字总结：本地发布时不得自造公网域名；外部发布时只能引用结构化返回的 `previewPath` / `publicUrl`，不得改写成其它 URL。UI 展示仍以结构化部署卡片为准。
 
@@ -236,7 +236,7 @@ store.previewArtifactId → ArtifactPreviewPanel
 
 `ProjectView`：根据 `artifact.conversationId + content.files[].path` 调 workspace read API 懒加载文件内容，左侧按 `files` 清单构建只读文件树，右侧显示当前文件源码。`project` 正文不入 DB，版本快照只保存文件清单与来源字段（`taskId` / `agentId`）。顶部下载调用 `GET /api/artifacts/:id/export`，服务端在导出时从 workspace 读取仍存在且位于 effective cwd 内的文件并生成 ZIP。
 
-AgentRunner 在普通 run 完成或 dispatch 子任务完成后读取 `dispatch-run-evidence.fileWrites`，用 `absolutePath` 相对化到 workspace effective cwd，去重生成 `files` 清单；清单为空不创建 `project`。该产物不注入 message part，通过 `artifact.create` SSE 进入 store，产物库需要合并 store 中实时 artifact 才能即时显示。
+AgentRunner 在普通 run 完成或 dispatch 子任务完成后读取 `dispatch-run-evidence.fileWrites`，用 `absolutePath` 相对化到 workspace effective cwd，去重生成 `files` 清单；清单为空不创建 `project`。该产物创建后向该 run 最后一条输出消息追加一个 `artifact_ref` part（同时发 `part.start`），这样撤回 / 重新生成删除消息时，自动产物会随消息一起清掉，不会留下孤儿。
 
 ### version compare
 
@@ -288,13 +288,15 @@ AgentRunner 在普通 run 完成或 dispatch 子任务完成后读取 `dispatch-
 
 直接 `DELETE FROM artifacts WHERE id = ?`。**不删除引用该 artifact 的 message 里的 artifact_ref part**（part 仍存，前端 lazy fetch 时 404 显示墓碑）。
 
+删除同时调用 `deleteDeploymentsForArtifact`：扫描 dataDir/deployments 下的 manifest，删掉 `artifactId` 匹配的本地部署目录，避免已删除产物仍能通过预览 / 下载访问。发布到外部静态目录（`deploymentPublishDir`）的副本不受 AgentHub 管理，不在删除范围内。
+
 会话级 cascade：删除 conversation → `artifacts` 表通过 FK `ON DELETE CASCADE` 自动清空。
 
 ---
 
 ## 版本链 + 二次编辑（已实现）
 
-字段：`artifacts.parent_artifact_id` + `version`。新版本 = **新行**，`parentArtifactId` 指向父，`version = parent.version + 1`（不原地改）。
+字段：`artifacts.parent_artifact_id` + `version`。新版本 = **新行**，`parentArtifactId` 指向父，`version = parent.version + 1`（不原地改）。父版本读取与插入在同一个 SQLite 事务里完成，并发提交不会写出重复 `version`。
 
 **三条写新版本的路径**，共用 `buildArtifactContent`（`src/server/artifact-content.ts`）做内容校验/规整（单一来源）：
 

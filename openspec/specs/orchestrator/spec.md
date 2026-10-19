@@ -83,6 +83,16 @@ AgentRunner MUST execute dispatch tasks as a DAG and skip dependent tasks when p
 - **THEN** AgentRunner treats that previous task as a resolved external dependency
 - **AND** validates and executes the remediation plan without requiring the previous task to be repeated in the new plan.
 
+#### Scenario: Handoff result is wrapped by the adapter
+- **WHEN** a child's `write_artifact` tool result carries `artifactId` and `outputKey` inside an adapter wrapper (Claude Code MCP content blocks or Codex `{ result, status }`)
+- **THEN** AgentRunner unwraps arrays of `{ type: 'text', text }` blocks and `result` / `value` / `content` / `output` wrappers
+- **AND** binds the artifact to the declared output key instead of dropping the handoff.
+
+#### Scenario: One task in a parallel wave throws
+- **WHEN** a child task in a concurrent wave rejects while sibling tasks are still running
+- **THEN** AgentRunner waits for every sibling in that wave to settle
+- **AND** releases the wave's in-memory file-write and tool-evidence records before propagating the failure.
+
 ### Requirement: Child task context SHALL include transitive upstream artifacts
 
 AgentRunner MUST include artifact summaries from the full dependency closure in child prompts.

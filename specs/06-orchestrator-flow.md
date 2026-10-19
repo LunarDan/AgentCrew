@@ -384,6 +384,13 @@ expectedOutputs / outputKey:
   如果上游 complete 但没有绑定下游需要的 artifact，依赖该 artifact 的任务会因 required input 缺失而 skipped
   上游任务本身是否 complete 由 report_task_result、acceptanceCriteria、代码验证 evidence、required project output 共同判定
 
+tool.result 里的交接信息（artifactId + outputKey）解析（src/server/artifact-handoff.ts）：
+  不同 adapter 对 MCP / 工具结果的包装不同，解析必须递归解包，否则交接会静默丢失：
+  - Claude Code：result = [{ type: 'text', text: JSON.stringify(value) }]（MCP content blocks）
+  - Codex：result = { result: <原始结果>, status }
+  - 也接受 result / value / content / output 包装对象与 JSON 字符串，最多递归 4 层
+  只有在解包后同时拿到非空 artifactId 与 outputKey 时才建立 outputKey → artifactId 映射
+
 某任务的任一 dependsOn 上游不是 complete:
   不启动该任务，不创建 child AgentRun
   TaskResult.status = 'skipped'
@@ -471,8 +478,9 @@ PLAN → EXECUTE → (有失败/冲突 且未达上限?) → REPLAN(补救) → 
 8. 用户批准后，AgentRunner 重新编译校验用户提交的 plan，发布 dispatch.plan 并进入 Stage 2
 9. AgentRunner.executePlan(...):
    for each wave:
-     Promise.all(ready.map(task =>
-       wait global sub-agent semaphore, then AgentRunner.run(subAgent, ..., parentRunId=orchRunId)
+     Promise.allSettled(ready.map(task => ...))   // 单个子任务抛错时也要等同波次其它子任务收尾
+     // 波次结束（含抛错路径，finally）统一清除该波次子 run 的 fileWrites / run evidence 内存记录
+     wait global sub-agent semaphore, then AgentRunner.run(subAgent, ..., parentRunId=orchRunId)
      ))
 10. 所有子 run 结束 → AgentRunner 回到 Orchestrator，
    把 task_results 作为新一轮 prompt 喂给 Adapter，跑 Stage 3

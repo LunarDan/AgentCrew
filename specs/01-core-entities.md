@@ -48,7 +48,7 @@ type ModelProvider = 'anthropic' | 'openai' | 'deepseek' | 'volcano-ark' | 'open
 - `mcpServerIds` 与 `toolNames` 规则不同：`adapterName` 为 `claude-code` / `codex` 时 `toolNames` 强制 `[]`，但 `mcpServerIds` **保留** —— 这是 SDK agent 拿到用户自选外部工具的途径；默认 `[]`，当前只在 `claude-code` / `codex` 上生效（`custom` 的 MCP 客户端为 P1，见 Spec 15）
 - `apiKey` / `apiBaseUrl` 是 per-agent 凭据：`apiBaseUrl` 非空时，`apiKey` 作为对应 SDK / endpoint 的 token；Claude Code、Codex、Custom openai-compatible 的 Base URL 协议不相同，Chat Completions-only provider 走 Custom adapter
 - `isBuiltin: true` 的 Agent 不可删除但可修改配置（详见 Spec 10）
-- 删除 Agent 不级联删除使用它的 Conversation；前端应展示「已停用 Agent」灰态
+- 删除 Agent 不级联删除使用它的 Conversation；但必须把该 id 从所有 `conversations.agentIds` 中移除，前端不应继续看到死引用
 
 ---
 
@@ -81,6 +81,7 @@ interface Conversation {
 - 群聊里 `isOrchestrator: true` 的 Agent 最多 1 个
 - 创建 Conversation 时自动创建关联的 Workspace（1:1）
 - `pinnedMessageIds` 上限 **5 条**（常量 `PIN_LIMIT_PER_CONVERSATION` 定义在 `src/shared/constants.ts`，service 在超出时抛 `PIN_LIMIT_EXCEEDED`）。被 pin 的消息由 `agent-runner` 在拼 system prompt 时注入 `<pinned_messages>` 块。前端 UI 入口见 spec 09 `PinnedMessagesBar` 与 `MessageItem` 的 📌 按钮
+- 有 `queued` / `running` 的 AgentRun 时拒绝删除会话（同「清空历史」），避免级联删除后仍在运行的 run 写回已删除的行
 
 ---
 
@@ -266,6 +267,8 @@ interface Attachment {
 - 删除 Conversation 级联删除 attachments 行（物理文件随 workspace 目录一起被删）
 - 单会话累计上限：100 MB / 1000 文件（与 workspace 共享配额）
 - 单个 attachment 可被同会话内多条 message 引用，删除 attachment 不删除引用它的 message.parts（前端 lazy fetch 时显示「附件已删除」墓碑）
+- 上传先写 workspace 文件、再插 attachments 行；插库失败时删除已落盘文件，避免孤儿文件
+- `sendMessage` 的 `attachmentIds` 必须全部存在且属于该会话；任一不存在时整个请求失败（不静默丢弃），且不允许落一条没有任何 part 的用户消息
 
 ---
 

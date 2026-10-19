@@ -64,6 +64,16 @@ In review mode, file write effects managed by AgentHub MUST create pending appro
 - **THEN** AgentHub records a pending write
 - **AND** waits for explicit user approval.
 
+### Requirement: Pending approvals SHALL be scoped to their conversation
+
+A pending approval resolved through `/api/conversations/{id}/.../{pendingId}` MUST belong to that conversation. An id from another conversation MUST be treated as not found.
+
+#### Scenario: Pending write id belongs to another conversation
+- **WHEN** a client posts an approval for a pending write / question under conversation A
+- **AND** the pending item's `conversationId` is B
+- **THEN** the route returns 404
+- **AND** the pending item is not applied.
+
 ### Requirement: SDK tool sets SHALL be documented separately
 
 SDK adapters MUST receive their tool set from the adapter/SDK rather than per-agent `toolNames`. This requirement governs **AgentHub-provided** tools only; user-registered external MCP servers are a separate, explicitly opted-in mechanism and MUST NOT be treated as part of the SDK tool set.
