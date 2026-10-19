@@ -1985,13 +1985,26 @@ async function emitErrorVisualisation(
   const errorText = status === 'aborted' ? '[已中止]' : `[失败] ${error ?? '未知错误'}`
   const now = Date.now()
 
-  // 优先：把错误追加到该 run 最近的 agent message（如果存在）
-  const lastMessageId = outputMessageIds[outputMessageIds.length - 1]
+  // 优先：把错误追加到该 run 最近的 agent message（如果存在）。
+  // adapter 中途抛错（例如 abort 让请求 reject）时 outputMessageIds 可能是空的，
+  // 但 run 已经写过 streaming 消息；不回查会再插一条 [已中止]，留下重复气泡。
+  const lastMessageId =
+    outputMessageIds[outputMessageIds.length - 1] ??
+    (
+      await db.query.messages.findFirst({
+        where: eq(schema.messages.runId, runId),
+        orderBy: [desc(schema.messages.createdAt)],
+      })
+    )?.id
   if (lastMessageId) {
     const msg = await db.query.messages.findFirst({
       where: eq(schema.messages.id, lastMessageId),
     })
     if (msg) {
+      const alreadyNoted = msg.parts.some(
+        (part) => part.type === 'text' && part.content === errorText,
+      )
+      if (alreadyNoted) return
       const parts: MessagePart[] = [...msg.parts, { type: 'text', content: errorText }]
       await db.update(schema.messages).set({ parts }).where(eq(schema.messages.id, lastMessageId))
       publish({
