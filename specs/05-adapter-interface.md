@@ -82,7 +82,7 @@ interface AdapterInput {
 
   // 本 run 启用的外部 MCP server（详见 Spec 15）。已由 AgentRunner 在 L3 完成
   // DB 读取 + enabled 过滤 + ${ENV} 展开 —— adapter 只做形状翻译，不读 DB、不展开占位符。
-  // 只有 Claude Code / Codex 两个 SDK adapter 消费；custom / mock 不支持（P1）。
+  // 只有 Claude Code / Codex / custom 三个 adapter 消费；mock 不支持。
   mcpServers?: ResolvedMcpServer[]
 
   // 附件（用户上传的文件/图片）— 用于 multimodal 投递
@@ -127,20 +127,21 @@ interface AdapterInput {
 
 源文件：`src/server/adapters/custom-agent-adapter.ts`
 
-最复杂的 adapter：自己实现 tool loop，覆盖 DeepSeek / OpenAI / 火山方舟 / 通用 OpenAI-compatible provider（其中 Anthropic 仍 TODO）。
+最复杂的 adapter：自己实现 tool loop，覆盖 DeepSeek / OpenAI / 火山方舟 / 通用 OpenAI-compatible provider（走 Chat Completions）与 Anthropic（走 Messages API）。
 
 ### 高层流程
 
 ```
-1. buildClient(provider, apiKey, apiBaseUrl) → OpenAI 兼容 client
+1. buildClient(provider, apiKey, apiBaseUrl) → 客户端
    apiKey 来自 AdapterInput.apiKey（已由 AgentRunner 按四层链解析，
    见下方顶级章节「API key 解析（共四层）」）。
-   provider → baseURL 映射：
-     deepseek    → https://api.deepseek.com/v1
-     volcano-ark → https://ark.cn-beijing.volces.com/api/v3
-     openai      → https://api.openai.com/v1
-     openai-compatible → agent.apiBaseUrl（必填）
-     anthropic   → throw (TODO)
+   provider → 客户端映射：
+     deepseek    → OpenAI 兼容，https://api.deepseek.com/v1
+     volcano-ark → OpenAI 兼容，https://ark.cn-beijing.volces.com/api/v3
+     openai      → OpenAI 兼容，SDK 默认 endpoint
+     openai-compatible → OpenAI 兼容，agent.apiBaseUrl（必填）
+     anthropic   → @anthropic-ai/sdk Messages API，默认 endpoint；
+                   agent.apiBaseUrl 可指向 Anthropic 兼容网关
    
 2. 外部 MCP（`AdapterInput.mcpServers` 非空时，见「外部 MCP server 接线」）:
    custom 自己创建 MCP client（`@modelcontextprotocol/sdk`）:
@@ -205,6 +206,17 @@ DeepSeek 等支持思考链的模型在 stream 中会单独输出 `delta.reasoni
 - agent `supportsVision=false` 或无图片：纯文本字符串（沿用 OpenAI legacy 单字符串 content）
 
 DeepSeek 的多模态模型（`deepseek-v4-flash`）走标准 OpenAI image_url 协议。
+
+### Anthropic Messages API 路径
+
+`provider === 'anthropic'` 时不走 OpenAI client，而是 `runAnthropicToolLoop`（`@anthropic-ai/sdk` 的 `messages.stream`）：
+
+- system prompt 走顶层 `system` 字段；历史（OpenAI ChatMessage）经 `toAnthropicMessages` 只保留 user / assistant 文本，丢弃 system / tool，合并连续同角色，并丢弃开头孤立的 assistant 消息。
+- 工具声明为 `{ name, description, input_schema }`；流式事件 `content_block_start/delta/stop` 映射到现有 `part.start` / `part.delta` / `part.end`（text / thinking）。
+- 工具调用从 `tool_use` block 的 `partial_json` 累加解析；执行后以 `tool_result` block（`tool_use_id` + JSON 字符串，失败带 `is_error`）回传，继续下一轮。
+- `max_tokens` 固定 8192（Agent 实体暂无该字段）；usage 记录 `input_tokens` / `output_tokens` / `cache_read_input_tokens` / `cache_creation_input_tokens`。
+- 图片附件只发送 Anthropic 支持的 `image/jpeg|png|gif|webp`；key 回退顺序 `agent.apiKey → ANTHROPIC_API_KEY → ANTHROPIC_AUTH_TOKEN`。
+- 外部 MCP 工具与 OpenAI 路径共用同一份工具表与执行器（`runToolCall`），审批门行为不变。
 
 ### Artifact / Deploy 注入路径
 
@@ -309,7 +321,7 @@ const result = await toolRegistry.execute(name, args, ctx)
 |---|---|---|---|
 | `claude-code` | — | `anthropicApiKey` | `ANTHROPIC_API_KEY` |
 | `codex` | — | `openaiApiKey` | `CODEX_API_KEY` → `OPENAI_API_KEY` |
-| `custom` | `anthropic` | `anthropicApiKey` | `ANTHROPIC_API_KEY` |
+| `custom` | `anthropic` | `anthropicApiKey` | `ANTHROPIC_API_KEY` → `ANTHROPIC_AUTH_TOKEN` |
 | `custom` | `openai` | `openaiApiKey` | `OPENAI_API_KEY` |
 | `custom` | `deepseek` | `deepseekApiKey` | `DEEPSEEK_API_KEY` |
 | `custom` | `volcano-ark` | `arkApiKey` | `ARK_API_KEY` |
@@ -318,7 +330,7 @@ const result = await toolRegistry.execute(name, args, ctx)
 **`apiBaseUrl` 按 adapter 分协议**：
 - Claude Code：`agent.apiBaseUrl` → `app_settings.anthropicBaseUrl` → `process.env.ANTHROPIC_BASE_URL` → SDK 默认。非空时 ClaudeCodeAdapter 改用 `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL` env 注入（详见 Spec 01 §agents）。
 - Codex：只使用 `agent.apiBaseUrl` → SDK 默认，不读 CC Switch / `~/.codex/config.toml` / 全局 Codex base URL。非空时必须是 Codex/Responses 兼容 endpoint；DeepSeek 等 Chat Completions-only endpoint 会在运行前被拒绝。
-- Custom：命名 provider 使用 adapter 内置默认 base URL；`openai-compatible` provider 必须使用 per-agent `apiBaseUrl`，该 URL 必须是 OpenAI Chat Completions 兼容 endpoint，不是 Codex/Responses endpoint。
+- Custom：命名 provider 使用 adapter 内置默认 base URL；`anthropic` 允许 per-agent `apiBaseUrl` 指向 Messages API 兼容网关；`openai-compatible` provider 必须使用 per-agent `apiBaseUrl`，该 URL 必须是 OpenAI Chat Completions 兼容 endpoint，不是 Codex/Responses endpoint。
 
 **优化点**：`buildAdapterInput` 只在 `agent.apiKey` 为空（或 Claude Code agent 的 `apiBaseUrl` 也为空）时才查 `app_settings`，避免每次构造 input 都打 DB。
 

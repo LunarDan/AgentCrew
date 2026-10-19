@@ -56,7 +56,7 @@
 | `volcano-ark` | 火山方舟 (豆包) | `doubao-seed-2-0-lite-260428` | ✅ 已接（OpenAI-compat） |
 | `openai` | OpenAI | `gpt-4o` | ✅ 已接 |
 | `openai-compatible` | OpenAI-compatible | — | ✅ 已接；要求 per-agent `apiKey` + `apiBaseUrl` |
-| `anthropic` | Anthropic | `claude-opus-4-7` | ❌ buildClient 里 throw（TODO） |
+| `anthropic` | Anthropic | `claude-opus-4-7` | ✅ 已接（`@anthropic-ai/sdk` Messages API）；`apiBaseUrl` 可指向兼容网关 |
 
 **OpenAI-compat 接入说明**：DeepSeek / 火山方舟都对外暴露 OpenAI-compatible Chat Completions API，所以共用 `openai` npm 包 + 改 `baseURL`。通义千问 compatible-mode、智谱、MiniMax、OpenRouter、SiliconFlow、Moonshot 等未内置 provider 应选择 `openai-compatible`，并填写该平台的 Chat Completions Base URL。详见 Spec 05 的「CustomAgentAdapter」一节。
 
@@ -64,7 +64,7 @@
 - `claude-code`：使用 `@anthropic-ai/claude-agent-sdk`，`toolNames=[]`，SDK 内置工具集；Review 模式通过 `canUseTool` 桥到 AgentHub 审批。
 - `codex`：使用 `@openai/codex-sdk`，`toolNames=[]`，SDK 内置本地命令 / 文件变更 / MCP / 计划事件；Review 模式以 read-only sandbox 运行，Auto 模式以 workspace-write sandbox 运行；自定义 Base URL 必须支持 Codex/Responses，DeepSeek 没有 `/responses`，不能走 Codex adapter。
 
-**用户选 Anthropic 会发生什么**：创建 / 编辑成功（DB 行写入），但发消息时 Adapter throw → run 失败 → 错误消息显示在对话里。为防止用户在不知情时踩到，编辑弹窗在 `adapterKind='custom'` 且 `provider='anthropic'` 时显示 amber 警告 banner，提示改用其它 provider 或 Claude Code adapter。真正支持需要接入 `@anthropic-ai/sdk` 的 messages API，仍列为待补功能。
+**Anthropic provider**：创建 / 编辑时可选，运行时由 CustomAgentAdapter 走 Messages API（流式文本、thinking、tool_use / tool_result）。key 回退顺序 `agent.apiKey → ANTHROPIC_API_KEY → ANTHROPIC_AUTH_TOKEN`；`apiBaseUrl` 可填 Anthropic 兼容网关（UI 只在 custom 的 `openai-compatible` 下暴露 Base URL，Anthropic 网关可通过 API 写入）。
 
 ---
 
@@ -252,7 +252,6 @@ zod 校验 body 在每个 route 文件内。
 ## 待补功能 (TODO)
 
 - **自建 Orchestrator**：UI 不能创建带 `isOrchestrator=true` 的 agent；需要 plan_tasks 工具 + 群聊约束
-- **Anthropic 路径实装**：buildClient 不要 throw，接入 `@anthropic-ai/sdk` 的 messages API
 
 ---
 

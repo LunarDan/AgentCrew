@@ -175,6 +175,7 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 ## 附 · 当前现状（易过时,以代码为准）
 
 ### ✅ 近期完成（最新一批）
+- **Custom adapter 支持 Anthropic（2026-10-20）**：`provider='anthropic'` 时走 `@anthropic-ai/sdk` Messages API（`messages.stream`），保留同一套 AgentHub 工具循环——`tool_use` / `tool_result` block、内置与外部 MCP 工具共用执行器、thinking/text 流式 part、缓存 token 用量；历史从 OpenAI ChatMessage 转换（只保留 user/assistant 文本、合并连续同角色）。key 回退 `agent.apiKey → ANTHROPIC_API_KEY → ANTHROPIC_AUTH_TOKEN`，Base URL 可指向兼容网关。已用本机 relay 做真实两轮 tool-loop 验证（模型 `claude-sonnet-4-6`）
 - **Agent 配置导入 / 导出（2026-10-20）**：v1 JSON（`format: agenthub-agent`）由 `src/shared/agent-export.ts` 严格校验（zod `strict`）；导出只含身份 / prompt / adapter / model / 工具 / vision，**永不含** `apiKey` / `apiBaseUrl` / `id` / `mcpServerIds`；导入在 Agent 库触发，校验通过后打开创建弹窗预填，用户补 key 并确认才落库，失败在列表顶部显示可读错误
 - **Agent 头像选择器（2026-10-20）**：创建 / 编辑弹窗的基本信息页新增 emoji 预设（10 个）+ 自定义输入（≤ 8 字符），`PATCH /api/agents/:id` 与服务层同步支持 `avatar`（空串回落到 `🤖`）；此前只能使用 service 默认值。顺带清理 `specs/10` 中两条已过时的 TODO（删除二次确认已实现）
 - **POSIX 子进程清理补 SIGKILL 升级（2026-10-20）**：`killProcessTree` / `killProcessTreeByPid` 在发出 SIGTERM 后 5 秒对同一进程组 / 已收集的 pid 补发 SIGKILL（定时器 `unref()`），覆盖忽略优雅信号的 bash 子进程与 stdio MCP server；Windows 仍由 `taskkill /F /T` 一步强制
@@ -210,4 +211,4 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 
 ---
 
-*最后更新：2026-10-20 · 记入 Agent 配置导入 / 导出、头像选择器、POSIX 子进程 SIGKILL 升级与内置 `web_fetch`（含 SSRF 防护）。同日更早记入了流式可靠性两处修复与 F2 的 live 验证结果。2026-10-19 记入外部 MCP P1（custom 自建 MCP 客户端 + 审批门扩展到 custom）与外部 MCP 连接失败可见（F2：`mcp_server.unavailable` + 持久系统提示）。2026-10-18 记入了 shell 工具按身份识别（Windows 上 SDK 的 shell 工具是 `PowerShell`，此前按 `Bash` 字面量匹配导致黑名单与审批分类器整条失效）。2026-10-13 记入了 Claude Code adapter 的隔离启动（`settingSources: []` + `strictMcpConfig: true`）与 F1 修复（`partIndex` 归一，`src/server/part-slots.ts`）及两个相邻未修缺陷（`persistEvent` 空缓冲兜底、claude-code adapter 非流式回退重复渲染）。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*
+*最后更新：2026-10-20 · 记入 Custom adapter 的 Anthropic Messages API 支持、Agent 配置导入 / 导出、头像选择器、POSIX 子进程 SIGKILL 升级与内置 `web_fetch`（含 SSRF 防护）。同日更早记入了流式可靠性两处修复与 F2 的 live 验证结果。2026-10-19 记入外部 MCP P1（custom 自建 MCP 客户端 + 审批门扩展到 custom）与外部 MCP 连接失败可见（F2：`mcp_server.unavailable` + 持久系统提示）。2026-10-18 记入了 shell 工具按身份识别（Windows 上 SDK 的 shell 工具是 `PowerShell`，此前按 `Bash` 字面量匹配导致黑名单与审批分类器整条失效）。2026-10-13 记入了 Claude Code adapter 的隔离启动（`settingSources: []` + `strictMcpConfig: true`）与 F1 修复（`partIndex` 归一，`src/server/part-slots.ts`）及两个相邻未修缺陷（`persistEvent` 空缓冲兜底、claude-code adapter 非流式回退重复渲染）。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*
