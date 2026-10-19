@@ -267,7 +267,15 @@ app/page.tsx
 
 **挂载兜底请求**：pending writes / bash commands / MCP tools / questions 在面板挂载时 GET 一次兜底，但若该会话的 store 桶已经有条目（说明 SSE 已推来更新的数据），必须跳过这次快照，不能用更旧的响应覆盖。消息首次加载失败时展示错误 + 重试，而不是误显示「还没有消息」。
 
-**404 行为**：artifact lazy fetch 404 → 渲染「产物已删除」墓碑卡片（不在 store 标记 deleted；用组件 local state）。
+**审批成功后本地收敛**：writes / bash / MCP / dispatch plan 的审批 POST 成功后，组件必须立即从对应 store 桶移除该条（dispatch 用 `resolveDispatchReviewLocally`），不能只等 `*.resolved` 或 `dispatch.plan.resolved` 事件。SSE 断线或事件丢失时，卡片会永远停在「处理中」/「待确认」，按钮全部禁用。
+
+**快照与重连语义**：GET 消息快照是权威的 —— 空快照也要删掉本地所有非 `temp_` 且非 `streaming` 的消息（不能用 `createdAt` 兜底把死消息全部保住）。SSE 重连影响所有会话，`resyncNonce` 变化时必须清空整个「已拉取会话」缓存，而不只是当前会话。pending dispatch plan 快照只能清掉**请求发出时本地已存在**的 pending id（在途 SSE 新计划不能被判死）。`ask_user` 弹窗的草稿只随 question id 重置（父级用 key），重连导致的同内容对象重建不能清空用户正在填的答案。
+
+**404 行为**：artifact lazy fetch 404 → 渲染「产物已删除」墓碑卡片（不在 store 标记 deleted；用组件 local state）。非 404 的失败（网络 / 5xx）不能当成删除，渲染可重试的错误卡片。
+
+**会话对象身份不是重载信号**：文件树 / pending 快照等开销较大的 effect 只依赖 `conversation.id`（以及 `resyncNonce`），不能依赖整个 `ConversationWithMeta` —— 改标题、pin、审批模式都会产生新对象，否则会把正在浏览的文件树折叠重拉。
+
+**产物保存后的预览归属**：编辑并提交新版本是异步的，响应回来时只有用户仍停留在这个 artifact（`previewArtifactId` 未变）才切到新版本，不能把已关闭 / 已切走的预览抢回来。
 
 `web_app` artifact 卡、ArtifactPreviewPanel 顶部和 `deploy_status` 卡都提供打开 / 复制预览 URL。URL 由当前 `window.location.origin + previewPath` 生成，避免把 dev 端口或 packaged 随机端口持久化进消息。ready 的本地静态发布卡如果带 `sourceDownloadPath` / `containerDownloadPath`，还展示源码包与容器包下载按钮。`/deploy` slash command 与直接发送 `部署` / `发布` / `上线` 使用同一套确定性部署 API；多个候选时展示 `deploy_candidates` 卡片。
 
