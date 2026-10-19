@@ -143,8 +143,10 @@ UI 当前允许勾选产物、附件和 workspace 相关常用工具。`plan_tas
 |---|---|---|
 | 创建 | UI / API | seed 数据（`src/db/seed.ts`）+ `pnpm db:seed` |
 | 编辑配置 | ✅ | ✅（早期不允许，已开放） |
-| 删除 | ✅ | ❌ service 层 throw `'Built-in agents cannot be deleted'` |
+| 删除 | ✅（仅限从未参与会话 / 产生产物的 Agent） | ❌ service 层 throw `'Built-in agents cannot be deleted'` |
 | `isOrchestrator` | 写死 false | seed 可设 true |
+
+> **删除的外键约束（2026-10-20）**：`messages.agent_id` / `artifacts.created_by_agent_id` / `agent_runs.agent_id` 都引用 `agents.id` 且没有 `ON DELETE` 级联，SQLite `foreign_keys=ON` 会拒绝删除用过的 Agent。UI 必须把这条失败原因显示出来（此前只 `console.error`，用户反复点击无反应）。要让用过的 Agent 可删，需要先定义级联 / 置空语义（属数据模型变更）。
 
 **为什么内置可改但不可删**：用户可能想换 API key / 改 system prompt（合理需求），但内置是「应用预设角色」，删了会破坏 demo 体验。如要重置内置 agent，跑 `pnpm db:seed` 重新种子（seed 脚本是 upsert）。
 
@@ -242,7 +244,9 @@ zod 校验 body 在每个 route 文件内。
 ## 表单 UX 注意点
 
 - **新建 Custom agent 预填 system prompt**：创建态默认填入一段可编辑模板，强调先判断上下文、少而准地用工具、产物走 `write_artifact`、网页完成后 `deploy_artifact`、`fs_write` / `bash` 只在 workspace 范围内必要时使用。用户可直接替换
-- **Provider 切换重置 modelId**：避免 `provider=openai, modelId=deepseek-v4-flash` 这种串味；`openai-compatible` 默认 modelId 为空，强制用户填写目标平台模型名
+- **Provider 切换重置 modelId 与凭据**：避免 `provider=openai, modelId=deepseek-v4-flash` 这种串味；`openai-compatible` 默认 modelId 为空，强制用户填写目标平台模型名。同时清空 apiKey / apiBaseUrl —— 旧 provider 的 key 与 endpoint 在新 provider 下一定不可用（曾导致 anthropic 请求被发到 OpenAI-compatible Base URL）
+- **Base URL 格式校验**：`openai-compatible` / `codex` 有各自校验；`claude-code` 与 custom `anthropic` 用 `src/shared/endpoint-url.ts` 校验必须是完整的 http(s) URL，避免把 `anyrouter.top` 这类缺协议的值存进库、到运行时才报错
+- **name / description 输入带上限**（64 / 280）：与 API zod schema 一致，避免必然 400 的提交
 - **API key 输入是 password 类型 + autocomplete=off**：防止浏览器把它存进 form autofill
 - **错误提示就近显示**：submit 失败时在 footer 上方显示 inline red banner，不用 toast
 - **打开 / 切换 agent 时 reset 表单**：用 `useEffect([open, agent])` 重置 state，避免编辑 A 后切到编辑 B 时残留 A 的输入
