@@ -101,6 +101,7 @@ export async function deleteCustomAgent(agentId: string): Promise<void> {
 
 export interface UpdateAgentPatch {
   name?: string
+  avatar?: string
   description?: string
   capabilities?: string[]
   systemPrompt?: string
@@ -143,6 +144,7 @@ export async function updateCustomAgent(agentId: string, patch: UpdateAgentPatch
   }
 
   if (patch.name !== undefined) updates.name = patch.name.trim()
+  if (patch.avatar !== undefined) updates.avatar = patch.avatar.trim() || '🤖'
   if (patch.description !== undefined) updates.description = patch.description.trim()
   if (patch.capabilities !== undefined) updates.capabilities = patch.capabilities
   if (patch.systemPrompt !== undefined) updates.systemPrompt = patch.systemPrompt

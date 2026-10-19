@@ -10,6 +10,7 @@ interface RouteContext {
 const PatchBody = z
   .object({
     name: z.string().min(1).max(64).optional(),
+    avatar: z.string().max(8).optional(),
     description: z.string().min(1).max(280).optional(),
     capabilities: z.array(z.string()).optional(),
     systemPrompt: z.string().min(1).optional(),

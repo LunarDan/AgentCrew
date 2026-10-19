@@ -50,6 +50,9 @@ import { useAppStore } from '@/stores/app-store'
 type AgentTab = 'basic' | 'model' | 'toolsPrompt'
 type CreateStep = 'choose' | 'wizard' | 'detail'
 
+const AVATAR_PRESETS = ['🤖', '🧠', '🛠️', '🔍', '✍️', '📊', '🎨', '🚀', '🧪', '📦'] as const
+const DEFAULT_AVATAR = '🤖'
+
 const DEFAULT_CUSTOM_SYSTEM_PROMPT = `你是一个 AgentHub custom agent。你的任务是理解用户目标，使用已启用的工具完成工作，并把结果清晰交付给用户。
 
 工作原则：
@@ -79,6 +82,7 @@ export function CreateAgentDialog({
   const isEdit = !!agent
 
   const [name, setName] = useState('')
+  const [avatar, setAvatar] = useState(DEFAULT_AVATAR)
   const [description, setDescription] = useState('')
   const [capabilitiesText, setCapabilitiesText] = useState('')
   const [systemPrompt, setSystemPrompt] = useState('')
@@ -109,6 +113,7 @@ export function CreateAgentDialog({
             : 'custom'
       setAdapterKind(kind)
       setName(agent.name)
+      setAvatar(agent.avatar || DEFAULT_AVATAR)
       setDescription(agent.description)
       setCapabilitiesText(agent.capabilities.join(', '))
       setSystemPrompt(agent.systemPrompt)
@@ -130,6 +135,7 @@ export function CreateAgentDialog({
     } else {
       setAdapterKind('custom')
       setName('')
+      setAvatar(DEFAULT_AVATAR)
       setDescription('')
       setCapabilitiesText('')
       setSystemPrompt(DEFAULT_CUSTOM_SYSTEM_PROMPT)
@@ -205,6 +211,7 @@ export function CreateAgentDialog({
     const p = draft.modelProvider ?? 'deepseek'
     setAdapterKind(kind)
     setName(draft.name)
+    setAvatar(draft.avatar || DEFAULT_AVATAR)
     setDescription(draft.description)
     setCapabilitiesText(draft.capabilities.join(', '))
     setSystemPrompt(draft.systemPrompt)
@@ -300,6 +307,7 @@ export function CreateAgentDialog({
       if (isEdit && agent) {
         const patch: UpdateAgentBody = {
           name: trimmed,
+          avatar: avatar.trim() || DEFAULT_AVATAR,
           description: description.trim(),
           capabilities,
           systemPrompt: systemPrompt.trim(),
@@ -317,7 +325,7 @@ export function CreateAgentDialog({
       } else {
         const body: CreateAgentBody = {
           name: trimmed,
-          avatar: '',
+          avatar: avatar.trim() || DEFAULT_AVATAR,
           description: description.trim(),
           capabilities,
           systemPrompt: systemPrompt.trim(),
@@ -401,6 +409,35 @@ export function CreateAgentDialog({
 
             <div className="min-h-0 flex-1 overflow-y-auto pr-1">
               <TabsContent value="basic" className="mt-0 space-y-3 py-1">
+                <div className="grid grid-cols-[80px_1fr] items-start gap-3">
+                  <Label>头像</Label>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {AVATAR_PRESETS.map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        aria-label={`使用 ${emoji} 作为头像`}
+                        aria-pressed={avatar === emoji}
+                        onClick={() => setAvatar(emoji)}
+                        className={cn(
+                          'flex size-8 items-center justify-center rounded-md border text-lg transition hover:border-foreground/30',
+                          avatar === emoji && 'border-primary bg-primary/5',
+                        )}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                    <Input
+                      value={avatar}
+                      onChange={(e) => setAvatar(e.target.value.slice(0, 8))}
+                      placeholder={DEFAULT_AVATAR}
+                      maxLength={8}
+                      aria-label="自定义头像"
+                      className="w-24"
+                    />
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-[80px_1fr] items-start gap-3">
                   <Label required>名称</Label>
                   <Input

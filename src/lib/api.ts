@@ -93,7 +93,7 @@ export async function createAgentDraft(body: AgentDraftRequest): Promise<AgentCo
 }
 
 export type UpdateAgentBody = Partial<
-  Omit<CreateAgentBody, 'avatar' | 'apiKey' | 'apiBaseUrl' | 'modelId'>
+  Omit<CreateAgentBody, 'apiKey' | 'apiBaseUrl' | 'modelId'>
 > & {
   // SDK adapter 可用 null 清空，表示走 SDK 默认模型；custom 仍必须有非空 modelId
   modelId?: string | null
