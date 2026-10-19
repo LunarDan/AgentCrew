@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server'
 
 import { mobileJson, mobileOptions } from '@/server/mobile-cors'
+import { mobileErrorJson } from '@/server/mobile-errors'
 import { requireMobileAuth } from '@/server/mobile-auth'
 import { getMobileConversationDetail } from '@/server/mobile-service'
 
@@ -18,7 +19,6 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
   try {
     return mobileJson(req, await getMobileConversationDetail(id))
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    return mobileJson(req, { error: message }, { status: 404 })
+    return mobileErrorJson(req, err, 'conversation detail')
   }
 }

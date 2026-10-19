@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server'
 
 import { mobileJson, mobileOptions } from '@/server/mobile-cors'
+import { mobileErrorJson } from '@/server/mobile-errors'
 import { requireMobileAuth } from '@/server/mobile-auth'
 import { getMobileSnapshot } from '@/server/mobile-service'
 
@@ -10,6 +11,9 @@ export async function GET(req: NextRequest) {
   const authError = await requireMobileAuth(req)
   if (authError) return authError
 
-  const snapshot = await getMobileSnapshot()
-  return mobileJson(req, snapshot)
+  try {
+    return mobileJson(req, await getMobileSnapshot())
+  } catch (err) {
+    return mobileErrorJson(req, err, 'snapshot')
+  }
 }

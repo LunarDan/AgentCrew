@@ -21,5 +21,7 @@ export async function GET(req: NextRequest) {
     }),
     companionMode: settings.companionMode,
     mobileDeviceTokenConfigured: !!settings.mobileDeviceToken,
+    // Electron 主进程监听 0.0.0.0:companionPort 失败时写入；否则手机连不上而设置页仍展示地址。
+    companionProxyError: process.env.AGENTHUB_COMPANION_PROXY_ERROR ?? null,
   })
 }

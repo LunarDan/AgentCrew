@@ -81,6 +81,7 @@ export function SettingsDialog({
   const [saveError, setSaveError] = useState<string | null>(null)
   const [reloadNonce, setReloadNonce] = useState(0)
   const [connectionHints, setConnectionHints] = useState<ConnectionHint[]>([])
+  const [companionProxyError, setCompanionProxyError] = useState<string | null>(null)
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null)
   const [tab, setTab] = useState('keys')
   const [form, setForm] = useState<SettingsForm>({
@@ -148,8 +149,11 @@ export function SettingsDialog({
         if (!cancelled) setHintsLoading(true)
         return fetchConnectionHints()
       })
-      .then((hints) => {
-        if (!cancelled) setConnectionHints(hints)
+      .then((result) => {
+        if (!cancelled) {
+          setConnectionHints(result.hints)
+          setCompanionProxyError(result.companionProxyError)
+        }
       })
       .catch((err) => console.error('[SettingsDialog] load connection hints failed', err))
       .finally(() => {
@@ -218,7 +222,9 @@ export function SettingsDialog({
         mobileDeviceToken: form.mobileDeviceToken.trim() || null,
       })
       setForm((prev) => ({ ...prev, ...companionFormPatch(next) }))
-      setConnectionHints(await fetchConnectionHints())
+      const hints = await fetchConnectionHints()
+      setConnectionHints(hints.hints)
+      setCompanionProxyError(hints.companionProxyError)
       setRestartRequired(true)
     } catch (err) {
       console.error('[SettingsDialog] enable companion failed', err)
@@ -233,7 +239,9 @@ export function SettingsDialog({
     try {
       const next = await updateAppSettings({ companionMode: 'off' })
       setForm((prev) => ({ ...prev, ...companionFormPatch(next) }))
-      setConnectionHints(await fetchConnectionHints())
+      const hints = await fetchConnectionHints()
+      setConnectionHints(hints.hints)
+      setCompanionProxyError(hints.companionProxyError)
       setRestartRequired(true)
     } catch (err) {
       console.error('[SettingsDialog] disable companion failed', err)
@@ -368,6 +376,7 @@ export function SettingsDialog({
                   busy={busy}
                   tokenBusy={tokenBusy}
                   restartRequired={restartRequired}
+                  companionProxyError={companionProxyError}
                   onCopy={(hint) => void handleCopyHint(hint)}
                   onCopyText={(value) => void handleCopyText(value)}
                   onEnable={() => void handleEnableCompanion()}
@@ -427,6 +436,7 @@ function MobileConnectionHints({
   busy,
   tokenBusy,
   restartRequired,
+  companionProxyError,
   onCopy,
   onCopyText,
   onEnable,
@@ -441,6 +451,7 @@ function MobileConnectionHints({
   busy: boolean
   tokenBusy: boolean
   restartRequired: boolean
+  companionProxyError: string | null
   onCopy: (hint: ConnectionHint) => void
   onCopyText: (value: string) => void
   onEnable: () => void
@@ -481,6 +492,18 @@ function MobileConnectionHints({
                 <p className="text-xs font-semibold">请重启桌面端 App</p>
                 <p className="mt-1 text-[11px] leading-4">
                   开启或关闭移动端连接后，监听地址需要重启后才会生效。
+                </p>
+              </div>
+            </div>
+          )}
+
+          {enabled && companionProxyError && (
+            <div className="flex gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-2 py-2 text-destructive">
+              <AlertTriangle className="mt-0.5 size-4 flex-none" />
+              <div className="min-w-0">
+                <p className="text-xs font-semibold">移动端代理未启动</p>
+                <p className="mt-1 text-[11px] leading-4">
+                  手机当前无法连接。{companionProxyError}。请关闭占用该端口的程序后重启桌面端。
                 </p>
               </div>
             </div>

@@ -20,6 +20,8 @@ export function isCompanionProxyPath(rawUrl: string | undefined): boolean {
   } catch {
     return false
   }
+  // 编码过的反斜杠（%5C）解码后不是合法 URL 路径；Windows 上 path.posix 也不会归一化它。
+  if (decoded.includes('\\')) return false
   const normalized = path.posix.normalize(decoded)
   if (normalized !== decoded) return false
   return normalized.startsWith(COMPANION_ROUTE_PREFIX)

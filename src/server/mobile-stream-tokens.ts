@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 
 /**
  * 一次性的移动端事件流 token（specs/14-mobile-remote.md §6.3 fallback）。
@@ -9,37 +9,58 @@ import { randomBytes } from 'node:crypto'
 
 export const MOBILE_STREAM_TOKEN_TTL_MS = 30_000
 
-const globalForTokens = globalThis as unknown as {
-  __agenthubMobileStreamTokens?: Map<string, number>
+interface StreamTokenEntry {
+  expiresAt: number
+  /** 签发时设备 token 的哈希；取值落在 URL 上，不能把设备 token 明文留在内存表里 */
+  deviceTokenHash: string
 }
 
-const tokens = globalForTokens.__agenthubMobileStreamTokens ?? new Map<string, number>()
+const globalForTokens = globalThis as unknown as {
+  __agenthubMobileStreamTokens?: Map<string, StreamTokenEntry>
+}
+
+const tokens = globalForTokens.__agenthubMobileStreamTokens ?? new Map<string, StreamTokenEntry>()
 if (!globalForTokens.__agenthubMobileStreamTokens) {
   globalForTokens.__agenthubMobileStreamTokens = tokens
 }
 
-export function issueMobileStreamToken(now = Date.now()): string {
+export function issueMobileStreamToken(deviceToken: string, now = Date.now()): string {
   pruneExpired(now)
   const token = randomBytes(24).toString('base64url')
-  tokens.set(token, now + MOBILE_STREAM_TOKEN_TTL_MS)
+  tokens.set(token, {
+    expiresAt: now + MOBILE_STREAM_TOKEN_TTL_MS,
+    deviceTokenHash: hashDeviceToken(deviceToken),
+  })
   return token
 }
 
-/** 一次性：校验通过立即删除，重复使用失败。 */
-export function consumeMobileStreamToken(token: string, now = Date.now()): boolean {
+/**
+ * 一次性：校验通过立即删除，重复使用失败。
+ * 同时要求设备 token 与签发时一致，token 轮换后旧流 token 立即作废。
+ */
+export function consumeMobileStreamToken(
+  token: string,
+  currentDeviceToken: string,
+  now = Date.now(),
+): boolean {
   pruneExpired(now)
-  const expiresAt = tokens.get(token)
-  if (expiresAt === undefined) return false
+  const entry = tokens.get(token)
+  if (entry === undefined) return false
   tokens.delete(token)
-  return expiresAt > now
+  if (entry.expiresAt <= now) return false
+  return entry.deviceTokenHash === hashDeviceToken(currentDeviceToken)
 }
 
 export function clearMobileStreamTokensForTest(): void {
   tokens.clear()
 }
 
+function hashDeviceToken(deviceToken: string): string {
+  return createHash('sha256').update(deviceToken).digest('hex')
+}
+
 function pruneExpired(now: number): void {
-  for (const [token, expiresAt] of tokens) {
-    if (expiresAt <= now) tokens.delete(token)
+  for (const [token, entry] of tokens) {
+    if (entry.expiresAt <= now) tokens.delete(token)
   }
 }

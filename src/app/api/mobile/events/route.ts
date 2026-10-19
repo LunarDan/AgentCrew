@@ -17,7 +17,9 @@ export const OPTIONS = mobileOptions
 export async function GET(req: NextRequest) {
   const streamToken = req.nextUrl.searchParams.get('streamToken')
   if (streamToken) {
-    if (!consumeMobileStreamToken(streamToken)) {
+    // 流 token 与设备 token 绑定：轮换后旧 token 直接判废。
+    const expected = await getExpectedMobileToken()
+    if (!expected || !consumeMobileStreamToken(streamToken, expected)) {
       return mobileJson(req, { error: 'Invalid or expired stream token' }, { status: 401 })
     }
   } else {
@@ -32,41 +34,53 @@ export async function GET(req: NextRequest) {
   }
 
   const encoder = new TextEncoder()
+  // start 里创建，cancel 在别的闭包里调用：通过它退订，避免客户端断开后订阅泄漏。
+  let closeStream: (() => void) | undefined
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       let closed = false
-
-      const send = (data: unknown) => {
-        if (closed) return
-        try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
-        } catch {
-          // 控制器已关闭，忽略
-        }
-      }
-
-      send({ type: 'connected', timestamp: Date.now() })
-
-      const unsubscribe = eventBus.subscribe((event) => {
-        send(event)
-      })
+      // close 在 send / 心跳里互引；用可变 holder 避免 TDZ，也让清理函数始终拿到最新句柄。
+      const handles: {
+        heartbeat?: ReturnType<typeof setInterval>
+        unsubscribe?: () => void
+      } = {}
 
       const close = () => {
         if (closed) return
         closed = true
-        clearInterval(heartbeat)
-        unsubscribe()
+        if (handles.heartbeat !== undefined) clearInterval(handles.heartbeat)
+        handles.unsubscribe?.()
+        req.signal.removeEventListener('abort', close)
         try {
           controller.close()
         } catch {
           // 已关闭
         }
       }
+      closeStream = close
+
+      const send = (data: unknown) => {
+        if (closed) return
+        // 手机侧读得慢时不要无限堆内存；丢事件由重连后的快照兜底。
+        if (controller.desiredSize !== null && controller.desiredSize <= 0) return
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
+        } catch {
+          // 控制器已关闭
+          close()
+        }
+      }
+
+      send({ type: 'connected', timestamp: Date.now() })
+
+      handles.unsubscribe = eventBus.subscribe((event) => {
+        send(event)
+      })
 
       let revalidating = false
-      const heartbeat = setInterval(() => {
-        if (revalidating) return
+      handles.heartbeat = setInterval(() => {
+        if (closed || revalidating) return
         revalidating = true
         void getExpectedMobileToken()
           .then((current) => {
@@ -83,6 +97,12 @@ export async function GET(req: NextRequest) {
       }, 15000)
 
       req.signal.addEventListener('abort', close)
+
+      // 上面的鉴权读是异步的，期间客户端可能已经断开。
+      if (req.signal.aborted) close()
+    },
+    cancel() {
+      closeStream?.()
     },
   })
 

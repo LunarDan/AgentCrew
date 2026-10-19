@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server'
 
 import { mobileJson, mobileOptions } from '@/server/mobile-cors'
+import { mobileErrorJson } from '@/server/mobile-errors'
 import { requireMobileAuth } from '@/server/mobile-auth'
 import { abortRun } from '@/server/conversation-service'
 
@@ -16,9 +17,13 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   if (authError) return authError
 
   const { id } = await ctx.params
-  const ok = await abortRun(id)
-  if (!ok) {
-    return mobileJson(req, { error: 'Run not found or already finished' }, { status: 404 })
+  try {
+    const ok = await abortRun(id)
+    if (!ok) {
+      return mobileJson(req, { error: 'Run not found or already finished' }, { status: 404 })
+    }
+    return mobileJson(req, { ok: true })
+  } catch (err) {
+    return mobileErrorJson(req, err, 'abort run')
   }
-  return mobileJson(req, { ok: true })
 }

@@ -11,6 +11,7 @@ import {
   sendMessage,
   withdrawLatestUserMessage,
 } from '@/server/conversation-service'
+import { MobileNotFoundError } from '@/server/mobile-errors'
 import { pendingQuestions } from '@/server/pending-questions'
 import { pendingWrites } from '@/server/pending-writes'
 import { getAppSettings } from '@/server/settings-service'
@@ -194,7 +195,7 @@ export async function getMobileConversationDetail(
 ): Promise<MobileConversationDetail> {
   const conversations = await listConversations()
   const conversation = conversations.find((item) => item.id === conversationId)
-  if (!conversation) throw new Error(`Conversation not found: ${conversationId}`)
+  if (!conversation) throw new MobileNotFoundError(`Conversation not found: ${conversationId}`)
 
   const [messages, runningRuns] = await Promise.all([
     listMessages(conversationId),
@@ -231,7 +232,7 @@ export async function getMobileArtifact(artifactId: string): Promise<MobileArtif
   const artifact = await db.query.artifacts.findFirst({
     where: eq(schema.artifacts.id, artifactId),
   })
-  if (!artifact) throw new Error(`Artifact not found: ${artifactId}`)
+  if (!artifact) throw new MobileNotFoundError(`Artifact not found: ${artifactId}`)
 
   return {
     id: artifact.id,

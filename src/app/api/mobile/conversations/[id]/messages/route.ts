@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server'
 import { z } from 'zod'
 
 import { mobileJson, mobileOptions } from '@/server/mobile-cors'
+import { mobileErrorJson } from '@/server/mobile-errors'
 import { requireMobileAuth } from '@/server/mobile-auth'
 import { sendMobileMessage } from '@/server/mobile-service'
 
@@ -37,6 +38,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     return mobileJson(req, result, { status: 202 })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    return mobileJson(req, { error: message }, { status: 400 })
+    // 客户端可自行修正的输入错误仍回 400；其余（DB、内部不变量）只回通用 500。
+    if (message.startsWith('Conversation not found')) {
+      return mobileJson(req, { error: message }, { status: 400 })
+    }
+    return mobileErrorJson(req, err, 'send message')
   }
 }

@@ -53,7 +53,12 @@ export async function startEmbeddedServer(): Promise<number> {
   require(standaloneEntry)
 
   await waitUntilReady(`http://127.0.0.1:${port}/`)
-  if (enabled) startCompanionProxy(companion.companionPort, port)
+  if (enabled) {
+    const proxy = await startCompanionProxy(companion.companionPort, port)
+    // 代理没起来时设置页仍会展示 LAN 地址；把失败原因带进渲染进程，让用户看见。
+    if (proxy.ok) delete process.env.AGENTHUB_COMPANION_PROXY_ERROR
+    else process.env.AGENTHUB_COMPANION_PROXY_ERROR = proxy.reason
+  }
   return port
 }
 
@@ -61,38 +66,70 @@ export async function startEmbeddedServer(): Promise<number> {
  * 0.0.0.0:<companionPort> → 127.0.0.1:<appPort> 的反向代理，只放行 `/api/mobile/*`。
  * 鉴权仍由每条移动端路由的 `requireMobileAuth` 完成（Bearer token）。
  */
-function startCompanionProxy(listenPort: number, targetPort: number): void {
-  const server = createHttpServer((req, res) => {
-    if (!isCompanionProxyPath(req.url)) {
-      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
-      res.end('Not found')
-      return
+function startCompanionProxy(
+  listenPort: number,
+  targetPort: number,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  return new Promise((resolve) => {
+    const server = createHttpServer((req, res) => {
+      if (!isCompanionProxyPath(req.url)) {
+        res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+        res.end('Not found')
+        return
+      }
+
+      const upstream = httpRequest(
+        {
+          host: '127.0.0.1',
+          port: targetPort,
+          method: req.method,
+          path: req.url,
+          headers: { ...req.headers, host: `127.0.0.1:${targetPort}` },
+        },
+        (upstreamRes) => {
+          res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers)
+          // pipe 只在目标关闭时 unpiple，不会销毁源；显式双向拆除，否则手机断线后
+          // SSE 的 upstream 请求永远不结束，events 路由的订阅与心跳会一直泄漏。
+          upstreamRes.on('error', () => res.destroy())
+          upstreamRes.pipe(res)
+        },
+      )
+      upstream.on('error', () => {
+        if (!res.headersSent) {
+          res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' })
+          res.end('Bad gateway')
+        } else {
+          res.destroy()
+        }
+      })
+      req.on('aborted', () => upstream.destroy())
+      res.on('close', () => {
+        if (!res.writableEnded) upstream.destroy()
+      })
+      req.pipe(upstream)
+    })
+
+    let settled = false
+    const settle = (result: { ok: true } | { ok: false; reason: string }) => {
+      if (settled) return
+      settled = true
+      resolve(result)
     }
 
-    const upstream = httpRequest(
-      {
-        host: '127.0.0.1',
-        port: targetPort,
-        method: req.method,
-        path: req.url,
-        headers: { ...req.headers, host: `127.0.0.1:${targetPort}` },
-      },
-      (upstreamRes) => {
-        res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers)
-        upstreamRes.pipe(res)
-      },
-    )
-    upstream.on('error', () => {
-      if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' })
-      res.end('Bad gateway')
+    // 常驻监听：listen 之后若再出错也不能变成未捕获的 'error' 事件。
+    server.on('error', (err: NodeJS.ErrnoException) => {
+      console.error(`[companion] proxy error on 0.0.0.0:${listenPort}`, err)
+      const reason =
+        err.code === 'EADDRINUSE'
+          ? `端口 ${listenPort} 已被占用（伴随模式无法监听）`
+          : `伴随模式监听失败：${err.message}`
+      settle({ ok: false, reason })
     })
-    req.pipe(upstream)
+    server.listen(listenPort, '0.0.0.0', () => {
+      server.unref()
+      settle({ ok: true })
+    })
   })
-
-  server.on('error', (err) => {
-    console.error(`[companion] failed to listen on 0.0.0.0:${listenPort}`, err)
-  })
-  server.listen(listenPort, '0.0.0.0', () => server.unref())
 }
 
 /** 从系统拿一个 ephemeral 端口（监听 :0 → 读 actual port → close）。 */

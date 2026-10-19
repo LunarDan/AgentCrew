@@ -26,6 +26,8 @@ describe('isCompanionProxyPath', () => {
 
   it('rejects backslash and malformed escapes', () => {
     expect(isCompanionProxyPath('/api/mobile\\..\\settings')).toBe(false)
+    expect(isCompanionProxyPath('/api/mobile%5C..%5Csettings')).toBe(false)
+    expect(isCompanionProxyPath('/api/mobile/snapshot%5C')).toBe(false)
     expect(isCompanionProxyPath('/api/mobile/%E0%A4%A')).toBe(false)
   })
 })

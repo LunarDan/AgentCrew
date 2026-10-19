@@ -866,9 +866,14 @@ export interface ConnectionHint {
   interfaceName?: string
 }
 
-export async function fetchConnectionHints(): Promise<ConnectionHint[]> {
-  const { hints } = await json<{ hints: ConnectionHint[] }>(fetch('/api/connection-hints'))
-  return hints
+export interface ConnectionHintsResponse {
+  hints: ConnectionHint[]
+  /** 桌面端伴随代理没起来时的原因（仅 Electron 打包版会设置） */
+  companionProxyError: string | null
+}
+
+export async function fetchConnectionHints(): Promise<ConnectionHintsResponse> {
+  return json<ConnectionHintsResponse>(fetch('/api/connection-hints'))
 }
 
 // ─── App Settings (全局 API key) ───────────────

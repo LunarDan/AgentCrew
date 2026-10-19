@@ -1,4 +1,4 @@
-import { app, BrowserWindow, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, session, shell } from 'electron'
 
 import { setupDataDir } from './paths'
 import { startEmbeddedServer } from './server-bootstrap'
@@ -78,20 +78,49 @@ if (!gotLock) {
     })
 
     // b) 拦截站外导航；本地 server origin 通过
-    win.webContents.on('will-navigate', (event, target) => {
-      let sameOrigin = false
+    const isSameOrigin = (target: string): boolean => {
       try {
-        sameOrigin = new URL(target).origin === new URL(url).origin
+        return new URL(target).origin === new URL(url).origin
       } catch {
-        sameOrigin = false
+        return false
       }
-      if (!sameOrigin) {
+    }
+    win.webContents.on('will-navigate', (event, target) => {
+      if (!isSameOrigin(target)) {
         event.preventDefault()
         openExternalHttp(target)
       }
     })
 
-    await win.loadURL(url)
+    // c) 服务端 302 不会重发 will-navigate：同源路由（如产物导出）跳到 LLM 可控的外链时
+    //    必须同样拦下，否则外部站点会在受信任窗口里打开
+    win.webContents.on('will-redirect', (event, target, _isInPlace, isMainFrame) => {
+      if (!isMainFrame) return
+      if (!isSameOrigin(target)) {
+        event.preventDefault()
+        openExternalHttp(target)
+      }
+    })
+
+    win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      if (!isMainFrame) return
+      console.error(`[AgentHub] failed to load ${validatedURL}: ${errorCode} ${errorDescription}`)
+    })
+
+    try {
+      await win.loadURL(url)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error('[AgentHub] loadURL failed', err)
+      dialog.showErrorBox('AgentHub 启动失败', `无法加载界面：${message}`)
+    }
+  }).catch((err) => {
+    console.error('[AgentHub] startup failed', err)
+    dialog.showErrorBox(
+      'AgentHub 启动失败',
+      err instanceof Error ? err.message : String(err),
+    )
+    app.quit()
   })
 
   app.on('window-all-closed', () => {
