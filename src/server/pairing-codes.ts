@@ -47,9 +47,16 @@ export function issuePairingCode(now = Date.now()): { code: string; expiresAt: n
 /** 成功即作废；失败按次数与全局速率限制记录。 */
 export function consumePairingCode(input: string, now = Date.now()): PairingResult {
   pruneFailures(now)
-  if (state.failures.length >= RATE_MAX_FAILURES) return { ok: false, reason: 'rate-limited' }
 
   const active = state.active
+  // 先认正确码：否则任何人刷失败就能把全局计数打满，让真正持码的用户也被 429 挡在门外
+  if (active && active.expiresAt > now && input.replace(/\s+/g, '') === active.code) {
+    state.active = null
+    return { ok: true }
+  }
+
+  if (state.failures.length >= RATE_MAX_FAILURES) return { ok: false, reason: 'rate-limited' }
+
   if (!active) {
     recordFailure(now)
     return { ok: false, reason: 'invalid' }
@@ -60,18 +67,13 @@ export function consumePairingCode(input: string, now = Date.now()): PairingResu
     return { ok: false, reason: 'expired' }
   }
 
-  if (input.replace(/\s+/g, '') !== active.code) {
-    active.attempts += 1
-    recordFailure(now)
-    if (active.attempts >= PAIRING_CODE_MAX_ATTEMPTS) {
-      state.active = null
-      return { ok: false, reason: 'too-many-attempts' }
-    }
-    return { ok: false, reason: 'invalid' }
+  active.attempts += 1
+  recordFailure(now)
+  if (active.attempts >= PAIRING_CODE_MAX_ATTEMPTS) {
+    state.active = null
+    return { ok: false, reason: 'too-many-attempts' }
   }
-
-  state.active = null
-  return { ok: true }
+  return { ok: false, reason: 'invalid' }
 }
 
 export function hasActivePairingCode(now = Date.now()): boolean {

@@ -69,6 +69,15 @@ describe('pairing codes', () => {
     expect(lastReason).toBe('rate-limited')
   })
 
+  it('still accepts the correct code after an attacker exhausts the global failure budget', () => {
+    for (let i = 0; i < 25; i++) {
+      issuePairingCode(1_000)
+      consumePairingCode('zzzzzz', 1_000)
+    }
+    const { code } = issuePairingCode(1_000)
+    expect(consumePairingCode(code, 1_000)).toEqual({ ok: true })
+  })
+
   it('recovers after the rate-limit window passes', () => {
     issuePairingCode(1_000)
     for (let i = 0; i < 25; i++) consumePairingCode('zzzzzz', 1_000)

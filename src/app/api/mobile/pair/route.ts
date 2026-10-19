@@ -16,6 +16,9 @@ import { getAppSettings } from '@/server/settings-service'
 
 export const OPTIONS = mobileOptions
 
+/** 未鉴权接口：先按 Content-Length 拒绝超大 body，别等 req.json() 把整个包读进内存。 */
+const MAX_BODY_BYTES = 4 * 1024
+
 const Body = z.object({
   code: z.string().min(1).max(32),
   deviceName: z.string().min(1).max(64),
@@ -36,6 +39,11 @@ const FAILURE_MESSAGE = {
 } as const
 
 export async function POST(req: NextRequest) {
+  const contentLength = Number(req.headers.get('content-length') ?? '0')
+  if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
+    return mobileJson(req, { error: 'Request body too large' }, { status: 413 })
+  }
+
   const settings = await getAppSettings()
   if (settings.companionMode === 'off') {
     return mobileJson(

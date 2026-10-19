@@ -196,7 +196,7 @@ P0 同时支持 QR 和手输，QR 是主路径，手输是兜底。
 - 错误次数限速；
 - 只暂存内存，不落库。
 
-**实现状态（2026-10-20）**：配对码（6 位数字，`src/server/pairing-codes.ts`）与 `POST /api/mobile/pair` 已实现；桌面设置页「移动端连接」可生成配对码、查看已配对设备并吊销（`POST /api/settings/pairing-code`、`GET/DELETE /api/settings/devices`，写接口带同源校验）。限流为「单码错 5 次作废 + 每分钟最多 20 次失败」，`companion_mode = 'off'` 时拒绝配对。**尚未实现**：QR 图片渲染与手机端扫码 —— 需要摄像头 / 扫码依赖（按 §6.2 先讨论），当前以手输地址 + 配对码为主路径。
+**实现状态（2026-10-20）**：配对码（6 位数字，`src/server/pairing-codes.ts`）与 `POST /api/mobile/pair` 已实现；桌面设置页「移动端连接」可生成配对码、查看已配对设备并吊销（`POST /api/settings/pairing-code`、`GET/DELETE /api/settings/devices`，写接口带同源校验）。限流为「单码错 5 次作废 + 每分钟最多 20 次失败」；全局失败预算**只拦错误码**，正确码始终可以兑换（否则未鉴权的失败洪泛能把合法用户锁在门外）。未鉴权的 pair 接口先按 `Content-Length` 拒绝 >4 KB 的请求体，避免在限流前把超大 JSON 读进内存。`companion_mode = 'off'` 时拒绝配对。**尚未实现**：QR 图片渲染与手机端扫码 —— 需要摄像头 / 扫码依赖（按 §6.2 先讨论），当前以手输地址 + 配对码为主路径。
 
 ### 5.4 API 鉴权边界
 
