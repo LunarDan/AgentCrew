@@ -15,6 +15,8 @@ export interface MobileApiClient {
   editMessage(conversationId: string, messageId: string, content: string): Promise<void>
   regenerate(conversationId: string): Promise<void>
   abortRun(runId: string): Promise<void>
+  /** 订阅全局事件流；调用方用 AbortSignal 断开。事件只用于触发刷新，不直接进 store。 */
+  subscribeEvents(onEvent: (event: unknown) => void, signal: AbortSignal): Promise<void>
   decidePendingWrite(id: string, action: 'approve' | 'reject'): Promise<void>
   answerPendingQuestion(id: string, answers: MobileAskUserAnswers): Promise<void>
 }
@@ -95,6 +97,48 @@ export function createMobileApiClient(config: ConnectionConfig): MobileApiClient
     },
     abortRun: async (runId) => {
       await request(`/api/mobile/runs/${runId}/abort`, { method: 'POST' })
+    },
+    subscribeEvents: async (onEvent, signal) => {
+      if (!baseUrl) throw new Error('Desktop host is not configured')
+      if (!config.deviceToken) throw new Error('Device token is not configured')
+
+      const res = await fetch(`${baseUrl}/api/mobile/events`, {
+        headers: {
+          Authorization: `Bearer ${config.deviceToken}`,
+          Accept: 'text/event-stream',
+        },
+        signal,
+      })
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) return
+        buffer += decoder.decode(value, { stream: true })
+
+        let boundary = buffer.indexOf('\n\n')
+        while (boundary >= 0) {
+          const chunk = buffer.slice(0, boundary)
+          buffer = buffer.slice(boundary + 2)
+          const data = chunk
+            .split('\n')
+            .filter((line) => line.startsWith('data:'))
+            .map((line) => line.slice(5).trimStart())
+            .join('\n')
+          if (data) {
+            try {
+              onEvent(JSON.parse(data) as unknown)
+            } catch {
+              // 心跳 / 非 JSON 行忽略
+            }
+          }
+          boundary = buffer.indexOf('\n\n')
+        }
+      }
     },
   }
 }

@@ -21,15 +21,22 @@ export function mobileJson(
 }
 
 export function withMobileCors(req: NextRequest, res: NextResponse): NextResponse {
+  for (const [name, value] of mobileCorsHeaders(req)) res.headers.set(name, value)
+  return res
+}
+
+/** 流式响应不能用 NextResponse，单独给出 header 集合。 */
+export function mobileCorsHeaders(req: NextRequest): Headers {
+  const headers = new Headers()
   const origin = req.headers.get('origin')
   if (origin && isAllowedOrigin(origin)) {
-    res.headers.set('Access-Control-Allow-Origin', origin)
+    headers.set('Access-Control-Allow-Origin', origin)
   }
-  res.headers.set('Vary', appendVaryOrigin(res.headers.get('Vary')))
-  res.headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-  res.headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, Accept')
-  res.headers.set('Access-Control-Max-Age', '600')
-  return res
+  headers.set('Vary', 'Origin')
+  headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+  headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, Accept')
+  headers.set('Access-Control-Max-Age', '600')
+  return headers
 }
 
 function isAllowedOrigin(origin: string): boolean {
@@ -43,10 +50,4 @@ function isAllowedOrigin(origin: string): boolean {
     .map((item) => item.trim())
     .filter(Boolean)
     .includes(origin)
-}
-
-function appendVaryOrigin(value: string | null): string {
-  if (!value) return 'Origin'
-  const parts = value.split(',').map((item) => item.trim().toLowerCase())
-  return parts.includes('origin') ? value : `${value}, Origin`
 }

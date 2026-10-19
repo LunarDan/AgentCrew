@@ -85,8 +85,39 @@ export function App() {
   }, [activeView, api, configured, recordSnapshotSuccess])
 
   useEffect(() => {
-    if (!configured || !selectedConversationId) return
+    if (!configured || activeView === 'settings') return
 
+    const controller = new AbortController()
+    let timer: number | null = null
+
+    // 事件流只用来「尽快刷新」；轮询仍保留为兜底（WebView 不支持 streaming 时）。
+    const scheduleRefresh = () => {
+      if (timer !== null) return
+      timer = window.setTimeout(() => {
+        timer = null
+        void api
+          .getSnapshot()
+          .then(recordSnapshotSuccess)
+          .catch(() => {})
+      }, 500)
+    }
+
+    void api
+      .subscribeEvents((event) => {
+        const type = (event as { type?: string } | null)?.type
+        if (type === 'heartbeat' || type === 'connected') return
+        scheduleRefresh()
+      }, controller.signal)
+      .catch(() => {})
+
+    return () => {
+      controller.abort()
+      if (timer !== null) window.clearTimeout(timer)
+    }
+  }, [activeView, api, configured, recordSnapshotSuccess])
+
+  useEffect(() => {
+    if (!configured || !selectedConversationId) return
     let cancelled = false
     const conversationId = selectedConversationId
 
