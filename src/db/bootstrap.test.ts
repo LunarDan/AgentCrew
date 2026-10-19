@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { reconcileInterruptedRuns } from './bootstrap'
+import { bootstrapDatabase, reconcileInterruptedRuns } from './bootstrap'
 
 function makeDb(): Database.Database {
   const db = new Database(':memory:')
@@ -62,5 +62,29 @@ describe('reconcileInterruptedRuns', () => {
     const first = db.prepare('SELECT id, finished_at FROM agent_runs ORDER BY id').all()
     reconcileInterruptedRuns(db)
     expect(db.prepare('SELECT id, finished_at FROM agent_runs ORDER BY id').all()).toEqual(first)
+  })
+})
+
+describe('bootstrapDatabase', () => {
+  it('installs the message search FTS table and triggers', () => {
+    const db = new Database(':memory:')
+    try {
+      bootstrapDatabase(db)
+
+      const fts = db
+        .prepare("SELECT name FROM sqlite_master WHERE name = 'messages_fts'")
+        .get()
+      expect(fts).toBeDefined()
+      const triggers = db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'messages_fts_%'")
+        .all() as { name: string }[]
+      expect(triggers.map((t) => t.name).sort()).toEqual([
+        'messages_fts_ad',
+        'messages_fts_ai',
+        'messages_fts_au',
+      ])
+    } finally {
+      db.close()
+    }
   })
 })

@@ -19,6 +19,7 @@
 import type Database from 'better-sqlite3'
 
 import { BUILTIN_AGENTS, UI_DESIGNER_ARTIFACT_PROMPT_HINT } from './builtin-agents'
+import { runMessageSearchMigration } from './migrate-add-message-search'
 
 const FRONTEND_DEPLOYMENT_PROMPT_HINT =
   'deploy_artifact / deploy_workspace 返回的 previewPath 是当前 AgentHub 实例下的相对路径，不要在文字总结里把它改写成公网域名或自造完整 URL；让用户点击部署卡片按钮，或原样引用 previewPath。'
@@ -321,6 +322,8 @@ export function bootstrapDatabase(sqlite: Database.Database): void {
   ensureSchema(sqlite)
   ensureBuiltinAgents(sqlite)
   upgradeBuiltinAgents(sqlite)
+  // 全局搜索依赖 messages_fts；打包版没有 pnpm，迁移只能在运行时自举。
+  runMessageSearchMigration(sqlite)
 }
 
 /**

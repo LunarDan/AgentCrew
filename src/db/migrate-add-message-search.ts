@@ -1,13 +1,13 @@
 /**
- * 一次性 schema migration：加 messages_fts 虚拟表 + 3 触发器，回填已有 text part。
+ * schema migration：加 messages_fts 虚拟表 + 3 触发器，回填已有 text part。
  *
- * 幂等：使用 IF NOT EXISTS 守卫；backfill 使用 INSERT OR IGNORE 不会重复插入。
+ * 幂等：使用 IF NOT EXISTS 守卫；backfill 用 INSERT OR IGNORE，且只在 FTS 表为空时
+ * 全量回填（避免每次进程启动都扫一遍 messages）。
  *
- * 执行：tsx src/db/migrate-add-message-search.ts
+ * 运行时入口：`bootstrapDatabase()`（每次进程启动）；也可手动跑
+ * `tsx src/db/migrate-add-message-search.ts`。
  */
 import type Database from 'better-sqlite3'
-
-import { sqlite as defaultSqlite } from './client'
 
 const STATEMENTS: string[] = [
   `CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(content, tokenize='trigram')`,
@@ -45,10 +45,11 @@ const STATEMENTS: string[] = [
        FROM json_each(m.parts)
        WHERE json_extract(value, '$.type') = 'text'
      )
-     FROM messages m`,
+     FROM messages m
+     WHERE NOT EXISTS (SELECT 1 FROM messages_fts)`,
 ]
 
-export function runMessageSearchMigration(target: Database.Database = defaultSqlite) {
+export function runMessageSearchMigration(target: Database.Database): void {
   for (const stmt of STATEMENTS) {
     target.exec(stmt)
   }
@@ -56,6 +57,8 @@ export function runMessageSearchMigration(target: Database.Database = defaultSql
 
 // CLI entry
 if (require.main === module) {
-  runMessageSearchMigration()
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { sqlite } = require('./client') as typeof import('./client')
+  runMessageSearchMigration(sqlite)
   console.log('done')
 }
