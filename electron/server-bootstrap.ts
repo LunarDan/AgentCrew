@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { request as httpRequest, createServer as createHttpServer } from 'node:http'
 import { createServer } from 'node:net'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -10,15 +11,19 @@ import path from 'node:path'
  * - PORT 走系统分配的空闲端口，避免与 3000 / 用户已开端口冲突
  * - require 触发 standalone server.js 启动；server.js 内 createServer().listen(PORT)
  * - 探活直到 HEAD / 返回 < 500，最多 15s
+ *
+ * 伴随模式（Spec 14 §5.4）下 Next **仍然只监听 loopback**；对外的 0.0.0.0 端口由
+ * `startCompanionProxy` 提供，且只转发 `/api/mobile/*`。把整个 Next 监听到 0.0.0.0 会让
+ * 同一局域网内任何设备都能直接读写 `/api/settings`（明文 key）、`/api/conversations` 等
+ * 未鉴权的桌面 API。
  */
 export async function startEmbeddedServer(): Promise<number> {
   const companion = readCompanionConfig()
   const enabled = companion.companionMode !== 'off' && !!companion.mobileDeviceToken
-  const hostname = enabled ? '0.0.0.0' : '127.0.0.1'
-  const port = enabled ? companion.companionPort : await getFreePort('127.0.0.1')
+  const port = await getFreePort('127.0.0.1')
 
   process.env.PORT = String(port)
-  process.env.HOSTNAME = hostname
+  process.env.HOSTNAME = '127.0.0.1'
   process.env.AGENTHUB_INTERNAL_BASE_URL = `http://127.0.0.1:${port}`
   process.env.NEXT_TELEMETRY_DISABLED = '1'
   if (enabled && companion.mobileDeviceToken) {
@@ -46,7 +51,54 @@ export async function startEmbeddedServer(): Promise<number> {
   require(standaloneEntry)
 
   await waitUntilReady(`http://127.0.0.1:${port}/`)
+  if (enabled) startCompanionProxy(companion.companionPort, port)
   return port
+}
+
+const COMPANION_ROUTE_PREFIX = '/api/mobile/'
+
+/** 只有移动端 API 允许越过 loopback 边界；desktop API 一律不转发。 */
+export function isCompanionProxyPath(rawUrl: string | undefined): boolean {
+  if (!rawUrl) return false
+  return rawUrl.split('?', 1)[0].startsWith(COMPANION_ROUTE_PREFIX)
+}
+
+/**
+ * 0.0.0.0:<companionPort> → 127.0.0.1:<appPort> 的反向代理，只放行 `/api/mobile/*`。
+ * 鉴权仍由每条移动端路由的 `requireMobileAuth` 完成（Bearer token）。
+ */
+function startCompanionProxy(listenPort: number, targetPort: number): void {
+  const server = createHttpServer((req, res) => {
+    if (!isCompanionProxyPath(req.url)) {
+      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+      res.end('Not found')
+      return
+    }
+
+    const upstream = httpRequest(
+      {
+        host: '127.0.0.1',
+        port: targetPort,
+        method: req.method,
+        path: req.url,
+        headers: { ...req.headers, host: `127.0.0.1:${targetPort}` },
+      },
+      (upstreamRes) => {
+        res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers)
+        upstreamRes.pipe(res)
+      },
+    )
+    upstream.on('error', () => {
+      if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' })
+      res.end('Bad gateway')
+    })
+    req.pipe(upstream)
+  })
+
+  server.on('error', (err) => {
+    console.error(`[companion] failed to listen on 0.0.0.0:${listenPort}`, err)
+  })
+  server.listen(listenPort, '0.0.0.0', () => server.unref())
 }
 
 /** 从系统拿一个 ephemeral 端口（监听 :0 → 读 actual port → close）。 */
