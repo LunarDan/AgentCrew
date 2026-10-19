@@ -409,7 +409,7 @@ src/components/message-highlight-layer.tsx // 在 ChatWindow 监听 highlightedM
 | Unit: service | `src/server/search-service.test.ts` | 空 query、含特殊字符、超长、纯空格、参数边界 |
 | Integration: 触发器 | `src/server/messages-fts-triggers.test.ts` | insert/update/delete 后 FTS 行数正确；多 text part 拆出多条；非 text part 忽略；**`status='streaming'` 时不触发**；`status` 从 streaming → complete 时一次性同步 |
 | Integration: 搜索 | `src/app/api/search/route.test.ts` | 中文 3+ 字匹配；英文前缀 `render*`；`bm25` 排序；`snippetHtml` 含 `<mark>`；`conversationId` / `role` 过滤；分页；fallback=like 路径 |
-| Integration: 回填 | `src/db/migrations/migration-backfill.test.ts` | 已有 N 条 messages 跑迁移后，FTS 行数 = N 条消息中 text part 总数 |
+| Integration: 回填 | `src/db/bootstrap.test.ts` | 迁移后 FTS 行数 = 有 text part 的消息数（多 text part 合并成一行）；重复执行不重复插入 |
 | E2E | `e2e/global-search.spec.ts`（Playwright） | ⌘K 唤起 → 输入 → 看到结果 → 点击 → 跳转到消息并高亮 → 2s 后高亮消失 |
 
 目标：**80%+ 覆盖率**（service / api / 触发器 / 迁移是重点，UI 端 E2E 覆盖关键路径即可）。
