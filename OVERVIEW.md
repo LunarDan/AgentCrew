@@ -175,6 +175,7 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 ## 附 · 当前现状（易过时,以代码为准）
 
 ### ✅ 近期完成（最新一批）
+- **移动端与流式审计修复（2026-10-20）**：① companion 反向代理按解码 + POSIX 归一化后的路径判定，`/api/mobile/../settings` 及其编码形式不再能借代理读到未鉴权的桌面 API；② 移动端事件流每 15s 心跳复核期望 token，轮换 token / 关闭伴随模式会关闭长连接；③ 移动端切换 host 时清空旧 token 与全部旧 host 状态（快照、会话、产物缓存），慢响应不再串到新会话，快照/产物响应按请求序号取最新，发送失败保留草稿，操作进行中所有审批按钮统一禁用；④ Claude Code 的 SDK `result` 报错（如 `error_max_turns`）现在让 run 失败并带出 `errors`，不再静默变成正常回答；⑤ custom adapter 每个 turn 在工具执行前上报 usage，plan 阶段不再丢失用量；错误可视化消息不再发 `message.end`（由 `run.end` 落到 error/aborted），中止的 adapter 消息也由 `run.end` 收尾
 - **移动端事件流（2026-10-20）**：新增 `GET /api/mobile/events`（Bearer 鉴权，SSE 格式）与 `POST /api/mobile/stream-token`（30 秒、一次性，供不能带 header 的 `EventSource` 走 query token）。移动 App 用事件流触发快照刷新（500ms 去抖），轮询保留为 WebView 不支持 fetch streaming 时的兜底
 - **沙箱与工具缺陷修复（2026-10-20）**：① workspace 路径校验补 realpath —— 此前只做词法比较,workspace 内的 symlink / junction 可直接读写外部文件;② Windows 黑名单 `del` / `rd` 支持带引号的盘符路径（`del /F /Q "C:\"` 此前可绕过）;③ `fs_write` 审批通过但写盘失败时返回真实错误,不再伪装成「用户拒绝」,并补上 review 结果的 `cwd`;④ sandbox 配额按覆盖增量计算,重写同一文件不再重复占用;⑤ 已中止的 run 不再启动新的 bash 进程;⑥ Anthropic / OpenAI 工具调用事件保持在 `message.end` 之前,工具产生的 part 不会再丢;`deploy.status` 不再以空缓冲覆盖已落库的 parts;`run.usage` 跨阶段累加;abort 时不再把消息收尾成 complete;⑦ 释放 abort / parent signal 监听,避免长会话累积
 - **移动端可停止运行中的任务（2026-10-20）**：新增 `POST /api/mobile/runs/:id/abort`（复用 `abortRun`），状态页列出 `runningRuns`（Agent 名 + 开始时间）并提供「停止」；此前移动端只能看到运行中计数，无法中止
@@ -206,6 +207,7 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 - Codex 写盘审批 hook（当前 Review 模式用 read-only sandbox）
 - sandbox 配额对 Claude Code SDK 失效（SDK 自己写盘绕过 quota）
 - 移动端伴随 App：QR/一次性配对码 + `device_sessions`（服务端只存 token hash、可吊销；涉及 schema 变更）
+- Orchestrator plan 阶段的 Claude Code usage：SDK 只在 `result` 消息里给 usage，而 plan 在 `plan_tasks` 的 `tool.call` 处提前结束（拿不到 `result`），该阶段 token 仍可能不计入 `agent_runs.usage`；custom adapter 已改为按 turn 提前上报
 - E2E 可观测性：本机 Playwright 浏览器版本与 `@playwright/test` 不匹配时需 `pnpm exec playwright install chromium`
 
 ### ⚠️ 关键约定（动手前必看）
