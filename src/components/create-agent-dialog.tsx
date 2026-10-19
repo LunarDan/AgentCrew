@@ -613,16 +613,10 @@ export function CreateAgentDialog({
                   </div>
                 )}
 
-                {adapterKind === 'custom' && provider === 'anthropic' && (
-                  <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-                    自建 Agent 暂未接入 Anthropic Messages API，选择该 provider 后发消息会失败。请改用
-                    DeepSeek / OpenAI / 火山方舟 / OpenAI-compatible，或把适配器切到 Claude Code SDK。
-                  </div>
-                )}
-
                 {(adapterKind === 'claude-code' ||
                   adapterKind === 'codex' ||
-                  (adapterKind === 'custom' && provider === 'openai-compatible')) && (
+                  (adapterKind === 'custom' &&
+                    (provider === 'openai-compatible' || provider === 'anthropic'))) && (
                   <div className="grid grid-cols-[80px_1fr] items-start gap-3">
                     <Label required={adapterKind === 'custom' && provider === 'openai-compatible'}>Base URL</Label>
                     <div>
@@ -634,7 +628,9 @@ export function CreateAgentDialog({
                             ? 'https://api.anthropic.com（默认）'
                             : adapterKind === 'codex'
                               ? 'https://api.openai.com/v1（默认，需支持 /responses）'
-                              : 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+                              : provider === 'anthropic'
+                                ? 'https://api.anthropic.com（默认）'
+                                : 'https://dashscope.aliyuncs.com/compatible-mode/v1'
                         }
                         className="font-mono text-xs"
                       />
@@ -646,6 +642,10 @@ export function CreateAgentDialog({
                         ) : adapterKind === 'codex' ? (
                           <>
                             必须指向 Codex/Responses 兼容 endpoint；DeepSeek / 火山方舟等 Chat Completions 兼容接口请用 Custom adapter。留空走 Codex SDK 默认 endpoint。
+                          </>
+                        ) : provider === 'anthropic' ? (
+                          <>
+                            可指向 Anthropic Messages API 兼容网关；留空走官方 endpoint。key 以 <code className="font-mono">x-api-key</code> 发送。
                           </>
                         ) : (
                           <>

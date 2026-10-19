@@ -33,6 +33,17 @@ export function resolveCustomProviderClientConfig(
       baseURL: DEFAULT_VOLCANO_ARK_BASE_URL,
     }
   }
+  if (provider === 'anthropic') {
+    const apiKey =
+      overrideKey?.trim() ||
+      process.env.ANTHROPIC_API_KEY ||
+      process.env.ANTHROPIC_AUTH_TOKEN
+    if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set and agent has no apiKey')
+    return {
+      apiKey,
+      ...(apiBaseUrl?.trim() ? { baseURL: apiBaseUrl.trim() } : {}),
+    }
+  }
   if (provider === 'openai') {
     const apiKey = overrideKey?.trim() || process.env.OPENAI_API_KEY
     if (!apiKey) throw new Error('OPENAI_API_KEY not set and agent has no apiKey')

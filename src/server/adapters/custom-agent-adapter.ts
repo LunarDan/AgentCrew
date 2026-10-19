@@ -1,11 +1,12 @@
 import { readFileSync } from 'node:fs'
 
+import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 
 import { newMessageId } from '@/server/ids'
 import { isToolApproved, waitForMcpToolApproval } from '@/server/mcp-approvals'
 import { toolRegistry } from '@/server/tools/registry'
-import type { ToolContext } from '@/server/tools/types'
+import type { ToolContext, ToolDef } from '@/server/tools/types'
 import type { DeployStatusRecord, ModelProvider, StreamEvent } from '@/shared/types'
 
 import {
@@ -15,16 +16,16 @@ import {
   type ConnectedMcpServer,
   type ConnectMcpServersResult,
 } from './custom-mcp-client'
-import { buildMcpToolTable, type ExposedMcpTool } from './custom-mcp-tools'
+import { buildMcpToolTable, type ExposedMcpTool, type McpToolTable } from './custom-mcp-tools'
 import { resolveCustomProviderClientConfig } from './custom-provider-client'
 import type { AdapterAttachment, AdapterInput, AgentPlatformAdapter } from './types'
 
 /**
  * CustomAgentAdapter —— 自配置 Agent 的适配器。
  *
- * 通过 openai SDK 调用底层模型（OpenAI Chat Completions 兼容协议），
- * 自己实现 tool loop：流式拉模型输出 → 解析 tool_calls → 调用 ToolExecutor →
- * 把结果回灌到 messages → 续写下一轮，直到模型不再调工具。
+ * OpenAI 兼容 provider 走 Chat Completions；Anthropic provider 走 Messages API。
+ * 两条路径共用同一套 AgentHub 工具表与 tool loop：流式拉模型输出 → 解析工具调用 →
+ * 调用 ToolExecutor → 把结果回灌 → 续写，直到模型不再调工具。
  *
  * 详细规格见 specs/05-adapter-interface.md。
  */
@@ -37,8 +38,15 @@ interface AccumulatingToolCall {
   argsBuffer: string
 }
 
+interface ToolCallOutcome {
+  ok: boolean
+  value: unknown
+}
+
 /** 防止单条 user message 塞太多图片（token 爆炸 + provider 通常有上限） */
 const MAX_IMAGES_PER_MESSAGE = 5
+const ANTHROPIC_MAX_TOKENS = 8192
+const ANTHROPIC_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
 
 export class CustomAgentAdapter implements AgentPlatformAdapter {
   readonly name = 'custom' as const
@@ -89,8 +97,6 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
     const systemPrompt = input.systemPrompt
     const apiKey = input.apiKey
 
-    const client = buildClient(modelProvider, apiKey, input.apiBaseUrl)
-
     const toolDefs = toolRegistry.resolve(input.toolNames)
     const mcpToolTable = buildMcpToolTable({
       servers: input.mcpServers ?? [],
@@ -100,10 +106,6 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
     const connectionsByName = new Map(
       mcp.servers.map((connection) => [connection.server.name, connection]),
     )
-    const apiTools = [
-      ...toolDefs.map(toApiTool),
-      ...mcpToolTable.tools.map(toMcpApiTool),
-    ]
 
     const ctx: ToolContext = {
       conversationId: input.conversationId,
@@ -116,6 +118,18 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
     // 构造 user message content：若 agent 声明 vision + 实际有图片，走 multimodal blocks
     const imageAttachments =
       input.attachments?.filter((a) => a.kind === 'image').slice(0, MAX_IMAGES_PER_MESSAGE) ?? []
+
+    if (modelProvider === 'anthropic') {
+      yield* this.runAnthropicToolLoop(input, signal, ctx, toolDefs, mcpToolTable, connectionsByName)
+      return
+    }
+
+    const client = buildClient(modelProvider, apiKey, input.apiBaseUrl)
+    const apiTools = [
+      ...toolDefs.map(toApiTool),
+      ...mcpToolTable.tools.map(toMcpApiTool),
+    ]
+
     const useMultimodal = !!supportsVision && imageAttachments.length > 0
 
     const userContent: ChatMessage['content'] = useMultimodal
@@ -311,82 +325,22 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
           args = {}
         }
 
-        yield baseEvent(input, {
-          type: 'tool.call',
+        const outcome = yield* this.runToolCall({
+          input,
           messageId,
           callId: tc.id,
           toolName: tc.name,
           args,
+          mcpToolTable,
+          connectionsByName,
+          ctx,
+          signal,
         })
-
-        const mcpTool = mcpToolTable.byExposedName.get(tc.name)
-        let toolOk: boolean
-        let value: unknown
-        if (mcpTool) {
-          const outcome = await executeMcpTool(mcpTool, args, {
-            input,
-            signal,
-            connection: connectionsByName.get(mcpTool.serverName),
-          })
-          toolOk = outcome.ok
-          value = outcome.value
-        } else {
-          const result = await toolRegistry.execute(tc.name, args, ctx)
-          toolOk = result.ok
-          value = result.ok ? result.value : { error: result.error }
-        }
-
-        yield baseEvent(input, {
-          type: 'tool.result',
-          messageId,
-          callId: tc.id,
-          result: value,
-          isError: !toolOk,
-        })
-
-        // 工具结果含 artifactId 视为「创建了产物」的约定，统一由 adapter 发布
-        // artifact.create 事件，让上层 AgentRunner 注入 artifact_ref part。
-        if (tc.name === 'write_artifact' && toolOk && hasArtifactId(value)) {
-          const artifactId = (value as { artifactId: string }).artifactId
-          const { db, schema } = await import('@/db/client')
-          const { eq } = await import('drizzle-orm')
-          const artifact = await db.query.artifacts.findFirst({
-            where: eq(schema.artifacts.id, artifactId),
-          })
-          if (artifact) {
-            yield baseEvent(input, {
-              type: 'artifact.create',
-              artifact: {
-                id: artifact.id,
-                conversationId: artifact.conversationId,
-                type: artifact.type,
-                title: artifact.title,
-                content: artifact.content,
-                version: artifact.version,
-                parentArtifactId: artifact.parentArtifactId ?? undefined,
-                createdByAgentId: artifact.createdByAgentId,
-                createdAt: artifact.createdAt,
-              },
-            })
-          }
-        }
-
-        if (
-          (tc.name === 'deploy_artifact' || tc.name === 'deploy_workspace') &&
-          toolOk &&
-          isDeployStatusRecord(value)
-        ) {
-          yield baseEvent(input, {
-            type: 'deploy.status',
-            messageId,
-            deployment: value,
-          })
-        }
 
         messages.push({
           role: 'tool',
           tool_call_id: tc.id,
-          content: JSON.stringify(value),
+          content: JSON.stringify(outcome.value),
         })
       }
 
@@ -397,6 +351,330 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
       // 继续下一轮
     }
     // 到达 MAX_TURNS 兜底：把累计 usage emit 一下（正常路径在 line 232 已 emit 过 + return）
+    yield baseEvent(input, {
+      type: 'run.usage',
+      runId: input.runId,
+      usage: { ...runUsage, model: modelId },
+    })
+  }
+
+  /** 执行一次工具调用，产出 tool.call / tool.result 与产物副作用事件；两条 provider 循环共用。 */
+  private async *runToolCall(params: {
+    input: AdapterInput
+    messageId: string
+    callId: string
+    toolName: string
+    args: unknown
+    mcpToolTable: McpToolTable
+    connectionsByName: Map<string, ConnectedMcpServer>
+    ctx: ToolContext
+    signal: AbortSignal
+  }): AsyncGenerator<StreamEvent, ToolCallOutcome> {
+    const { input, messageId, callId, toolName, args, mcpToolTable, connectionsByName, ctx, signal } =
+      params
+
+    yield baseEvent(input, { type: 'tool.call', messageId, callId, toolName, args })
+
+    const mcpTool = mcpToolTable.byExposedName.get(toolName)
+    let toolOk: boolean
+    let value: unknown
+    if (mcpTool) {
+      const outcome = await executeMcpTool(mcpTool, args, {
+        input,
+        signal,
+        connection: connectionsByName.get(mcpTool.serverName),
+      })
+      toolOk = outcome.ok
+      value = outcome.value
+    } else {
+      const result = await toolRegistry.execute(toolName, args, ctx)
+      toolOk = result.ok
+      value = result.ok ? result.value : { error: result.error }
+    }
+
+    yield baseEvent(input, {
+      type: 'tool.result',
+      messageId,
+      callId,
+      result: value,
+      isError: !toolOk,
+    })
+
+    // 工具结果含 artifactId 视为「创建了产物」的约定，统一由 adapter 发布
+    // artifact.create 事件，让上层 AgentRunner 注入 artifact_ref part。
+    if (toolName === 'write_artifact' && toolOk && hasArtifactId(value)) {
+      const artifactId = (value as { artifactId: string }).artifactId
+      const { db, schema } = await import('@/db/client')
+      const { eq } = await import('drizzle-orm')
+      const artifact = await db.query.artifacts.findFirst({
+        where: eq(schema.artifacts.id, artifactId),
+      })
+      if (artifact) {
+        yield baseEvent(input, {
+          type: 'artifact.create',
+          artifact: {
+            id: artifact.id,
+            conversationId: artifact.conversationId,
+            type: artifact.type,
+            title: artifact.title,
+            content: artifact.content,
+            version: artifact.version,
+            parentArtifactId: artifact.parentArtifactId ?? undefined,
+            createdByAgentId: artifact.createdByAgentId,
+            createdAt: artifact.createdAt,
+          },
+        })
+      }
+    }
+
+    if (
+      (toolName === 'deploy_artifact' || toolName === 'deploy_workspace') &&
+      toolOk &&
+      isDeployStatusRecord(value)
+    ) {
+      yield baseEvent(input, { type: 'deploy.status', messageId, deployment: value })
+    }
+
+    return { ok: toolOk, value }
+  }
+
+  /** Anthropic Messages API：内容块 / tool_use 与 OpenAI tool_calls 的形状不同，其余语义一致。 */
+  private async *runAnthropicToolLoop(
+    input: AdapterInput,
+    signal: AbortSignal,
+    ctx: ToolContext,
+    toolDefs: ToolDef[],
+    mcpToolTable: McpToolTable,
+    connectionsByName: Map<string, ConnectedMcpServer>,
+  ): AsyncIterable<StreamEvent> {
+    const modelId = input.modelId
+    if (!modelId) throw new Error('CustomAgentAdapter requires modelId')
+    const clientConfig = resolveCustomProviderClientConfig('anthropic', input.apiKey, input.apiBaseUrl)
+    const client = new Anthropic({
+      apiKey: clientConfig.apiKey,
+      baseURL: clientConfig.baseURL,
+      maxRetries: MAX_API_RETRIES,
+    })
+
+    const tools: Anthropic.Tool[] = [
+      ...toolDefs.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        input_schema: tool.parameters as Anthropic.Tool.InputSchema,
+      })),
+      ...mcpToolTable.tools.map((tool) => ({
+        name: tool.exposedName,
+        description: tool.description,
+        input_schema: tool.inputSchema as Anthropic.Tool.InputSchema,
+      })),
+    ]
+
+    const images = input.customConfig?.supportsVision
+      ? (input.attachments?.filter((a) => a.kind === 'image').slice(0, MAX_IMAGES_PER_MESSAGE) ?? [])
+      : []
+    const userBlocks = buildAnthropicUserContent(input.prompt, images)
+
+    const messages = toAnthropicMessages(input.history ?? [])
+    const lastMessage = messages[messages.length - 1]
+    if (lastMessage && lastMessage.role === 'user') {
+      lastMessage.content = [...toAnthropicBlocks(lastMessage.content), ...userBlocks]
+    } else {
+      messages.push({ role: 'user', content: userBlocks })
+    }
+
+    const MAX_TURNS = 8
+    let turn = 0
+    const runUsage = {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreationTokens: 0,
+      cacheReadTokens: 0,
+      lastInputTokens: 0,
+    }
+
+    while (turn < MAX_TURNS) {
+      if (signal.aborted) return
+      turn++
+
+      const messageId = newMessageId()
+      yield baseEvent(input, {
+        type: 'message.start',
+        messageId,
+        agentId: input.agentId,
+        runId: input.runId,
+      })
+
+      let nextPartIndex = 0
+      const textBlocks = new Map<number, { partIndex: number; text: string }>()
+      const thinkingBlocks = new Map<number, { partIndex: number; text: string }>()
+      const toolBlocks = new Map<number, { id: string; name: string; json: string }>()
+      let stopReason: string | null = null
+      const msgUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }
+      let cacheCreationTokens = 0
+
+      const stream = client.messages.stream(
+        {
+          model: modelId,
+          max_tokens: ANTHROPIC_MAX_TOKENS,
+          system: input.systemPrompt || undefined,
+          messages,
+          ...(tools.length > 0 ? { tools } : {}),
+        },
+        { signal },
+      )
+
+      for await (const event of stream) {
+        if (signal.aborted) return
+        switch (event.type) {
+          case 'message_start': {
+            const usage = event.message.usage
+            msgUsage.inputTokens = usage.input_tokens
+            msgUsage.cacheReadTokens = usage.cache_read_input_tokens ?? 0
+            cacheCreationTokens = usage.cache_creation_input_tokens ?? 0
+            break
+          }
+          case 'content_block_start': {
+            const block = event.content_block
+            if (block.type === 'text') {
+              const partIndex = nextPartIndex++
+              textBlocks.set(event.index, { partIndex, text: '' })
+              yield baseEvent(input, {
+                type: 'part.start',
+                messageId,
+                partIndex,
+                part: { type: 'text', content: '' },
+              })
+            } else if (block.type === 'thinking') {
+              const partIndex = nextPartIndex++
+              thinkingBlocks.set(event.index, { partIndex, text: '' })
+              yield baseEvent(input, {
+                type: 'part.start',
+                messageId,
+                partIndex,
+                part: { type: 'thinking', content: '' },
+              })
+            } else if (block.type === 'tool_use') {
+              toolBlocks.set(event.index, { id: block.id, name: block.name, json: '' })
+            }
+            break
+          }
+          case 'content_block_delta': {
+            const delta = event.delta
+            if (delta.type === 'text_delta') {
+              const block = textBlocks.get(event.index)
+              if (block) {
+                block.text += delta.text
+                yield baseEvent(input, {
+                  type: 'part.delta',
+                  messageId,
+                  partIndex: block.partIndex,
+                  delta: { type: 'text.append', text: delta.text },
+                })
+              }
+            } else if (delta.type === 'thinking_delta') {
+              const block = thinkingBlocks.get(event.index)
+              if (block) {
+                block.text += delta.thinking
+                yield baseEvent(input, {
+                  type: 'part.delta',
+                  messageId,
+                  partIndex: block.partIndex,
+                  delta: { type: 'thinking.append', text: delta.thinking },
+                })
+              }
+            } else if (delta.type === 'input_json_delta') {
+              const block = toolBlocks.get(event.index)
+              if (block) block.json += delta.partial_json
+            }
+            break
+          }
+          case 'content_block_stop': {
+            const text = textBlocks.get(event.index)
+            if (text) {
+              yield baseEvent(input, { type: 'part.end', messageId, partIndex: text.partIndex })
+            }
+            const thinking = thinkingBlocks.get(event.index)
+            if (thinking) {
+              yield baseEvent(input, { type: 'part.end', messageId, partIndex: thinking.partIndex })
+            }
+            break
+          }
+          case 'message_delta': {
+            stopReason = event.delta.stop_reason ?? stopReason
+            msgUsage.outputTokens = event.usage.output_tokens
+            break
+          }
+        }
+      }
+
+      runUsage.inputTokens += msgUsage.inputTokens
+      runUsage.outputTokens += msgUsage.outputTokens
+      runUsage.cacheReadTokens += msgUsage.cacheReadTokens
+      runUsage.cacheCreationTokens += cacheCreationTokens
+      runUsage.lastInputTokens = msgUsage.inputTokens
+
+      const assistantContent: Anthropic.ContentBlockParam[] = []
+      for (const block of textBlocks.values()) {
+        if (block.text) assistantContent.push({ type: 'text', text: block.text })
+      }
+      const toolUses: Array<{ id: string; name: string; input: unknown }> = []
+      for (const block of toolBlocks.values()) {
+        if (!block.id || !block.name) continue
+        let parsed: unknown = {}
+        try {
+          parsed = block.json ? JSON.parse(block.json) : {}
+        } catch {
+          parsed = {}
+        }
+        toolUses.push({ id: block.id, name: block.name, input: parsed })
+        assistantContent.push({
+          type: 'tool_use',
+          id: block.id,
+          name: block.name,
+          input: parsed as Anthropic.ToolUseBlockParam['input'],
+        })
+      }
+      if (assistantContent.length > 0) {
+        messages.push({ role: 'assistant', content: assistantContent })
+      }
+
+      if (msgUsage.inputTokens > 0 || msgUsage.outputTokens > 0) {
+        yield baseEvent(input, { type: 'message.usage', messageId, usage: msgUsage })
+      }
+      yield baseEvent(input, { type: 'message.end', messageId })
+
+      if (toolUses.length === 0 || stopReason !== 'tool_use') {
+        yield baseEvent(input, {
+          type: 'run.usage',
+          runId: input.runId,
+          usage: { ...runUsage, model: modelId },
+        })
+        return
+      }
+
+      const toolResults: Anthropic.ToolResultBlockParam[] = []
+      for (const use of toolUses) {
+        const outcome = yield* this.runToolCall({
+          input,
+          messageId,
+          callId: use.id,
+          toolName: use.name,
+          args: use.input,
+          mcpToolTable,
+          connectionsByName,
+          ctx,
+          signal,
+        })
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: use.id,
+          content: serializeToolResult(outcome.value),
+          ...(outcome.ok ? {} : { is_error: true }),
+        })
+      }
+      messages.push({ role: 'user', content: toolResults })
+    }
+
     yield baseEvent(input, {
       type: 'run.usage',
       runId: input.runId,
@@ -529,6 +807,84 @@ function isDeployStatusRecord(value: unknown): value is DeployStatusRecord {
  * DeepSeek 兼容 OpenAI schema；Anthropic 的 image block 形态不同，目前 CustomAgentAdapter
  * 走 openai SDK + OpenAI-compatible endpoint，先只支持这一套。
  */
+function toAnthropicBlocks(content: Anthropic.MessageParam['content']): Anthropic.ContentBlockParam[] {
+  return typeof content === 'string' ? [{ type: 'text', text: content }] : content
+}
+
+function extractHistoryText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content
+    .map((part) => {
+      if (
+        part &&
+        typeof part === 'object' &&
+        'type' in part &&
+        part.type === 'text' &&
+        'text' in part &&
+        typeof part.text === 'string'
+      ) {
+        return part.text
+      }
+      return ''
+    })
+    .filter(Boolean)
+    .join('\n')
+}
+
+/** OpenAI ChatMessage → Anthropic MessageParam：只保留 user/assistant 文本，合并连续同角色。 */
+export function toAnthropicMessages(history: ChatMessage[]): Anthropic.MessageParam[] {
+  const messages: Anthropic.MessageParam[] = []
+  for (const message of history) {
+    if (message.role !== 'user' && message.role !== 'assistant') continue
+    const text = extractHistoryText(message.content)
+    if (!text) continue
+    // Anthropic 要求首条是 user；用户视角的历史一般也以 user 开头。
+    if (messages.length === 0 && message.role === 'assistant') continue
+    const last = messages[messages.length - 1]
+    if (last && last.role === message.role) {
+      const previous =
+        typeof last.content === 'string' ? last.content : extractHistoryText(last.content)
+      last.content = previous ? `${previous}\n\n${text}` : text
+    } else {
+      messages.push({ role: message.role, content: text })
+    }
+  }
+  return messages
+}
+
+function buildAnthropicUserContent(
+  prompt: string,
+  images: AdapterAttachment[],
+): Anthropic.ContentBlockParam[] {
+  const blocks: Anthropic.ContentBlockParam[] = [{ type: 'text', text: prompt }]
+  for (const img of images) {
+    if (!ANTHROPIC_IMAGE_TYPES.has(img.mimeType)) continue
+    try {
+      const data = readFileSync(img.absPath).toString('base64')
+      blocks.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: img.mimeType as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
+          data,
+        },
+      })
+    } catch (err) {
+      console.warn('[CustomAgentAdapter] failed to read image', img.absPath, err)
+    }
+  }
+  return blocks
+}
+
+function serializeToolResult(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? String(value)
+  } catch {
+    return String(value)
+  }
+}
+
 function buildMultimodalUserContent(
   prompt: string,
   images: AdapterAttachment[],
