@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ChevronLeft, Home, Loader2, Menu, RefreshCw, Settings, X } from 'lucide-react'
 
-import { createMobileApiClient } from './api/client'
+import { createMobileApiClient, pairMobileDevice } from './api/client'
 import { ApprovalsScreen } from './screens/ApprovalsScreen'
 import { ArtifactPreviewSheet } from './screens/ArtifactPreviewSheet'
 import { ConversationsScreen } from './screens/ConversationsScreen'
@@ -389,6 +389,17 @@ export function App() {
     )
   }
 
+  /** 一次性配对码换设备 token；返回 null 表示成功，否则是给用户看的错误文案。 */
+  async function pairDeviceFromMobile(code: string): Promise<string | null> {
+    try {
+      const result = await pairMobileDevice(connection.baseUrl, code, defaultMobileDeviceName())
+      updateConnection({ ...connection, deviceToken: result.deviceToken })
+      return null
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err)
+    }
+  }
+
   usePullToRefresh(() => {
     void refreshSnapshot()
   }, configured && !selectedConversationId && activeView === 'home')
@@ -423,6 +434,7 @@ export function App() {
         recentHosts={recentHosts}
         onChange={updateConnection}
         onSelectHost={(baseUrl) => updateConnection({ ...connection, baseUrl })}
+        onPairDevice={pairDeviceFromMobile}
         onTest={() => void refreshSnapshot()}
       />
     ) : (
@@ -563,6 +575,12 @@ export function App() {
 
 function normalizeBaseUrl(value: string): string {
   return value.trim().replace(/\/+$/, '')
+}
+
+/** 设备名会显示在桌面设置页的已配对列表里。 */
+function defaultMobileDeviceName(): string {
+  const match = /iPhone|iPad|Android/i.exec(navigator.userAgent)
+  return match ? `${match[0]} 上的 AgentHub` : '移动设备'
 }
 
 /** 产物缓存的有效期：过期后重新拉取，避免一直显示桌面端已经改过的旧版本。 */

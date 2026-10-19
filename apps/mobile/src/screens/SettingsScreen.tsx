@@ -1,4 +1,5 @@
 import { CheckCircle2, Clock, Link, Wifi } from 'lucide-react'
+import { useState } from 'react'
 
 import type { ConnectionConfig } from '../types'
 
@@ -11,6 +12,7 @@ export function SettingsScreen({
   onChange,
   onTest,
   onSelectHost,
+  onPairDevice,
 }: {
   connection: ConnectionConfig
   loading: boolean
@@ -20,8 +22,32 @@ export function SettingsScreen({
   onChange: (next: ConnectionConfig) => void
   onTest: () => void
   onSelectHost: (host: string) => void
+  /** 返回 null 表示成功，否则是给用户看的错误文案。 */
+  onPairDevice: (code: string) => Promise<string | null>
 }) {
   const usingLoopback = isLoopbackUrl(connection.baseUrl)
+  const [pairingCode, setPairingCode] = useState('')
+  const [pairingBusy, setPairingBusy] = useState(false)
+  const [pairingError, setPairingError] = useState<string | null>(null)
+  const [pairingOk, setPairingOk] = useState(false)
+
+  async function handlePair() {
+    if (pairingBusy || !pairingCode.trim()) return
+    setPairingBusy(true)
+    setPairingError(null)
+    setPairingOk(false)
+    try {
+      const message = await onPairDevice(pairingCode)
+      if (message) {
+        setPairingError(message)
+      } else {
+        setPairingOk(true)
+        setPairingCode('')
+      }
+    } finally {
+      setPairingBusy(false)
+    }
+  }
 
   return (
     <div className="screen-stack">
@@ -82,6 +108,33 @@ export function SettingsScreen({
             onChange={(e) => onChange({ ...connection, deviceToken: e.target.value })}
           />
         </label>
+
+        <label className="field">
+          <span>或用一次性配对码</span>
+          <input
+            value={pairingCode}
+            placeholder="桌面设置页「生成」的 6 位数字"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={12}
+            onChange={(e) => {
+              setPairingCode(e.target.value)
+              setPairingOk(false)
+            }}
+          />
+        </label>
+        <button
+          type="button"
+          className="primary-action full"
+          disabled={pairingBusy || !pairingCode.trim()}
+          onClick={() => void handlePair()}
+        >
+          {pairingBusy ? '配对中' : '用配对码连接'}
+        </button>
+        {pairingError && <div className="error-banner">{pairingError}</div>}
+        {pairingOk && (
+          <p className="muted-text">配对成功，设备 token 已填入。请点「测试连接」。</p>
+        )}
 
         {error && <div className="error-banner">{error}</div>}
 

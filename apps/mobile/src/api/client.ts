@@ -147,6 +147,52 @@ export function createMobileApiClient(config: ConnectionConfig): MobileApiClient
   }
 }
 
+export interface PairingResult {
+  deviceToken: string
+  deviceId: string
+  deviceName: string
+}
+
+/**
+ * 用桌面设置页生成的一次性配对码换设备 token（spec 14 §5.3）。
+ * 还没有 token，所以不能走 `createMobileApiClient`。
+ */
+export async function pairMobileDevice(
+  baseUrlInput: string,
+  code: string,
+  deviceName: string,
+): Promise<PairingResult> {
+  const baseUrl = normalizeBaseUrl(baseUrlInput)
+  if (!baseUrl) throw new Error('Desktop host is not configured')
+
+  const res = await fetch(`${baseUrl}/api/mobile/pair`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ code: code.trim(), deviceName }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  }).catch((err) => {
+    const message = err instanceof Error ? err.message : String(err)
+    throw new Error(`Cannot reach ${baseUrl}: ${message}`)
+  })
+
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: unknown } | null
+    throw new Error(
+      typeof body?.error === 'string' ? body.error : `Pairing failed (HTTP ${res.status})`,
+    )
+  }
+
+  const body = (await res.json()) as {
+    deviceToken: string
+    device: { id: string; deviceName: string }
+  }
+  return {
+    deviceToken: body.deviceToken,
+    deviceId: body.device.id,
+    deviceName: body.device.deviceName,
+  }
+}
+
 function normalizeBaseUrl(value: string): string {
   return withScheme(value).replace(/\/+$/, '')
 }
