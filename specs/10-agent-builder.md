@@ -37,10 +37,10 @@
 | `modelId` | string | — | provider 默认 | 切换 provider 时自动重置 |
 | `apiKey` | string | — | `''` | 命名 provider 留空走 env var；`openai-compatible` 必填 per-agent key |
 | `apiBaseUrl` | string | — | `''` | Claude Code 可填 Anthropic 兼容 endpoint；Codex 仅可填 Codex/Responses 兼容 endpoint；Custom `openai-compatible` 必填 Chat Completions 兼容 endpoint |
-| `toolNames` | string[] | — | 全栈通用预设 | 当前可勾选：`write_artifact` / `deploy_artifact` / `deploy_workspace` / `read_artifact` / `read_attachment` / `ask_user` / `fs_read` / `fs_write` / `bash` |
+| `toolNames` | string[] | — | 全栈通用预设 | 当前可勾选：`write_artifact` / `deploy_artifact` / `deploy_workspace` / `read_artifact` / `read_attachment` / `ask_user` / `fs_list` / `fs_read` / `fs_write` / `bash` / `web_fetch` |
 | `mcpServerIds` | string[] | — | `[]` | 该 agent 启用的外部 MCP server id；在「工具集」tab 的多选里勾选，只列出当前 adapter 能跑的 server（矩阵见 `src/shared/mcp.ts`）。与 `toolNames` 独立，SDK adapter 也不清空（Spec 15） |
 | `supportsVision` | boolean | — | `true` | 决定是否把图片 base64 注入 messages |
-| `avatar` | string | — | `'🤖'` | service 层默认（UI 当前不暴露） |
+| `avatar` | string | — | `'🤖'` | 创建 / 编辑弹窗提供 emoji 预设 + 自定义输入（≤ 8 字符）；service 对空串回落到 `'🤖'` |
 | `isBuiltin` | boolean | — | `false` | service 写死，UI 不可改 |
 | `isOrchestrator` | boolean | — | `false` | service 写死，UI 不可改 |
 
@@ -252,9 +252,7 @@ zod 校验 body 在每个 route 文件内。
 ## 待补功能 (TODO)
 
 - **自建 Orchestrator**：UI 不能创建带 `isOrchestrator=true` 的 agent；需要 plan_tasks 工具 + 群聊约束
-- **Avatar 选择器**：当前自建 agent 默认 `'🤖'`，用户不能改。UI 可加 emoji picker / 上传图
 - **导入 / 导出 agent 配置**：JSON 格式导出，分享配置；导入时校验
-- **删除自建 agent 的二次确认**：当前一键删除，加 Dialog 确认更稳
 - **Anthropic 路径实装**：buildClient 不要 throw，接入 `@anthropic-ai/sdk` 的 messages API
 
 ---
