@@ -1696,14 +1696,14 @@ async function persistEvent(
       return
     }
     case 'part.start': {
-      const parts = partsBuffer.get(event.messageId) ?? []
+      const parts = await getWritableParts(event.messageId, partsBuffer)
+      if (!parts) return
       parts[event.partIndex] = event.part
-      partsBuffer.set(event.messageId, parts)
       await db.update(schema.messages).set({ parts }).where(eq(schema.messages.id, event.messageId))
       return
     }
     case 'part.delta': {
-      const parts = partsBuffer.get(event.messageId)
+      const parts = await getWritableParts(event.messageId, partsBuffer)
       if (!parts) return
       const part = parts[event.partIndex]
       if (!part) return
@@ -1715,26 +1715,26 @@ async function persistEvent(
       return
     }
     case 'tool.call': {
-      const parts = partsBuffer.get(event.messageId) ?? []
+      const parts = await getWritableParts(event.messageId, partsBuffer)
+      if (!parts) return
       parts.push({
         type: 'tool_use',
         callId: event.callId,
         toolName: event.toolName,
         args: event.args,
       })
-      partsBuffer.set(event.messageId, parts)
       await db.update(schema.messages).set({ parts }).where(eq(schema.messages.id, event.messageId))
       return
     }
     case 'tool.result': {
-      const parts = partsBuffer.get(event.messageId) ?? []
+      const parts = await getWritableParts(event.messageId, partsBuffer)
+      if (!parts) return
       parts.push({
         type: 'tool_result',
         callId: event.callId,
         result: event.result,
         isError: event.isError,
       })
-      partsBuffer.set(event.messageId, parts)
       await db.update(schema.messages).set({ parts }).where(eq(schema.messages.id, event.messageId))
       return
     }
@@ -1753,6 +1753,26 @@ async function persistEvent(
     default:
       return
   }
+}
+
+/**
+ * 取可写的 parts 缓冲。缓冲缺失时从 DB 读一次：`message.end` 之后到达的 part / tool
+ * 事件不能以 `[]` 为基底写回 —— 那会把已落库的 parts 覆盖成单元素数组。
+ * 消息不存在或已经完成时返回 null，调用方丢弃该事件。
+ */
+async function getWritableParts(
+  messageId: string,
+  partsBuffer: Map<string, MessagePart[]>,
+): Promise<MessagePart[] | null> {
+  const buffered = partsBuffer.get(messageId)
+  if (buffered) return buffered
+
+  const row = await db.query.messages.findFirst({ where: eq(schema.messages.id, messageId) })
+  if (!row || row.status !== 'streaming') return null
+
+  const parts = [...row.parts]
+  partsBuffer.set(messageId, parts)
+  return parts
 }
 
 // ─── DB / 事件辅助 ─────────────────────────────────────────

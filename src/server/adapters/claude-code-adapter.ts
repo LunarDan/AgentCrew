@@ -117,6 +117,10 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
     // 翻译状态
     let nextPartIndex = 0
     let activeTextPartIndex = -1 // -1 表示当前没有开放的 text part
+    // partial streaming 是否已经产出过文本。完整 assistant 消息的兜底只在它为 false 时启用：
+    // 否则 [tool_use, text] 顺序下，tool_use 先把 activeTextPartIndex 重置为 -1，
+    // 已由 delta 流出的 text 会被整段再发一次，同一段文字渲染两遍。
+    let sawStreamedText = false
     const toolCallIdByUseId = new Map<string, string>()
     const toolInputByUseId = new Map<string, Record<string, unknown>>()
     // 同步记录 tool name —— 让 tool_result 阶段能判断「这个结果是 write_artifact 来的，要 yield artifact.create」
@@ -513,6 +517,7 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
         if (m.type === 'stream_event') {
           const ev = m.event as { type?: string; delta?: { type?: string; text?: string } }
           if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta' && ev.delta.text) {
+            sawStreamedText = true
             if (activeTextPartIndex === -1) {
               activeTextPartIndex = nextPartIndex++
               yield baseEvent({
@@ -557,8 +562,13 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
                 toolName: block.name,
                 args: block.input ?? {},
               }) as StreamEvent
-            } else if (block.type === 'text' && activeTextPartIndex === -1 && block.text) {
-              // 没开 partial stream（或者 partial 漏了）时的兜底：把整段 text 作为一个 part
+            } else if (
+              block.type === 'text' &&
+              activeTextPartIndex === -1 &&
+              block.text &&
+              !sawStreamedText
+            ) {
+              // 整轮都没收到 partial text 时的兜底：把整段 text 作为一个 part
               const idx = nextPartIndex++
               yield baseEvent({
                 type: 'part.start' as const,

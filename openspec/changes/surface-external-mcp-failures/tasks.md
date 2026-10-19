@@ -29,15 +29,21 @@
 - [x] 3.6 `src/server/agent-runner.ts` — `buildAdapterInput` 返回 `{ input, mcpWarnings }`；`appendMcpNotice`；`consumeStream` 处理事件；三个调用点接入。
 - [x] 3.7 `pnpm typecheck`、`pnpm lint`、`pnpm test`（37 个测试文件、288 通过 / 1 跳过）。
 
-## 4. Live verification（暂缓，2026-10-19 决定）
+## 4. Live verification（2026-10-20 补跑完成）
 
-> 用户选择「暂不启动 dev server，先推送」。以下五格**均未执行**；实现依赖的 SDK 行为（init 的 `mcp_servers` 状态取值、失败 server 是否被整个省略）目前只有 `.d.ts` 依据。恢复验证时从这里开始。
+环境（2026-10-20）：Windows 11，dev server，claude-code adapter，`claude-sonnet-4-6`（经 relay）。测试 server 为自建 stdio MCP server（`echo` 一个工具）。判据均为持久化消息与进程事实。
 
-- [ ] 4.1 坏 server 格：`command` 不存在的 stdio server，启用并在 claude-code agent 上勾选。预期 run `complete`，出现 `[MCP]` 系统消息点名该 server，且其工具不出现。**同时记录 SDK init 实际给出的 status 值**（若是「整个省略」，按 proposal 的兜底扩 `not-listed`）。
-- [ ] 4.2 健康 server 格：最小 stdio echo server。预期**没有** `[MCP]` 消息（无假阳性）。
-- [ ] 4.3 解析失败格：env 引用不存在的 `${VAR}`。预期 run 开始前出现解析警告消息。
-- [ ] 4.4 持久化：刷新后警告仍在（系统消息落库）。
-- [ ] 4.5 无 MCP 格：普通 run 不出现 `[MCP]` 消息。
-- [ ] 4.6 记录结果到本文件，格式同 `fix-sdk-shell-tool-gate/tasks.md §4`。
+- [x] 4.1 坏 server 格：`command` 不存在的 stdio server，启用并在 claude-code agent 上勾选。预期 run `complete`，出现 `[MCP]` 系统消息点名该 server，且其工具不出现。**同时记录 SDK init 实际给出的 status 值**（若是「整个省略」，按 proposal 的兜底扩 `not-listed`）。
+  - 同时勾选坏 server `f2bad` 与健康 server `f2ok`：健康的 `mcp__f2ok__echo` 正常调用（`tool_result` 为 `f2-ok`）；会话内一条系统消息：`[MCP] 外部 MCP server 未能连接，本次运行不会提供它们的工具：\n- f2bad（failed）`；run `complete`。
+  - **SDK init 实际给出 `failed`**（不是整个省略）。原 proposal 里「省略 → `not-listed`」的兜底**不需要**实现。
+- [x] 4.2 健康 server 格：最小 stdio echo server。预期**没有** `[MCP]` 消息（无假阳性）。
+  - 只勾选 `f2ok`：工具调用成功，系统消息数 **0**。
+- [x] 4.3 解析失败格：env 引用不存在的 `${VAR}`。预期 run 开始前出现解析警告消息。
+  - `f2env` 的 `TOKEN` 引用 `${AGENTHUB_LIVE_MISSING_VAR_2026}`：run 前出现一条系统消息：`[MCP] 外部 MCP server 配置有问题，本次运行已跳过：\n- MCP server "f2env" could not be resolved: MCP env placeholder ${AGENTHUB_LIVE_MISSING_VAR_2026} is not set in the environment`；run `complete`。
+- [x] 4.4 持久化：刷新后警告仍在（系统消息落库）。
+  - 重启 dev server 后重新 GET 上述两个会话：4.1 与 4.3 的系统消息仍在（各 1 条），确认是 DB 持久化而非进程内状态。
+- [x] 4.5 无 MCP 格：普通 run 不出现 `[MCP]` 消息。
+  - 未勾选任何 server：agent 回复 `done`，系统消息数 **0**。
+- [x] 4.6 记录结果到本文件，格式同 `fix-sdk-shell-tool-gate/tasks.md §4`。
 
 > 这一步要起 dev server 并跑真实模型。dev server 曾多次被系统因内存终止，**动手前先问**，不自行启动。
