@@ -10,7 +10,7 @@ import {
   writeFileInWorkspace,
 } from '@/server/fs-service'
 import { pendingWrites } from '@/server/pending-writes'
-import { assertPathWithinWorkspace } from '@/server/workspace-utils'
+import { assertPathWithinWorkspace, getEffectiveCwd } from '@/server/workspace-utils'
 
 import type { ToolDef } from './types'
 
@@ -97,22 +97,32 @@ export const fsWriteTool: ToolDef = {
       workspace,
     })
 
-    const decision = await new Promise<{ applied: boolean }>((resolve) => {
-      pendingWrites.attachResolver(pending.id, resolve)
-      // Run abort → pending 也取消
-      const onAbort = () => {
-        pendingWrites.cancel(pending.id)
-        resolve({ applied: false })
-      }
-      if (ctx.abortSignal.aborted) {
-        onAbort()
-      } else {
-        ctx.abortSignal.addEventListener('abort', onAbort, { once: true })
-      }
+    let resolveDecision: (decision: { applied: boolean; error?: string }) => void = () => {}
+    const decisionPromise = new Promise<{ applied: boolean; error?: string }>((resolve) => {
+      resolveDecision = resolve
     })
+    const onAbort = () => {
+      pendingWrites.cancel(pending.id)
+      resolveDecision({ applied: false })
+    }
+    pendingWrites.attachResolver(pending.id, resolveDecision)
+    // Run abort → pending 也取消
+    if (ctx.abortSignal.aborted) {
+      onAbort()
+    } else {
+      ctx.abortSignal.addEventListener('abort', onAbort, { once: true })
+    }
+
+    const decision = await decisionPromise
+    ctx.abortSignal.removeEventListener('abort', onAbort)
 
     if (!decision.applied) {
-      return { ok: false, error: 'User rejected the file change' }
+      return {
+        ok: false,
+        error: decision.error
+          ? `File write failed: ${decision.error}`
+          : 'User rejected the file change',
+      }
     }
 
     recordFileWrite(ctx.runId, absPath, parsed.data.content)
@@ -128,6 +138,7 @@ export const fsWriteTool: ToolDef = {
       value: {
         path: parsed.data.path,
         absolutePath: absPath,
+        cwd: getEffectiveCwd(workspace),
         bytes: Buffer.byteLength(parsed.data.content, 'utf8'),
         applied: 'review' as const,
       },

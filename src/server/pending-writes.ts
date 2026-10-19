@@ -14,10 +14,16 @@ import { newPendingWriteId } from './ids'
  * 详见 specs/07-tools.md 「fs_write 审批模式」一节。
  */
 
+interface PendingDecision {
+  applied: boolean
+  /** approve 时写盘失败的原因；reject / abort 不填。 */
+  error?: string
+}
+
 interface PendingEntry {
   write: PendingWrite
   workspace: WorkspaceRow
-  resolver: ((decision: { applied: boolean }) => void) | null
+  resolver: ((decision: PendingDecision) => void) | null
   /** true = approve 时不调 writeFileInWorkspace（写盘由调用方负责，如 Claude Code SDK 内置 Edit/Write）。 */
   skipWrite: boolean
 }
@@ -68,7 +74,7 @@ class PendingWritesStore {
     return write
   }
 
-  attachResolver(id: string, resolver: (decision: { applied: boolean }) => void): void {
+  attachResolver(id: string, resolver: (decision: PendingDecision) => void): void {
     const entry = this.map.get(id)
     if (entry) entry.resolver = resolver
   }
@@ -91,9 +97,10 @@ class PendingWritesStore {
       try {
         writeFileInWorkspace(entry.workspace, entry.write.path, entry.write.newContent)
       } catch (err) {
-        // 写入失败仍视作「未应用」让 LLM 看到错误，但 dialog 也要关
+        // 写入失败不是「用户拒绝」：把真实原因带回工具结果，dialog 仍要关。
+        const message = err instanceof Error ? err.message : String(err)
         console.error('[pendingWrites] approve write failed', err)
-        this.finalize(id, false)
+        this.finalize(id, false, message)
         return false
       }
     }
@@ -115,10 +122,10 @@ class PendingWritesStore {
     this.map.delete(id)
   }
 
-  private finalize(id: string, applied: boolean) {
+  private finalize(id: string, applied: boolean, error?: string) {
     const entry = this.map.get(id)
     if (!entry) return
-    entry.resolver?.({ applied })
+    entry.resolver?.({ applied, ...(error ? { error } : {}) })
     this.map.delete(id)
     eventBus.publish({
       type: 'fs_write.resolved',
