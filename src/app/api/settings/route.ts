@@ -17,7 +17,8 @@ const PatchBody = z.object({
   deepseekApiKey: z.string().nullable().optional(),
   arkApiKey: z.string().nullable().optional(),
   companionMode: z.enum(['off', 'lan', 'tailnet']).optional(),
-  mobileDeviceToken: z.string().nullable().optional(),
+  // 这个 token 是局域网唯一的凭据；拒绝过短的值，避免手填出「1」这类可猜 token。
+  mobileDeviceToken: z.string().min(16).max(256).nullable().optional(),
   deploymentPublishEnabled: z.boolean().optional(),
   deploymentPublishDir: z.string().nullable().optional(),
   deploymentPublicBaseUrl: z.string().nullable().optional(),

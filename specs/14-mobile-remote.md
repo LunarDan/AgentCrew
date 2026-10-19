@@ -104,7 +104,7 @@ P0 实现允许先使用「桌面端地址 + 设备 token」完成配对：
 - 打包版 Electron 在 `companion_mode !== 'off'` 且 token 存在时，对 `0.0.0.0:60646` 起一个**只转发 `/api/mobile/*`** 的反向代理；Next 本体始终只监听 `127.0.0.1`（见 §5.4 的实现约束）；
 - 手机 App 手动填写地址与 token；扫码配对后续复用同一 payload。
 
-**鉴权来源（2026-10-20）**：`/api/mobile/*` 的期望 token 优先取环境变量（dev 注入 / Electron bootstrap），否则取 `app_settings.companion_mode + mobile_device_token`。设置表是持久来源 —— 进程重启后旧 token 仍有效；`companion_mode = 'off'` 时 DB token 不再放行（环境变量覆盖仅用于 dev）。`GET /api/mobile/snapshot` 的 `server.companionMode` 同样来自设置表，不再读单独的 `AGENTHUB_COMPANION_MODE` 环境变量。
+**鉴权来源（2026-10-20）**：`/api/mobile/*` 的期望 token 优先取环境变量（dev 注入 / Electron bootstrap），否则取 `app_settings.companion_mode + mobile_device_token`。设置表是持久来源 —— 进程重启后旧 token 仍有效；`companion_mode = 'off'` 时 DB token 不再放行（环境变量覆盖仅用于 dev）。`GET /api/mobile/snapshot` 的 `server.companionMode` 同样来自设置表，不再读单独的 `AGENTHUB_COMPANION_MODE` 环境变量。Token 由 `newMobileDeviceToken()` 生成（24 字节随机，base64url）；`PATCH /api/settings` 拒绝短于 16 字符的 `mobileDeviceToken`，避免手填出可猜的弱 token。比较使用 `timingSafeEqual`。
 
 ### 4.2 Tailscale / Tailnet
 
