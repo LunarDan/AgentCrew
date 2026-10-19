@@ -55,7 +55,7 @@ export function ApprovalsScreen({
                 <button
                   type="button"
                   className="danger-action"
-                  disabled={busyId === write.id}
+                  disabled={busyId !== null}
                   onClick={() => onWriteDecision(write.id, 'reject')}
                 >
                   <X className="button-icon" aria-hidden="true" />
@@ -64,7 +64,7 @@ export function ApprovalsScreen({
                 <button
                   type="button"
                   className="primary-action small"
-                  disabled={busyId === write.id}
+                  disabled={busyId !== null}
                   onClick={() => onWriteDecision(write.id, 'approve')}
                 >
                   <Check className="button-icon" aria-hidden="true" />
@@ -181,7 +181,7 @@ export function ApprovalsScreen({
                 <button
                   type="button"
                   className="primary-action full"
-                  disabled={!canSubmit || busyId === item.id}
+                  disabled={!canSubmit || busyId !== null}
                   onClick={() => onQuestionAnswer(item.id, buildAnswers(item, draft))}
                 >
                   <Send className="button-icon" aria-hidden="true" />

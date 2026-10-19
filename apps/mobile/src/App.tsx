@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ChevronLeft, Home, Loader2, Menu, RefreshCw, Settings, X } from 'lucide-react'
 
 import { createMobileApiClient } from './api/client'
@@ -40,12 +40,17 @@ export function App() {
   const [error, setError] = useState<string | null>(null)
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null)
 
+  const selectedConversationRef = useRef<string | null>(null)
+  const snapshotSeq = useRef(0)
+  const artifactSeq = useRef(0)
+  const busyRef = useRef(false)
+
   const api = useMemo(() => createMobileApiClient(connection), [connection])
   const configured = !!normalizeBaseUrl(connection.baseUrl) && !!connection.deviceToken.trim()
   const connectionFingerprint = `${normalizeBaseUrl(connection.baseUrl)}\n${connection.deviceToken.trim()}`
   const connectionOk = configured && lastSuccessfulConnection === connectionFingerprint
 
-  const recordSnapshotSuccess = useCallback(
+  const applySnapshot = useCallback(
     (next: MobileSnapshot) => {
       setSnapshot(next)
       setLastSuccessfulConnection(connectionFingerprint)
@@ -56,9 +61,38 @@ export function App() {
     [connection.baseUrl, connectionFingerprint],
   )
 
+  /** 所有快照刷新都走这里：只接受最后发出的那次响应，避免旧响应覆盖新状态。 */
+  const loadSnapshot = useCallback(async () => {
+    const seq = ++snapshotSeq.current
+    const next = await api.getSnapshot()
+    if (seq === snapshotSeq.current) applySnapshot(next)
+    return next
+  }, [api, applySnapshot])
+
+  const selectConversation = useCallback((id: string | null) => {
+    selectedConversationRef.current = id
+    setSelectedConversationId(id)
+    if (id === null) setConversationDetail(null)
+  }, [])
+
   useEffect(() => {
     saveConnection(connection)
   }, [connection])
+
+  // 换 host / token 后旧数据一律作废：不能把上一个桌面端的会话或产物缓存显示/发送到新 host。
+  useEffect(() => {
+    snapshotSeq.current++
+    artifactSeq.current++
+    setSnapshot(null)
+    setConversationDetail(null)
+    setArtifactPreview(null)
+    setArtifactCache({})
+    setArtifactError(null)
+    setArtifactLoadingId(null)
+    setLastSyncedAt(null)
+    setLastSuccessfulConnection(null)
+    setError(null)
+  }, [connectionFingerprint])
 
   useEffect(() => {
     if (!configured || activeView === 'settings') return
@@ -67,8 +101,7 @@ export function App() {
 
     async function refreshMobileSnapshot() {
       try {
-        const next = await api.getSnapshot()
-        if (!cancelled) recordSnapshotSuccess(next)
+        await loadSnapshot()
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err))
       }
@@ -82,7 +115,7 @@ export function App() {
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [activeView, api, configured, recordSnapshotSuccess])
+  }, [activeView, configured, loadSnapshot])
 
   useEffect(() => {
     if (!configured || activeView === 'settings') return
@@ -95,10 +128,7 @@ export function App() {
       if (timer !== null) return
       timer = window.setTimeout(() => {
         timer = null
-        void api
-          .getSnapshot()
-          .then(recordSnapshotSuccess)
-          .catch(() => {})
+        void loadSnapshot().catch(() => {})
       }, 500)
     }
 
@@ -114,7 +144,7 @@ export function App() {
       controller.abort()
       if (timer !== null) window.clearTimeout(timer)
     }
-  }, [activeView, api, configured, recordSnapshotSuccess])
+  }, [activeView, api, configured, loadSnapshot])
 
   useEffect(() => {
     if (!configured || !selectedConversationId) return
@@ -124,7 +154,7 @@ export function App() {
     async function refreshConversationDetail() {
       try {
         const next = await api.getConversation(conversationId)
-        if (!cancelled) {
+        if (!cancelled && selectedConversationRef.current === conversationId) {
           setConversationDetail(next)
           setLastSuccessfulConnection(connectionFingerprint)
         }
@@ -151,8 +181,7 @@ export function App() {
     setLoading(true)
     setError(null)
     try {
-      const next = await api.getSnapshot()
-      recordSnapshotSuccess(next)
+      await loadSnapshot()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -160,19 +189,24 @@ export function App() {
     }
   }
 
-  async function runMobileAction(id: string, action: () => Promise<void>) {
+  async function runMobileAction(id: string, action: () => Promise<void>): Promise<boolean> {
     if (!configured) {
       setError('请先在设置里填写桌面端地址和设备 token。')
-      return
+      return false
     }
+    if (busyRef.current) return false
+    busyRef.current = true
     setOperationId(id)
     setError(null)
     try {
       await action()
-      recordSnapshotSuccess(await api.getSnapshot())
+      await loadSnapshot()
+      return true
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
+      return false
     } finally {
+      busyRef.current = false
       setOperationId(null)
     }
   }
@@ -182,16 +216,21 @@ export function App() {
       setError('请先在设置里填写桌面端地址和设备 token。')
       return
     }
-    setSelectedConversationId(id)
+    selectConversation(id)
     setActiveView('home')
     setDrawerOpen(false)
     setLoading(true)
     setError(null)
     try {
-      setConversationDetail(await api.getConversation(id))
+      const detail = await api.getConversation(id)
+      // 慢请求返回时用户可能已经返回列表或打开了别的会话：丢弃过期响应。
+      if (selectedConversationRef.current !== id) return
+      setConversationDetail(detail)
       setLastSuccessfulConnection(connectionFingerprint)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      if (selectedConversationRef.current === id) {
+        setError(err instanceof Error ? err.message : String(err))
+      }
     } finally {
       setLoading(false)
     }
@@ -199,55 +238,60 @@ export function App() {
 
   function openHome() {
     setActiveView('home')
-    setSelectedConversationId(null)
-    setConversationDetail(null)
+    selectConversation(null)
     closeArtifactPreview()
     setDrawerOpen(false)
   }
 
   function backToList() {
-    setSelectedConversationId(null)
-    setConversationDetail(null)
+    selectConversation(null)
     closeArtifactPreview()
   }
 
   function openSettings() {
     setActiveView('settings')
-    setSelectedConversationId(null)
-    setConversationDetail(null)
+    selectConversation(null)
     closeArtifactPreview()
     setDrawerOpen(false)
   }
 
-  async function sendMessageFromMobile(content: string) {
-    if (!selectedConversationId) return
-    await runMobileAction('send-message', async () => {
-      await api.sendMessage(selectedConversationId, content)
-      setConversationDetail(await api.getConversation(selectedConversationId))
+  async function sendMessageFromMobile(content: string): Promise<boolean> {
+    const conversationId = selectedConversationId
+    if (!conversationId) return false
+    return runMobileAction('send-message', async () => {
+      await api.sendMessage(conversationId, content)
+      const detail = await api.getConversation(conversationId)
+      if (selectedConversationRef.current === conversationId) setConversationDetail(detail)
     })
   }
 
   async function withdrawMessageFromMobile(messageId: string) {
-    if (!selectedConversationId) return
+    const conversationId = selectedConversationId
+    if (!conversationId) return
     await runMobileAction(`withdraw-${messageId}`, async () => {
-      await api.withdrawMessage(selectedConversationId, messageId)
-      setConversationDetail(await api.getConversation(selectedConversationId))
+      await api.withdrawMessage(conversationId, messageId)
+      const detail = await api.getConversation(conversationId)
+      if (selectedConversationRef.current === conversationId) setConversationDetail(detail)
     })
   }
 
   async function editMessageFromMobile(messageId: string, content: string) {
-    if (!selectedConversationId) return
+    const conversationId = selectedConversationId
+    if (!conversationId) return
     await runMobileAction(`edit-${messageId}`, async () => {
-      await api.editMessage(selectedConversationId, messageId, content)
-      setConversationDetail(await api.getConversation(selectedConversationId))
+      await api.editMessage(conversationId, messageId, content)
+      const detail = await api.getConversation(conversationId)
+      if (selectedConversationRef.current === conversationId) setConversationDetail(detail)
     })
   }
 
   async function regenerateFromMobile() {
-    if (!selectedConversationId) return
+    const conversationId = selectedConversationId
+    if (!conversationId) return
     await runMobileAction('regenerate', async () => {
-      await api.regenerate(selectedConversationId)
-      setConversationDetail(await api.getConversation(selectedConversationId))
+      await api.regenerate(conversationId)
+      const detail = await api.getConversation(conversationId)
+      if (selectedConversationRef.current === conversationId) setConversationDetail(detail)
     })
   }
 
@@ -258,29 +302,45 @@ export function App() {
     }
     const cached = artifactCache[artifactId]
     if (cached) {
+      artifactSeq.current++
       setArtifactPreview(cached)
       setArtifactError(null)
+      setArtifactLoadingId(null)
       return
     }
 
+    const seq = ++artifactSeq.current
     setArtifactLoadingId(artifactId)
     setArtifactError(null)
     setArtifactPreview(null)
     try {
       const artifact = await api.getArtifact(artifactId)
+      if (seq !== artifactSeq.current) return
       setArtifactCache((current) => ({ ...current, [artifact.id]: artifact }))
       setArtifactPreview(artifact)
     } catch (err) {
-      setArtifactError(err instanceof Error ? err.message : String(err))
+      if (seq === artifactSeq.current) {
+        setArtifactError(err instanceof Error ? err.message : String(err))
+      }
     } finally {
-      setArtifactLoadingId(null)
+      if (seq === artifactSeq.current) setArtifactLoadingId(null)
     }
   }
 
   function closeArtifactPreview() {
+    artifactSeq.current++
     setArtifactPreview(null)
     setArtifactError(null)
     setArtifactLoadingId(null)
+  }
+
+  /** host 变了就丢弃旧 token：不能把 A 的长效 token 发给 B（可能只是共享/不可信的地址）。 */
+  function updateConnection(next: ConnectionConfig) {
+    setConnection((current) =>
+      normalizeBaseUrl(next.baseUrl) !== normalizeBaseUrl(current.baseUrl)
+        ? { ...next, deviceToken: '' }
+        : next,
+    )
   }
 
   usePullToRefresh(() => {
@@ -288,17 +348,21 @@ export function App() {
   }, configured && !selectedConversationId && activeView === 'home')
 
   const hasPending = !!snapshot && (snapshot.pendingWrites.length > 0 || snapshot.pendingQuestions.length > 0)
+  const detailForSelected =
+    conversationDetail && conversationDetail.conversation.id === selectedConversationId
+      ? conversationDetail
+      : null
 
   const content = selectedConversationId ? (
       <ConversationsScreen
         connected={configured}
         loading={loading}
         snapshot={snapshot}
-        detail={conversationDetail}
+        detail={detailForSelected}
         selectedConversationId={selectedConversationId}
         onOpenConversation={(id) => void openConversation(id)}
         onOpenArtifact={(id) => void openArtifactPreview(id)}
-        onSendMessage={(content) => void sendMessageFromMobile(content)}
+        onSendMessage={(content) => sendMessageFromMobile(content)}
         onWithdrawMessage={(messageId) => void withdrawMessageFromMobile(messageId)}
         onEditMessage={(messageId, content) => void editMessageFromMobile(messageId, content)}
         onRegenerate={() => void regenerateFromMobile()}
@@ -311,8 +375,8 @@ export function App() {
         error={error}
         connectionOk={connectionOk}
         recentHosts={recentHosts}
-        onChange={setConnection}
-        onSelectHost={(baseUrl) => setConnection((current) => ({ ...current, baseUrl }))}
+        onChange={updateConnection}
+        onSelectHost={(baseUrl) => updateConnection({ ...connection, baseUrl })}
         onTest={() => void refreshSnapshot()}
       />
     ) : (

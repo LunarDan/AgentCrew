@@ -61,7 +61,7 @@ export function StatusScreen({
           {(snapshot?.runningRuns ?? []).map((run) => {
             const agentName =
               snapshot?.agents.find((agent) => agent.id === run.agentId)?.name ?? "Agent"
-            const busy = busyRunId === run.id
+            const busy = busyRunId !== null
             return (
               <article key={run.id} className="approval-card">
                 <div>

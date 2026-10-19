@@ -59,7 +59,7 @@ export function ConversationsScreen({
   selectedConversationId: string | null
   onOpenConversation: (id: string) => void
   onOpenArtifact: (id: string) => void
-  onSendMessage: (content: string) => void
+  onSendMessage: (content: string) => Promise<boolean> | boolean
   onWithdrawMessage: (messageId: string) => void
   onEditMessage: (messageId: string, content: string) => void
   onRegenerate: () => void
@@ -112,11 +112,12 @@ export function ConversationsScreen({
     return () => window.removeEventListener('scroll', handleScroll)
   }, [selectedConversationId, scrollSignature])
 
-  function submitDraft() {
+  async function submitDraft() {
     const content = draft.trim()
-    if (!content) return
-    onSendMessage(content)
-    setDraft('')
+    if (!content || busy) return
+    const ok = await onSendMessage(content)
+    if (!ok) return // 发送失败时保留草稿，用户可以直接重试
+    setDraft((current) => (current.trim() === content ? '' : current))
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
 
@@ -132,7 +133,7 @@ export function ConversationsScreen({
   function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
-      submitDraft()
+      void submitDraft()
     }
   }
 
@@ -180,7 +181,7 @@ export function ConversationsScreen({
               className="composer"
               onSubmit={(event) => {
                 event.preventDefault()
-                submitDraft()
+                void submitDraft()
               }}
             >
               <textarea
@@ -191,7 +192,7 @@ export function ConversationsScreen({
                 onChange={(event) => handleDraftChange(event.target.value)}
                 onKeyDown={handleComposerKeyDown}
               />
-              <button type="submit" className="primary-action icon-action" aria-label="发送" disabled={!draft.trim()}>
+              <button type="submit" className="primary-action icon-action" aria-label="发送" disabled={!draft.trim() || busy}>
                 <Send className="button-icon" aria-hidden="true" />
               </button>
             </form>
