@@ -8,7 +8,10 @@ export interface DiffLine {
   text: string
 }
 
-const MAX_LINES = 1500
+const MAX_LINES = 600
+
+/** 超长文件走截断的「全删 + 全增」，避免把整份文件铺进 WebView。 */
+const MAX_FALLBACK_LINES = 400
 
 /** LCS-based line diff. Falls back to "all removed + all added" for very large inputs. */
 export function computeLineDiff(oldText: string, newText: string): DiffLine[] {
@@ -18,10 +21,12 @@ export function computeLineDiff(oldText: string, newText: string): DiffLine[] {
   const n = b.length
 
   if (m > MAX_LINES || n > MAX_LINES) {
-    return [
-      ...a.map((text): DiffLine => ({ kind: "del", text })),
-      ...b.map((text): DiffLine => ({ kind: "add", text })),
-    ]
+    const removed = a.slice(0, MAX_FALLBACK_LINES).map((text): DiffLine => ({ kind: "del", text }))
+    const added = b.slice(0, MAX_FALLBACK_LINES).map((text): DiffLine => ({ kind: "add", text }))
+    const omitted = m - removed.length + (n - added.length)
+    return omitted > 0
+      ? [...removed, ...added, { kind: "hunk", text: `… 省略 ${omitted} 行（文件过大）` }]
+      : [...removed, ...added]
   }
 
   // lcs[i][j] = length of longest common subsequence of a[i:] and b[j:]
