@@ -1075,6 +1075,9 @@ async function maybeCreateProjectArtifact(args: {
     agentId: args.agentId,
   }
   const artifactId = newArtifactId()
+  // 没有可挂载的消息就不创建产物：否则它没有任何引用，撤回 / 重新生成也永远清不掉。
+  const targetMessageId = args.result.outputMessageIds?.at(-1)
+  if (!targetMessageId) return null
   const createdAt = Date.now()
   await db.insert(schema.artifacts).values({
     id: artifactId,
@@ -1105,14 +1108,30 @@ async function maybeCreateProjectArtifact(args: {
     },
   })
   // 挂到消息上，撤回 / 重新生成时才能随消息一起清掉这个自动产物
-  await appendArtifactRefPart(args.result.outputMessageIds?.at(-1), artifactId)
+  const attached = await appendArtifactRefPart(targetMessageId, artifactId)
+  if (!attached) {
+    // 目标消息在插入与挂载之间被删了（撤回 / 并发清理）：产物已无引用，删掉并通知客户端
+    args.result.artifactIds = args.result.artifactIds.filter((id) => id !== artifactId)
+    await db.delete(schema.artifacts).where(eq(schema.artifacts.id, artifactId))
+    publish({
+      type: 'message.removed',
+      conversationId: args.conversationId,
+      timestamp: Date.now(),
+      messageIds: [],
+      artifactIds: [artifactId],
+    })
+    return null
+  }
   return artifactId
 }
 
-async function appendArtifactRefPart(messageId: string | undefined, artifactId: string): Promise<void> {
-  if (!messageId) return
+async function appendArtifactRefPart(
+  messageId: string | undefined,
+  artifactId: string,
+): Promise<boolean> {
+  if (!messageId) return false
   const row = await db.query.messages.findFirst({ where: eq(schema.messages.id, messageId) })
-  if (!row) return
+  if (!row) return false
   const parts: MessagePart[] = [...row.parts, { type: 'artifact_ref', artifactId }]
   await db.update(schema.messages).set({ parts }).where(eq(schema.messages.id, messageId))
   publish({
@@ -1123,6 +1142,7 @@ async function appendArtifactRefPart(messageId: string | undefined, artifactId: 
     partIndex: parts.length - 1,
     part: { type: 'artifact_ref', artifactId },
   })
+  return true
 }
 
 async function runChildTaskAttempt(
