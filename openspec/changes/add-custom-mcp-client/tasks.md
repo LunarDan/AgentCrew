@@ -32,9 +32,9 @@
 
 ## 4. Tests（commit 4）
 
-- [ ] 4.1 `custom-mcp-tools.test.ts` — 合法名不变；非法字符清洗；64 字符截断；与内置/彼此冲突时加 hash；映射路由取回原始 server/tool；结果转换（text / structuredContent / image 不内联 / isError / 截断）。
-- [ ] 4.2 `custom-mcp-client.test.ts` — 用 `@modelcontextprotocol/sdk` 起一个进程内 stdio echo server：connect → listTools → callTool → close；坏 `command` 返回失败名单而不抛；close 后无残留子进程。
-- [ ] 4.3 `agent-runner` / `mcp-notices` 已有用例回归；确认无 server 时 custom 行为不变。
+- [x] 4.1 `custom-mcp-tools.test.ts` — 合法名不变；非法字符清洗；64 字符截断；与内置/彼此冲突时加 hash；映射路由取回原始 server/tool；结果转换（text / structuredContent / image 不内联 / isError / 截断）。
+- [x] 4.2 `custom-mcp-client.test.ts` — 用 `@modelcontextprotocol/sdk` 起一个进程内 stdio echo server：connect → listTools → callTool → close；坏 `command` 返回失败名单而不抛；close 后无残留子进程。
+- [x] 4.3 `agent-runner` / `mcp-notices` 已有用例回归；确认无 server 时 custom 行为不变。（2026-10-19：全量 39 文件 / 308 passed / 1 skipped）
 
 ## 5. Live verification（动手前问）
 
