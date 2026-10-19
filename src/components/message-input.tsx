@@ -388,6 +388,13 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
     setSending(false)
   }, [conversationId])
 
+  // 异步请求回来时用来判断用户是否已经切走：切走后不能再改新会话的输入框状态
+  const conversationIdRef = useRef(conversationId)
+  useEffect(() => {
+    conversationIdRef.current = conversationId
+  }, [conversationId])
+  const isCurrentConversation = () => conversationIdRef.current === conversationId
+
   const mentionedAgents = mentionedIds.map((id) => agents[id]).filter(Boolean)
 
   const detectSlashTrigger = (text: string, cursor: number): SlashTrigger | null => {
@@ -560,7 +567,7 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
     } catch (err) {
       console.error('[MessageInput] compact failed', err)
     } finally {
-      setSending(false)
+      if (isCurrentConversation()) setSending(false)
     }
   }
 
@@ -587,9 +594,9 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
     } catch (err) {
       console.error('[MessageInput] deploy failed', err)
       removeMessages(conversationId, [tempId])
-      setSendError(err instanceof Error ? err.message : String(err))
+      if (isCurrentConversation()) setSendError(err instanceof Error ? err.message : String(err))
     } finally {
-      setSending(false)
+      if (isCurrentConversation()) setSending(false)
     }
   }
 
@@ -704,10 +711,12 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
         await reviseDispatchPlan(conversationId, planReview.planId, text)
       } catch (err) {
         console.error('[MessageInput] revise plan failed', err)
-        setContent(text)
-        setSendError(err instanceof Error ? err.message : String(err))
+        if (isCurrentConversation()) {
+          setContent(text)
+          setSendError(err instanceof Error ? err.message : String(err))
+        }
       } finally {
-        setSending(false)
+        if (isCurrentConversation()) setSending(false)
       }
       return
     }
@@ -758,16 +767,18 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
       upsertReturnedMessages(result.messages)
     } catch (err) {
       console.error('[MessageInput] send failed', err)
-      // 发送失败：撤掉乐观消息，并把用户输入原样放回输入框，避免留下永远等不到回复的假消息
+      // 发送失败：撤掉乐观消息（按会话分桶，切走也要撤），输入框回填只在还停在这个会话时做
       removeMessages(conversationId, [tempId])
-      setContent(text)
-      setMentionedIds(mentionedIds)
-      setPendingQuote(quote)
-      if (parentId) setReplyTarget(conversationId, parentId)
       for (const attachment of pending) addPendingAttachment(conversationId, attachment)
-      setSendError(err instanceof Error ? err.message : String(err))
+      if (parentId) setReplyTarget(conversationId, parentId)
+      if (isCurrentConversation()) {
+        setContent(text)
+        setMentionedIds(mentionedIds)
+        setPendingQuote(quote)
+        setSendError(err instanceof Error ? err.message : String(err))
+      }
     } finally {
-      setSending(false)
+      if (isCurrentConversation()) setSending(false)
     }
   }
 
