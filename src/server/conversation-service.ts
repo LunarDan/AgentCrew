@@ -267,6 +267,17 @@ export async function listMessages(conversationId: string) {
 
 // ─── 删除会话 ────────────────────────────────────────────
 export async function deleteConversation(conversationId: string): Promise<void> {
+  // 运行中的 run 仍在写消息 / 调用工具；级联删除后它们会写回已删除的会话
+  const activeRuns = await db.query.agentRuns.findMany({
+    where: and(
+      eq(schema.agentRuns.conversationId, conversationId),
+      inArray(schema.agentRuns.status, ['queued', 'running']),
+    ),
+  })
+  if (activeRuns.length > 0) {
+    throw new Error('Cannot delete a conversation while agent runs are active')
+  }
+
   const workspace = await db.query.workspaces.findFirst({
     where: eq(schema.workspaces.conversationId, conversationId),
   })
@@ -561,11 +572,16 @@ export async function sendMessage(args: SendMessageArgs): Promise<SendMessageRes
 
   // 把附件作为新 parts 加到 message
   if (args.attachmentIds && args.attachmentIds.length > 0) {
+    const requestedIds = Array.from(new Set(args.attachmentIds))
     const rows = await db.query.attachments.findMany({
-      where: (a, { inArray }) => inArray(a.id, args.attachmentIds!),
+      where: (a, { inArray }) => inArray(a.id, requestedIds),
     })
-    for (const r of rows) {
-      if (r.conversationId !== args.conversationId) continue // 防越权引用其他会话的附件
+    const usable = rows.filter((r) => r.conversationId === args.conversationId) // 防越权引用其他会话的附件
+    const missing = requestedIds.filter((id) => !usable.some((r) => r.id === id))
+    if (missing.length > 0) {
+      throw new Error(`Attachments not found in this conversation: ${missing.join(', ')}`)
+    }
+    for (const r of usable) {
       parts.push(
         r.kind === 'image'
           ? {
@@ -584,6 +600,10 @@ export async function sendMessage(args: SendMessageArgs): Promise<SendMessageRes
             },
       )
     }
+  }
+
+  if (parts.length === 0) {
+    throw new Error('Message must contain text or at least one valid attachment')
   }
 
   await db.insert(schema.messages).values({
