@@ -272,7 +272,13 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
         yield baseEvent(input, { type: 'part.end', messageId, partIndex: textPartIndex })
       }
 
-      const toolCalls = Array.from(toolCallBuffer.values()).filter((tc) => tc.id && tc.name)
+      // 有些兼容 provider 会晚给 id，甚至不给 id；不能因此丢掉已经流下来的调用。
+      // 丢掉会让本轮看起来「没有工具调用」而直接收尾，模型请求的动作永远不执行。
+      const toolCalls: AccumulatingToolCall[] = []
+      for (const [idx, tc] of toolCallBuffer) {
+        if (!tc.id && !tc.name && !tc.argsBuffer) continue
+        toolCalls.push({ ...tc, id: tc.id || `call_${idx}` })
+      }
 
       // 本 turn 的 usage 必须在执行工具之前发出：plan 阶段会在 plan_tasks 的
       // tool.call 处停下来，之后再发就永远发不出去。AgentRunner 按 runId 累加。
@@ -321,6 +327,10 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
       // 执行工具
       for (const tc of toolCalls) {
         if (signal.aborted) return
+        // 连名字都没有就无法执行：显式报错，别让 run 静默「正常结束」
+        if (!tc.name) {
+          throw new Error(`Provider returned a tool call without a function name (id ${tc.id})`)
+        }
         let args: unknown
         try {
           args = tc.argsBuffer ? JSON.parse(tc.argsBuffer) : {}
@@ -498,7 +508,6 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
       const textBlocks = new Map<number, { partIndex: number; text: string }>()
       const thinkingBlocks = new Map<number, { partIndex: number; text: string }>()
       const toolBlocks = new Map<number, { id: string; name: string; json: string }>()
-      let stopReason: string | null = null
       const msgUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 }
       let cacheCreationTokens = 0
 
@@ -590,7 +599,6 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
             break
           }
           case 'message_delta': {
-            stopReason = event.delta.stop_reason ?? stopReason
             msgUsage.outputTokens = event.usage.output_tokens
             break
           }
@@ -639,7 +647,9 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
         })
       }
 
-      if (toolUses.length === 0 || stopReason !== 'tool_use') {
+      // 是否继续由「有没有工具调用」决定：部分 Anthropic 兼容网关会给出 tool_use 块
+      // 却把 stop_reason 报成 end_turn / max_tokens 或干脆省略。
+      if (toolUses.length === 0) {
         yield baseEvent(input, { type: 'message.end', messageId })
         return
       }
