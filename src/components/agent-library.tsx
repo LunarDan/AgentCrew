@@ -41,6 +41,7 @@ export function AgentLibrary() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const deleteTarget = deleteTargetId ? agents.find((a) => a.id === deleteTargetId) : null
 
@@ -97,12 +98,19 @@ export function AgentLibrary() {
   const confirmDelete = async () => {
     if (!deleteTargetId) return
     setDeleting(true)
+    setDeleteError(null)
     try {
       await deleteAgentAPI(deleteTargetId)
       removeAgent(deleteTargetId)
       setDeleteTargetId(null)
     } catch (err) {
       console.error('[AgentLibrary] delete failed', err)
+      const message = err instanceof Error ? err.message : String(err)
+      setDeleteError(
+        /FOREIGN KEY constraint failed/i.test(message)
+          ? '这个 Agent 已经参与过会话或产生过产物，数据库外键约束不允许删除。'
+          : message,
+      )
     } finally {
       setDeleting(false)
     }
@@ -207,6 +215,7 @@ export function AgentLibrary() {
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation()
+                        setDeleteError(null)
                         setDeleteTargetId(a.id)
                       }}
                       title="删除 Agent"
@@ -229,16 +238,36 @@ export function AgentLibrary() {
         importedAgent={importedAgent}
       />
 
-      <Dialog open={!!deleteTargetId} onOpenChange={(open) => !open && setDeleteTargetId(null)}>
+      <Dialog
+        open={!!deleteTargetId}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteTargetId(null)
+            setDeleteError(null)
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>删除 Agent</DialogTitle>
             <DialogDescription>
-              确定删除「{deleteTarget?.name}」吗？已使用该 Agent 的会话将无法继续使用它。该操作不可恢复。
+              确定删除「{deleteTarget?.name}」吗？该操作不可恢复。参与过会话或产生过产物的 Agent
+              受数据库外键约束保护，无法删除。
             </DialogDescription>
           </DialogHeader>
+          {deleteError && (
+            <p className="rounded-md border border-red-200 bg-red-50 px-2 py-1.5 text-xs text-red-700 dark:border-red-900/70 dark:bg-red-950/40 dark:text-red-200">
+              {deleteError}
+            </p>
+          )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTargetId(null)}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDeleteTargetId(null)
+                setDeleteError(null)
+              }}
+            >
               取消
             </Button>
             <Button
