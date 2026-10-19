@@ -47,7 +47,7 @@
 |---|---|
 | 找回讨论细节 | "上周那个关于渲染管线的讨论在哪" → ⌘K → 输入"渲染管线" → 看到 3 个会话各命中几条 → 点开看 |
 | 找回代码片段 | "Claude 帮我写过那个 debounce 函数" → ⌘K → 输入"debounce" → 直接看到代码片段上下文 |
-| 在当前会话内搜 | "这段长对话里我刚才说的'切换模型'在哪里" → 不切会话（暂时不暴露此入口；可后续加 "搜索本会话" toggle） |
+| 在当前会话内搜 | "这段长对话里我刚才说的'切换模型'在哪里" → 不切会话 → 点输入框右侧「仅当前会话」→ 只搜 `activeConversationId` 对应会话；没有打开的会话时该按钮不显示 |
 | 模糊中文 | ⌘K → 输入"模型"（2 字）→ 走 LIKE 兜底，结果多；输入"模型切"（3 字）→ 走 FTS5，结果带高亮 |
 
 ---
@@ -334,10 +334,12 @@ interface SearchState {
   loading: boolean
   error: string | null
   highlightedMessageId: string | null
+  onlyCurrentConversation: boolean   // 仅搜 activeConversationId 对应会话
 
   openSearch: () => void
   closeSearch: () => void
   setQuery: (q: string) => void
+  setOnlyCurrentConversation: (on: boolean) => void
   runSearch: () => Promise<void>   // 内部 debounce 200ms
   jumpToHit: (hit: SearchHit) => void
   clearHighlight: () => void
@@ -350,6 +352,7 @@ interface SearchState {
    - 中文字符数 < 3（如 "模型"、"render 渲染"、"ai 模"）→ 带 `fallback=like`（LIKE 对中英都能兜底，不会因中文太短而漏掉）
    - 中文字符数 ≥ 3 → 走 FTS5 路径
 3. 简单规则：宁愿走 LIKE 兜底，**不**做"中英分词后分别查"的复杂逻辑
+4. `onlyCurrentConversation` 为真时带 `conversationId=activeConversationId`；此时没有打开的会话则自动退回全局搜索（该 flag 复位）
 
 `jumpToHit` 内部：
 - `closeSearch()`
@@ -367,6 +370,8 @@ src/components/message-highlight-layer.tsx // 在 ChatWindow 监听 highlightedM
 ```
 
 `<MessageList>` 渲染的每个 message 容器加 `id={`message-${msg.id}`}`，方便 `scrollIntoView` 定位；高亮通过临时 CSS class（2s 后移除）实现。
+
+输入框右侧的「仅当前会话」按钮只在存在 `activeConversationId` 时出现；切换后立即用同一 query 重搜（不走 200ms debounce），placeholder 与空状态文案同步切换。
 
 ### 9.3 不动的东西
 
