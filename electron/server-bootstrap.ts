@@ -185,7 +185,8 @@ async function waitUntilReady(url: string, timeoutMs = 15_000): Promise<void> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     try {
-      const resp = await fetch(url, { method: 'HEAD' })
+      // 没有超时的 HEAD 会挂死整个循环：端口被别的进程占住却不响应时，主窗口永远不会出现
+      const resp = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(2_000) })
       if (resp.status < 500) return
     } catch {
       // server 尚未起来
