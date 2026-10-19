@@ -93,7 +93,7 @@ interface AppState {
 | `tool.call` | 给消息 push 一个 `tool_use` part（与 `part.start` 的 assign 共用同一数组，依赖服务端已归一化的下标） |
 | `tool.result` | 给消息 push 一个 `tool_result` part（前端按 callId 合并渲染）；若同 callId 结果已存在，则更新已有结果以配合失败兜底的幂等处理 |
 | `artifact.create` | `artifacts[artifact.id] = artifact`（不在消息里插 `artifact_ref` part，那由 `part.start` 单独投递） |
-| `artifact.update` | 浅合并 `content` patch（TODO：当前没有 emitter，前端 reducer 已就绪） |
+| `artifact.update` | 浅合并 `content` patch（当前没有 in-place 更新路径：编辑走版本链，提交后是新的 artifact 行 + `artifact.create`；reducer 保留是为协议完整性） |
 | `deploy.status` | 不直接改 store；AgentRunner 会补发 `part.start(deploy_status)`，reducer 按普通 part 写入 |
 | `dispatch.plan` | 找该 runId 最新的 agent 消息作挂载点，创建 `DispatchState` |
 | `dispatch.start` | `taskStatus[taskId] = 'running'`，记 `childRunIds[taskId] = childRunId` |
