@@ -2010,6 +2010,9 @@ async function appendMcpNotice(
     return
   }
 
+  // plan / aggregate 等多次适配器调用可能报同一件事，同样的文案只留一份。
+  if (existing.parts.some((p) => p.type === 'text' && p.content === text)) return
+
   const parts = [...existing.parts, part]
   await db.update(schema.messages).set({ parts }).where(eq(schema.messages.id, messageId))
   publish({
