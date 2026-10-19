@@ -69,6 +69,7 @@ export function AskUserQuestionDialog({ conversationId }: { conversationId: stri
       >
         {current && (
           <AskUserBody
+            key={current.id}
             conversationId={conversationId}
             questionId={current.id}
             agentName={agentName}
@@ -107,12 +108,8 @@ function AskUserBody({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // 切换不同 question id 时重置 draft
-  useEffect(() => {
-    setDraft(initialDraft(questions))
-    setError(null)
-    setBusy(false)
-  }, [questionId, questions])
+  // 重置只跟 question id 走（由父级 key 负责）；重连时 questions 只是反序列化出新的同内容对象，
+  // 不能因此清掉用户正在填的选择与备注
 
   const allAnswered = useMemo(
     () =>
