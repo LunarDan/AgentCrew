@@ -7,6 +7,9 @@ interface RouteContext {
   params: Promise<{ id: string }>
 }
 
+/** 与 attachment-service 的 20MB 文件上限对齐，多留 1MB 给 multipart 边界与头部。 */
+const MAX_UPLOAD_BYTES = 21 * 1024 * 1024
+
 export async function GET(_req: NextRequest, ctx: RouteContext) {
   const { id } = await ctx.params
   const attachments = await listAttachments(id)
@@ -17,6 +20,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   const rejected = rejectCrossOriginWrite(req)
   if (rejected) return rejected
   const { id } = await ctx.params
+  // 先按 Content-Length 拒绝超大包：req.formData() 会把整个 body 读进内存。
+  const contentLength = Number(req.headers.get('content-length') ?? '0')
+  if (Number.isFinite(contentLength) && contentLength > MAX_UPLOAD_BYTES) {
+    return NextResponse.json({ error: 'Request body too large' }, { status: 413 })
+  }
   let form: FormData
   try {
     form = await req.formData()
