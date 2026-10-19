@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import { MessageItem } from '@/components/message-item'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -14,7 +14,10 @@ const STREAM_SCROLL_THROTTLE_MS = 80
 export function MessageList({ conversationId }: { conversationId: string }) {
   const messages = useMessagesForConversation(conversationId)
   const setMessagesForConversation = useAppStore((s) => s.setMessagesForConversation)
-  const messageIdsByConv = useAppStore((s) => s.messageIdsByConv[conversationId])
+  const fetchedConversationsRef = useRef<Set<string>>(new Set())
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [retryNonce, setRetryNonce] = useState(0)
+  const [loaded, setLoaded] = useState(false)
 
   const viewportRef = useRef<HTMLDivElement>(null)
   const scrollFrameRef = useRef<number | null>(null)
@@ -87,19 +90,29 @@ export function MessageList({ conversationId }: { conversationId: string }) {
   }, [conversationId, hasMessages])
 
   useEffect(() => {
-    if (messageIdsByConv) return
+    if (fetchedConversationsRef.current.has(conversationId)) {
+      setLoaded(true)
+      return
+    }
     let cancelled = false
+    setLoadError(null)
+    setLoaded(false)
     fetchMessages(conversationId)
       .then((list) => {
-        if (!cancelled) setMessagesForConversation(conversationId, list)
+        if (cancelled) return
+        setMessagesForConversation(conversationId, list)
+        fetchedConversationsRef.current.add(conversationId)
+        setLoaded(true)
       })
       .catch((err) => {
+        if (cancelled) return
         console.error('[MessageList] fetch failed', err)
+        setLoadError(err instanceof Error ? err.message : String(err))
       })
     return () => {
       cancelled = true
     }
-  }, [conversationId, messageIdsByConv, setMessagesForConversation])
+  }, [conversationId, retryNonce, setMessagesForConversation])
 
   useLayoutEffect(() => {
     if (messages.length === 0) return
@@ -133,6 +146,27 @@ export function MessageList({ conversationId }: { conversationId: string }) {
   ])
 
   if (messages.length === 0) {
+    if (loadError) {
+      return (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-8 text-sm text-muted-foreground">
+          <span>消息加载失败：{loadError}</span>
+          <button
+            type="button"
+            className="rounded border px-2 py-1 text-xs hover:bg-accent"
+            onClick={() => setRetryNonce((n) => n + 1)}
+          >
+            重试
+          </button>
+        </div>
+      )
+    }
+    if (!loaded) {
+      return (
+        <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
+          加载消息中…
+        </div>
+      )
+    }
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
         还没有消息，发一条试试。

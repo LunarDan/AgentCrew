@@ -257,7 +257,11 @@ export const useAppStore = create<AppState>()(
 
     setMessagesForConversation: (conversationId, list) =>
       set((s) => {
-        const nextIds = list.map((m) => m.id)
+        const snapshotIds = list.map((m) => m.id)
+        const snapshotSet = new Set(snapshotIds)
+        // GET 快照可能早于本次请求期间到达的 SSE 消息：并集合并，不能整桶覆盖
+        const existingIds = s.messageIdsByConv[conversationId] ?? []
+        const nextIds = [...snapshotIds, ...existingIds.filter((id) => !snapshotSet.has(id))]
         if (!areStringArraysEqual(s.messageIdsByConv[conversationId], nextIds)) {
           s.messageIdsByConv[conversationId] = nextIds
         }
