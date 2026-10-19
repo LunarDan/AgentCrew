@@ -58,7 +58,7 @@ L1 Persistence                          src/db/**（Drizzle+SQLite） + workspac
 | CodexAdapter | ✅ | @openai/codex-sdk + 线程续接 + AgentHub MCP bridge |
 | 自建 Agent | ✅ | 表单/对话式创建,自定义 prompt + 工具集 |
 | Orchestrator 编排 | ✅ | 三阶段规划 + DAG 调度 + 级联中止 + 可视化卡 + 同波次代码冲突检测（检测+上报，不自动合并） |
-| 工具系统 | ✅ | write/deploy/read_artifact · read_attachment · fs_read/fs_write/bash · plan_tasks · ask_user |
+| 工具系统 | ✅ | write/deploy/read_artifact · read_attachment · fs_read/fs_write/bash · web_fetch（SSRF 防护） · plan_tasks · ask_user |
 | Artifact 预览/编辑 | ✅ | web_app(iframe + preview URL + 本地静态发布/源码包/容器包) / document(md) / image / 版本对比 diff（历史 diff 只读兼容） / **ppt(幻灯片分页预览 + 固定逻辑画布缩放 + 溢出角标 + 完整 theme token + 导出真 .pptx)** · code_file workspace 预览/编辑 · 版本链 v1↔v2 · 选区改写 · 面板内编辑(CodeMirror)→提交新版本 · 导出 |
 | Workspace 沙箱 | ✅ | sandbox/local 双模式 · fs_write 审批(Review/Auto) · 双平台 shell 黑名单（按工具身份识别，Windows 的 `PowerShell` 同样覆盖）· SDK 隔离启动（workspace 的项目设置 / hooks / `.mcp.json` 不参与 run） |
 | 外部 MCP server | ✅ | P0/P1：设置面板登记（stdio/sse/http + 测试连接）+ Agent 勾选 · claude-code/codex 接线 · custom 自建 MCP client（per-run 连接 + loop 路由）· `ask` 审批门（Claude Code + custom）· ⚠️ **在沙箱与命令黑名单之外运行**（见「关键约定」） |
@@ -175,6 +175,7 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 ## 附 · 当前现状（易过时,以代码为准）
 
 ### ✅ 近期完成（最新一批）
+- **内置工具 `web_fetch`（2026-10-20）**：抓取 http/https URL 的文本内容。SSRF 防护包括协议白名单、URL 内嵌凭据、`localhost` / `*.localhost`、IP 字面量与 DNS 解析结果的非公网判定（回环 / 私网 / link-local / 组播 / 保留段 / 云 metadata / IPv6 ULA 与内嵌 IPv4 形式），域名在建连时用自定义 `lookup` 复核（覆盖 DNS rebinding）；重定向手动跟随且每跳重校验；整体 20s 超时、2 MiB 上限、50,000 字符截断；非文本响应只返回元信息
 - **流式可靠性两处修复（2026-10-20）**：① `persistEvent` 的 parts 缓冲缺失时改为从 DB 回读，`message.end` 之后到达的 part / tool 事件不再把已落库的 `parts` 覆盖成单元素数组（消息不存在或已完成则丢弃该事件）；② claude-code adapter 的完整消息兜底只在整轮**没有**收到 partial text 时启用，`[tool_use, text]` 顺序下不再把已流出的文本整段重发一份。同时补跑完 F2 的 5 格 live 验证：SDK init 对坏 `command` 实际报 `failed`，健康 server 无假阳性，解析失败与持久化均符合预期
 - **外部 MCP 工具接入 P1**（`specs/15`）：custom adapter 自建 MCP 客户端层 —— 每个 `stream()` 并行 connect + listTools（stdio/sse/http）、工具清洗为 `mcp__*` 并合并进 OpenAI function list（内置优先、运行期 Map 路由）、`trust='ask'` 审批门复用现有队列、`mcp_server.unavailable` 上报建连失败、`finally` 关闭连接并杀 stdio 进程树。`CLAUDE.md §5.5` 的审批门适用范围已扩展为 Claude Code + custom
 - **MCP 连接失败可见（F2）**：claude-code adapter 从 SDK init 消息读取 `mcp_servers` 状态，对 `failed` / `needs-auth` / `disabled` 发 `mcp_server.unavailable`；解析阶段与 spawn 阶段失败统一由 AgentRunner 写成会话内一条持久的 `role='system'` 提示（`msg_mcp_<runId>`），点名 server 与状态 —— 此前只有 `console.warn`，用户看到的是「已启用、已勾选、就是没有」。Codex 的 spawn 状态仍无 SDK 信号可读
@@ -206,4 +207,4 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 
 ---
 
-*最后更新：2026-10-20 · 记入了流式可靠性两处修复与 F2 的 live 验证结果。2026-10-19 记入外部 MCP P1（custom 自建 MCP 客户端 + 审批门扩展到 custom）与外部 MCP 连接失败可见（F2：`mcp_server.unavailable` + 持久系统提示）。2026-10-18 记入了 shell 工具按身份识别（Windows 上 SDK 的 shell 工具是 `PowerShell`，此前按 `Bash` 字面量匹配导致黑名单与审批分类器整条失效）。2026-10-13 记入了 Claude Code adapter 的隔离启动（`settingSources: []` + `strictMcpConfig: true`）与 F1 修复（`partIndex` 归一，`src/server/part-slots.ts`）及两个相邻未修缺陷（`persistEvent` 空缓冲兜底、claude-code adapter 非流式回退重复渲染）。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*
+*最后更新：2026-10-20 · 记入内置 `web_fetch`（含 SSRF 防护）。同日更早记入了流式可靠性两处修复与 F2 的 live 验证结果。2026-10-19 记入外部 MCP P1（custom 自建 MCP 客户端 + 审批门扩展到 custom）与外部 MCP 连接失败可见（F2：`mcp_server.unavailable` + 持久系统提示）。2026-10-18 记入了 shell 工具按身份识别（Windows 上 SDK 的 shell 工具是 `PowerShell`，此前按 `Bash` 字面量匹配导致黑名单与审批分类器整条失效）。2026-10-13 记入了 Claude Code adapter 的隔离启动（`settingSources: []` + `strictMcpConfig: true`）与 F1 修复（`partIndex` 归一，`src/server/part-slots.ts`）及两个相邻未修缺陷（`persistEvent` 空缓冲兜底、claude-code adapter 非流式回退重复渲染）。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*

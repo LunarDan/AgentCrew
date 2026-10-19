@@ -79,6 +79,7 @@ export const toolRegistry = buildRegistry()
 | `fs_read` | 读 workspace 内文本文件 | 读文件系统 | 需要看用户项目代码的 agent |
 | `fs_write` | 写 workspace 内文本文件 | 写文件系统 | 需要生成 / 修改文件的 agent |
 | `bash` | 在 workspace 内跑 shell 命令 | 进程 / 文件系统 | 需要 git / 编译 / 测试的 agent |
+| `web_fetch` | 抓取外部 http(s) URL 的文本内容 | 网络请求 | 需要查阅在线文档 / 页面的 agent |
 
 ### write_artifact
 
@@ -379,6 +380,25 @@ curl -s http://127.0.0.1:3000/health
 
 **返回**：`{ cwd, command, exitCode, output, truncated, timedOut }`
 
+### web_fetch
+
+源文件：`src/server/tools/web-fetch.ts`
+
+**参数**：`{ url: string }`。仅接受 `http:` / `https:`。
+
+**SSRF 防护**：
+- 拒绝 URL 内嵌凭据（`user:pass@host`）。
+- 拒绝 `localhost` / `*.localhost`，以及任何以 IP 字面量出现的非公网地址（WHATWG `URL` 已把 `127.1`、`2130706433`、`0x7f000001` 等归一化为点分 IPv4，因此这些写法同样会被拦下）。
+- 非公网判定覆盖：`0.0.0.0/8`、`10/8`、`100.64/10`（CGNAT）、`127/8`、`169.254/16`（含云 metadata）、`172.16/12`、`192.0.0/24`、`192.0.2/24`、`192.88.99/24`、`192.168/16`、`198.18/15`、`198.51.100/24`、`203.0.113/24`、组播与保留段；IPv6 的 `::` / `::1`、`fc00::/7`、`fe80::/10`、`fec0::/10`、`ff00::/8`、`2001:db8::/32`，以及内嵌 IPv4 的映射 / 6to4 / NAT64 形式。
+- 域名通过自定义 DNS `lookup` 在**建连时**校验：解析结果里只允许公网地址，全部被拦则失败关闭。这样域名解析到内网（含 DNS rebinding、`nip.io` 之类）也会在连接前被拒绝。
+- 重定向手动跟随，最多 5 跳；每一跳都重新走完整的 URL + 地址校验。
+
+**限制**：整体 20s 超时（与 `ctx.abortSignal` 共同生效）；响应体上限 2 MiB；文本截断到 50,000 字符并附 `[truncated ...]` 标记。非文本 content-type 不下载响应体，只返回状态与 content-type。
+
+**返回**：`{ url, status, contentType, content, truncated }`；非文本响应 `content: null` 并带 `note`。
+
+**描述**：抓取的是原始内容（HTML 不转 markdown）；LLM 需要自行从 HTML 中提取信息。
+
 ---
 
 ## 工具调用生命周期
@@ -485,14 +505,15 @@ AgentRunner 在构造 `AdapterInput.systemPrompt` 时会追加按可用工具生
 - **bash cwd 强制为 `ctx.workspacePath`**
 - **bash 命令前匹配双平台黑名单**（详见 Spec 11；POSIX：rm -rf /、sudo、fork bomb、curl pipe shell 等；Windows：Remove-Item -Recurse -Force、format、shutdown、iex(iwr ...)、reg delete 等）
 - **不引入新依赖而不在 PR 中说明**（CLAUDE.md §4.3）
+- **发起网络请求的工具必须做 SSRF 校验**：协议白名单、禁止内网 / 回环 / link-local / metadata 地址，重定向每跳重校验（详见上方 `web_fetch`）
 
 **`getBannedPatterns(platform)` 跨 adapter / 工具共享**：定义在 `src/server/security.ts`，由 `findBannedPattern(command, platform?)` 暴露（platform 省略时取 `currentPlatform()`）。`bash` 工具和 `ClaudeCodeAdapter`（用 SDK Bash 工具时）都走同一份名单，新增模式同步 Spec 11 「命令黑名单」节并只改 `security.ts` 这一处。
 
 **TODO 工具（CLAUDE.md 提到但仍未实装）**：
 
-- `web_fetch` —— 抓取 URL 内容（SSRF 防护：禁止 localhost / 内网 IP / file://）
+- 暂无。
 
-**bash / fs_read / fs_write 已实装**（详见上方各自小节）。
+**bash / fs_read / fs_write / web_fetch 已实装**（详见上方各自小节）。
 
 新人不要以为未实装的工具已经存在；要么先实现，要么按 Spec 07 §「新增工具步骤」走。
 
