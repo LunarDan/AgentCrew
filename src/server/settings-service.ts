@@ -54,8 +54,22 @@ export interface AppSettingsPatch {
   deploymentPublicBaseUrl?: string | null
 }
 
+// 单行表的「读-合并-整行 upsert」必须串行：设置面板与 token 轮换并发保存时，
+// 后写者会用自己读到的旧快照覆盖对方的字段。
+let settingsWriteQueue: Promise<unknown> = Promise.resolve()
+
+function withSettingsWriteLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = settingsWriteQueue.then(fn, fn)
+  settingsWriteQueue = run.catch(() => {})
+  return run
+}
+
 /** UPSERT 全部字段：传 null 清空，undefined 不动。 */
 export async function updateAppSettings(patch: AppSettingsPatch): Promise<AppSettingsRow> {
+  return withSettingsWriteLock(() => updateAppSettingsLocked(patch))
+}
+
+async function updateAppSettingsLocked(patch: AppSettingsPatch): Promise<AppSettingsRow> {
   const current = await getAppSettings()
   const next: AppSettingsRow = {
     ...current,
