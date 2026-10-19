@@ -1,6 +1,6 @@
 'use client'
 
-import { Check, ChevronDown, ChevronRight, Copy, Download, ExternalLink, FileText, FolderGit2, Image as ImageIcon, Layers, Loader2, Package, Presentation, Rocket, Sparkles, Terminal, XCircle } from 'lucide-react'
+import { AlertCircle, Check, ChevronDown, ChevronRight, Copy, Download, ExternalLink, FileText, FolderGit2, Image as ImageIcon, Layers, Loader2, Package, Presentation, RefreshCw, Rocket, Sparkles, Terminal, XCircle } from 'lucide-react'
 import type { KeyboardEvent, MouseEvent, ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 
@@ -691,23 +691,48 @@ function ArtifactRefPart({ artifactId }: { artifactId: string }) {
   const artifact = useAppStore((s) => s.artifacts[artifactId])
   const upsertArtifact = useAppStore((s) => s.upsertArtifact)
   const openPreview = useAppStore((s) => s.openArtifactPreview)
-  const [status, setStatus] = useState<'loading' | 'deleted'>('loading')
+  const [status, setStatus] = useState<'loading' | 'deleted' | 'error'>('loading')
+  const [retryNonce, setRetryNonce] = useState(0)
 
-  // Lazy load: store 里没有该 artifact 时，按需 fetch（404 即视为已删除）
+  // Lazy load: store 里没有该 artifact 时，按需 fetch。只有 404 才算已删除，
+  // 网络 / 5xx 是暂时性失败，不能把仍然存在的产物标成「已删除」
   useEffect(() => {
     if (artifact) return
     let cancelled = false
+    setStatus('loading')
     fetchArtifact(artifactId)
       .then((row) => {
         if (!cancelled) upsertArtifact(row)
       })
-      .catch(() => {
-        if (!cancelled) setStatus('deleted')
+      .catch((err: unknown) => {
+        if (cancelled) return
+        const message = err instanceof Error ? err.message : String(err)
+        setStatus(/^HTTP 404\b/.test(message) ? 'deleted' : 'error')
       })
     return () => {
       cancelled = true
     }
-  }, [artifactId, artifact, upsertArtifact])
+  }, [artifactId, artifact, retryNonce, upsertArtifact])
+
+  if (status === 'error' && !artifact) {
+    return (
+      <Card className="border-dashed">
+        <CardContent className="flex items-center gap-2 px-3 py-2">
+          <AlertCircle className="size-4 shrink-0 text-amber-600" />
+          <div className="min-w-0 flex-1 text-sm text-muted-foreground">产物加载失败</div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-xs"
+            onClick={() => setRetryNonce((n) => n + 1)}
+          >
+            <RefreshCw className="mr-1 size-3" />
+            重试
+          </Button>
+        </CardContent>
+      </Card>
+    )
+  }
 
   if (status === 'deleted' && !artifact) {
     return (
