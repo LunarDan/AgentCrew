@@ -4,6 +4,14 @@ import { AlertTriangle, Check, Loader2, Plus, Trash2, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import {
   createMcpServer,
@@ -70,6 +78,8 @@ export function McpServersSettings() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [testByServer, setTestByServer] = useState<Record<string, McpTestResult | 'running'>>({})
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const reload = useCallback(async () => {
     const list = await fetchMcpServers()
@@ -128,11 +138,15 @@ export function McpServersSettings() {
   const handleDelete = useCallback(
     async (id: string) => {
       setError(null)
+      setDeleting(true)
       try {
         await deleteMcpServer(id)
         await reload()
+        setDeleteTargetId(null)
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setDeleting(false)
       }
     },
     [reload],
@@ -248,7 +262,7 @@ export function McpServersSettings() {
                   size="sm"
                   variant="ghost"
                   className="h-6 px-1.5 text-rose-600 hover:text-rose-700"
-                  onClick={() => void handleDelete(server.id)}
+                  onClick={() => setDeleteTargetId(server.id)}
                 >
                   <Trash2 className="size-3" />
                 </Button>
@@ -434,6 +448,31 @@ export function McpServersSettings() {
           注册外部 MCP server
         </Button>
       )}
+
+      <Dialog open={!!deleteTargetId} onOpenChange={(open) => !open && setDeleteTargetId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除 MCP server</DialogTitle>
+            <DialogDescription>
+              确定删除「
+              {servers.find((s) => s.id === deleteTargetId)?.name ?? deleteTargetId}
+              」吗？已勾选它的 Agent 下次运行将不再提供它的工具。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTargetId(null)}>
+              取消
+            </Button>
+            <Button
+              className="bg-red-600 hover:bg-red-700"
+              disabled={deleting}
+              onClick={() => deleteTargetId && void handleDelete(deleteTargetId)}
+            >
+              {deleting ? '删除中...' : '删除'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
