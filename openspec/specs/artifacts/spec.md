@@ -23,6 +23,10 @@ Artifact content MUST be a discriminated union keyed by artifact type so rendere
 - **WHEN** an artifact has web app content
 - **THEN** the preview renders it in a sandboxed iframe.
 
+#### Scenario: Artifact content is blank
+- **WHEN** artifact content normalizes to an empty or whitespace-only body (or the files of a web app are all blank)
+- **THEN** artifact creation fails validation instead of persisting an empty artifact.
+
 ### Requirement: PPT artifacts SHALL support rich semantic slide blocks
 
 PPT artifact content SHALL accept a richer structured slide model in addition to the legacy simple `title` / `bullets` / `layout` slide shape. The richer model MUST remain JSON-serializable, MUST be renderable in the preview panel, and MUST be exportable to `.pptx`.

@@ -112,6 +112,8 @@ document 类似：`{ content }` / `{ markdown }` / `{ text }` / 裸字符串都�
 
 image 接受 `{ url, alt? }` 或裸 URL 字符串。
 
+**空正文不建产物**：`document` / `web_app` / `image` 的正文（或 URL）为空串 / 纯空白时返回 `null`，与缺失字段同样处理；`web_app` 的多个文件全部为空串也算无内容。避免生成一张永远空白、无法排查的产物卡片。
+
 ppt 接受旧版 `{ title, bullets, notes?, layout? }` slide，也接受新版 block DSL：`subtitle`、`layout: 'content'|'two-column'|'metrics'|'timeline'|'quote'` 等，以及 `blocks`。支持的 block 类型固定为 `heading` / `paragraph` / `bullets` / `metric` / `quote` / `timeline` / `columns` / `callout` / `divider` / `spacer`；`columns` 子 block 只允许 `paragraph` / `bullets` / `metric` / `callout`。旧版 bullets 在渲染/导出边界由 `src/shared/ppt-normalize.ts` 归一化为 `{ type: 'bullets', items }`，不迁移历史 DB 行。PPT JSON 不允许直接嵌入 `data:*;base64,...` 这类无界二进制 payload；图片等大资产必须走可安全解析的 URL / 附件 / workspace 引用（当前 PPT 首版不实现图片 block）。
 
 diff 解析逻辑仍保留在 `buildArtifactContent('diff', ...)`，用于旧 DB 行和内部兼容路径，但 `write_artifact` 的 zod schema / JSON Schema / LLM 描述不再接受 `diff`。
