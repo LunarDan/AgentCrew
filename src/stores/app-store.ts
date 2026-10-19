@@ -49,6 +49,8 @@ interface AppState {
 
   // ─── 产物预览 ──────────────────────────────────────
   previewArtifactId: string | null
+  /** 已删除的 artifact id：产物库的本地 meta 列表不订阅 artifacts，需要据此剪枝。 */
+  removedArtifactIds: string[]
 
   // ─── 右侧文件浏览器面板（与 artifact preview 互斥）─
   fileExplorerOpen: boolean
@@ -194,6 +196,7 @@ export const useAppStore = create<AppState>()(
     dispatchesByRunId: {},
     activeConversationId: null,
     previewArtifactId: null,
+    removedArtifactIds: [],
     fileExplorerOpen: false,
     openFilesByConv: {},
     activeTabByConv: {},
@@ -443,6 +446,7 @@ export const useAppStore = create<AppState>()(
       set((s) => {
         delete s.artifacts[artifactId]
         if (s.previewArtifactId === artifactId) s.previewArtifactId = null
+        if (!s.removedArtifactIds.includes(artifactId)) s.removedArtifactIds.push(artifactId)
       }),
 
     removeArtifacts: (artifactIds) =>
@@ -450,6 +454,7 @@ export const useAppStore = create<AppState>()(
         for (const id of artifactIds) {
           delete s.artifacts[id]
           if (s.previewArtifactId === id) s.previewArtifactId = null
+          if (!s.removedArtifactIds.includes(id)) s.removedArtifactIds.push(id)
         }
       }),
 
@@ -791,6 +796,7 @@ export const useAppStore = create<AppState>()(
             for (const id of event.artifactIds) {
               delete s.artifacts[id]
               if (s.previewArtifactId === id) s.previewArtifactId = null
+              if (!s.removedArtifactIds.includes(id)) s.removedArtifactIds.push(id)
             }
             return
           }

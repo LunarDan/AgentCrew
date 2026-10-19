@@ -45,6 +45,7 @@ export function ArtifactLibrary({
   const artifactsById = useAppStore((s) => s.artifacts)
   const removeArtifact = useAppStore((s) => s.removeArtifact)
   const storeArtifacts = useAppStore((s) => s.artifacts)
+  const removedArtifactIds = useAppStore((s) => s.removedArtifactIds)
   const conversations = useAppStore((s) => s.conversations)
 
   const refresh = async () => {
@@ -64,9 +65,14 @@ export function ArtifactLibrary({
   }, [])
 
   const mergedItems = useMemo(() => {
+    // items 是一次性 fetch 的本地列表：别处删掉的版本要靠 store 的广播集合剪掉
+    const removed = new Set(removedArtifactIds)
     const byId = new Map<string, ArtifactListItem>()
-    for (const item of items) byId.set(item.id, item)
+    for (const item of items) {
+      if (!removed.has(item.id)) byId.set(item.id, item)
+    }
     for (const artifact of Object.values(storeArtifacts)) {
+      if (removed.has(artifact.id)) continue
       const existing = byId.get(artifact.id)
       byId.set(artifact.id, {
         id: artifact.id,
@@ -82,7 +88,7 @@ export function ArtifactLibrary({
       })
     }
     return [...byId.values()].sort((a, b) => b.createdAt - a.createdAt)
-  }, [conversations, items, storeArtifacts])
+  }, [conversations, items, removedArtifactIds, storeArtifacts])
 
   const scopedItems = useMemo(
     () => (conversationId ? mergedItems.filter((a) => a.conversationId === conversationId) : mergedItems),
