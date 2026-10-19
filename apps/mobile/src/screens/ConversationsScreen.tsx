@@ -75,16 +75,23 @@ export function ConversationsScreen({
   const detailConversationId = detail?.conversation.id ?? null
   const scrollSignature = useMemo(() => buildConversationScrollSignature(detail), [detail])
 
-  // 最新可操作消息：撤回/编辑只对最新 user 消息、重新生成只对最新非流式 agent 消息（后端只允许操作最新）
+  // 撤回/编辑只对最新 user 消息；重新生成在服务端是从最新 user 消息重跑，
+  // 所以按钮只能挂在「最后一条消息就是可重新生成的 agent 消息」上，
+  // 否则点的是旧回复，删掉的却是最新一轮（含正在生成或尚未开始的回复）。
   const msgs = detail?.messages ?? []
   let latestUserMessageId: string | null = null
-  let latestAgentMessageId: string | null = null
   for (let i = msgs.length - 1; i >= 0; i--) {
-    const m = msgs[i]
-    if (!latestUserMessageId && m.role === 'user') latestUserMessageId = m.id
-    if (!latestAgentMessageId && m.role === 'agent' && m.status !== 'streaming') latestAgentMessageId = m.id
-    if (latestUserMessageId && latestAgentMessageId) break
+    if (msgs[i].role === 'user') {
+      latestUserMessageId = msgs[i].id
+      break
+    }
   }
+  const lastMessage = msgs.at(-1)
+  const latestAgentMessageId =
+    lastMessage && lastMessage.role === 'agent' && lastMessage.status !== 'streaming'
+      ? lastMessage.id
+      : null
+  const noRunningRuns = (detail?.runningRuns.length ?? 0) === 0
 
   useEffect(() => {
     if (!selectedConversationId || !detailConversationId || selectedConversationId !== detailConversationId) return
@@ -160,7 +167,7 @@ export function ConversationsScreen({
                     message={message}
                     onOpenArtifact={onOpenArtifact}
                     isLatestUser={message.id === latestUserMessageId}
-                    isLatestAgent={message.id === latestAgentMessageId}
+                    isLatestAgent={message.id === latestAgentMessageId && noRunningRuns}
                     busy={busy}
                     onWithdraw={onWithdrawMessage}
                     onEdit={onEditMessage}
