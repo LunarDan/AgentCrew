@@ -214,6 +214,12 @@ export type ResolvedMcpServer = {
   | { transport: 'http'; url: string; headers?: Record<string, string> }
 )
 
+/** SDK init 报告的外部 server 连接状态：只有不可用（failed / needs-auth / disabled）会被上报。 */
+export interface McpServerRunStatus {
+  name: string
+  status: string
+}
+
 /** 读接口返回的密钥摘要：只给「是不是占位符」和「后 4 位」，明文永不出服务端。 */
 export type MaskedSecret = { masked: string } | { placeholder: string }
 
@@ -482,6 +488,7 @@ export type StreamEvent = BaseEvent &
     | { type: 'bash_command.resolved'; pendingId: string; approved: boolean }
     | { type: 'mcp_tool.pending'; pendingCall: PendingMcpToolCall }
     | { type: 'mcp_tool.resolved'; pendingId: string; approved: boolean }
+    | { type: 'mcp_server.unavailable'; runId: string; servers: McpServerRunStatus[] }
     | { type: 'ask_user.pending'; pendingQuestion: PendingQuestion }
     | { type: 'ask_user.resolved'; pendingId: string; answered: boolean }
     | { type: 'heartbeat' }

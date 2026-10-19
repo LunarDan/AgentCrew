@@ -39,6 +39,7 @@ import { buildChildProcessEnv, createAdapterEvent } from './adapter-utils'
 import { composeSystemPrompt, projectMemoryPath, readProjectMemory } from './project-memory'
 import { sdkIsolationOptions } from './sdk-isolation'
 import { claudeCodeSessions } from './session-store'
+import { collectUnavailableServers } from './mcp-status'
 import { isShellTool } from './shell-tool'
 import type { AdapterInput, AgentPlatformAdapter } from './types'
 
@@ -479,13 +480,31 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
     try {
       const q = query({ prompt: input.prompt, options })
       for await (const m of q) {
-        // SDKSystemMessage init 携带 session_id —— 保存供下次 resume
+        // SDKSystemMessage init 携带 session_id / 工具表 / 外部 MCP 连接状态
         if (m.type === 'system') {
           const sid = (m as { session_id?: string }).session_id
           if (sid) claudeCodeSessions.set(input.conversationId, sid)
+          if ((m as { subtype?: string }).subtype !== 'init') continue
+
           const tools = (m as { tools?: unknown }).tools
           if (Array.isArray(tools)) {
             sdkToolNames = tools.filter((t): t is string => typeof t === 'string')
+          }
+
+          // 只报告本次 run 传入的外部 server；内置 agenthub 桥不在名单里。
+          const mcpStatuses = (m as { mcp_servers?: unknown }).mcp_servers
+          if (Array.isArray(mcpStatuses)) {
+            const unavailable = collectUnavailableServers(
+              mcpStatuses,
+              (input.mcpServers ?? []).map((server) => server.name),
+            )
+            if (unavailable.length > 0) {
+              yield baseEvent({
+                type: 'mcp_server.unavailable' as const,
+                runId: input.runId,
+                servers: unavailable,
+              })
+            }
           }
           continue
         }

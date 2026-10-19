@@ -21,13 +21,13 @@
 
 ## 3. Implementation（commit 3）
 
-- [ ] 3.1 `src/shared/types.ts` — `McpServerRunStatus` + `mcp_server.unavailable`。
-- [ ] 3.2 新增 `src/server/adapters/mcp-status.ts` — `collectUnavailableServers(statuses, expectedNames)`，纯函数。
-- [ ] 3.3 新增 `src/server/adapters/mcp-status.test.ts` — 三种不可用状态、`connected`/`pending`/未知、`agenthub` 与未传入名字过滤、去重、空输入。
-- [ ] 3.4 `src/server/adapters/claude-code-adapter.ts` — init 分支加 `subtype === 'init'` 守卫，读 `mcp_servers`，非空时 yield 事件。
-- [ ] 3.5 新增 `src/server/mcp-notices.ts` + `.test.ts` — 解析 / 不可用两类文案；空输入返回 `null`。
-- [ ] 3.6 `src/server/agent-runner.ts` — `buildAdapterInput` 返回 `{ input, mcpWarnings }`；`appendMcpNotice`；`consumeStream` 处理事件；三个调用点接入。
-- [ ] 3.7 `pnpm typecheck`、`pnpm lint`、`pnpm test`。
+- [x] 3.1 `src/shared/types.ts` — `McpServerRunStatus` + `mcp_server.unavailable`。
+- [x] 3.2 新增 `src/server/adapters/mcp-status.ts` — `collectUnavailableServers(statuses, expectedNames)`，纯函数。
+- [x] 3.3 新增 `src/server/adapters/mcp-status.test.ts` — 三种不可用状态、`connected`/`pending`/未知、`agenthub` 与未传入名字过滤、去重、空输入。
+- [x] 3.4 `src/server/adapters/claude-code-adapter.ts` — init 分支加 `subtype === 'init'` 守卫，读 `mcp_servers`，非空时 yield 事件。
+- [x] 3.5 新增 `src/server/mcp-notices.ts` + `.test.ts` — 解析 / 不可用两类文案；空输入返回 `null`。
+- [x] 3.6 `src/server/agent-runner.ts` — `buildAdapterInput` 返回 `{ input, mcpWarnings }`；`appendMcpNotice`；`consumeStream` 处理事件；三个调用点接入。
+- [x] 3.7 `pnpm typecheck`、`pnpm lint`、`pnpm test`（37 个测试文件、288 通过 / 1 跳过）。
 
 ## 4. Live verification（动手前问）
 

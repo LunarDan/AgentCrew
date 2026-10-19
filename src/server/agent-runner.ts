@@ -57,6 +57,7 @@ import {
 } from './dispatch-plan'
 import { eventBus } from './event-bus'
 import { newArtifactId, newRunId } from './ids'
+import { formatResolutionWarnings, formatUnavailableNotice } from './mcp-notices'
 import { resolveMcpServersForAgent } from './mcp-server-service'
 import { translatePartIndex, type PartSlotsByMessage } from './part-slots'
 import { pendingDispatchPlans, type PlanReviewOutcome } from './pending-dispatch-plans'
@@ -363,19 +364,18 @@ async function executeSimpleRun(
     : baseToolNames
 
   const adapter = agentRegistry.getAdapter(agent)
-  const stream = adapter.stream(
-    await buildAdapterInput(
-      args,
-      agent,
-      runId,
-      prompt,
-      workspace,
-      toolNames,
-      args.overrideSystemPrompt,
-      attachments,
-    ),
-    signal,
+  const built = await buildAdapterInput(
+    args,
+    agent,
+    runId,
+    prompt,
+    workspace,
+    toolNames,
+    args.overrideSystemPrompt,
+    attachments,
   )
+  await appendMcpNotice(args.conversationId, runId, formatResolutionWarnings(built.mcpWarnings))
+  const stream = adapter.stream(built.input, signal)
 
   const result = await consumeStream(stream, args.agentId, runId)
   if (args.parentRunId) return result
@@ -567,22 +567,19 @@ async function executeOrchestratorRun(
     (n) => n !== 'plan_tasks' && n !== ASK_USER_TOOL_NAME,
   )
 
-  const aggStream = agentRegistry
-    .getAdapter(agent)
-    .stream(
-      await buildAdapterInput(
-        args,
-        agent,
-        runId,
-        aggregateUserPrompt,
-        workspace,
-        aggregateToolNames,
-        aggregateSystemPrompt,
-        // aggregate 阶段不再带原始图片附件（避免重复传图片浪费 token；plan 阶段已经看过）
-        [],
-      ),
-      signal,
-    )
+  const aggBuilt = await buildAdapterInput(
+    args,
+    agent,
+    runId,
+    aggregateUserPrompt,
+    workspace,
+    aggregateToolNames,
+    aggregateSystemPrompt,
+    // aggregate 阶段不再带原始图片附件（避免重复传图片浪费 token；plan 阶段已经看过）
+    [],
+  )
+  await appendMcpNotice(args.conversationId, runId, formatResolutionWarnings(aggBuilt.mcpWarnings))
+  const aggStream = agentRegistry.getAdapter(agent).stream(aggBuilt.input, signal)
 
   const aggRun = await consumeStream(aggStream, agent.id, runId)
   allArtifactIds.push(...aggRun.artifactIds)
@@ -623,12 +620,18 @@ async function runPlanStage(
     : userPrompt
 
   const planRef: { value: DispatchPlanItem[] | null } = { value: null }
-  const planStream = agentRegistry
-    .getAdapter(agent)
-    .stream(
-      await buildAdapterInput(args, agent, runId, effectivePrompt, workspace, planToolNames, planSystemPrompt, attachments),
-      signal,
-    )
+  const planBuilt = await buildAdapterInput(
+    args,
+    agent,
+    runId,
+    effectivePrompt,
+    workspace,
+    planToolNames,
+    planSystemPrompt,
+    attachments,
+  )
+  await appendMcpNotice(args.conversationId, runId, formatResolutionWarnings(planBuilt.mcpWarnings))
+  const planStream = agentRegistry.getAdapter(agent).stream(planBuilt.input, signal)
   const planRun = await consumeStream(planStream, agent.id, runId, (event) => {
     if (event.type === 'tool.call') {
       const planArgs = extractPlanTasksToolArgs(event)
@@ -1547,6 +1550,11 @@ async function consumeStream(
     await persistEvent(event, partsBuffer, runId, agentId, outputMessageIds, artifactIds)
     publish(event)
 
+    // 透传事件：连接失败的 server 由这里落成会话内可见提示（不改变 run 的成败）。
+    if (event.type === 'mcp_server.unavailable') {
+      await appendMcpNotice(event.conversationId, runId, formatUnavailableNotice(event.servers))
+    }
+
     if (event.type === 'artifact.create') {
       const outputKey = outputKeyByArtifactId.get(event.artifact.id)
       if (outputKey) outputArtifacts[outputKey] = event.artifact.id
@@ -1962,6 +1970,58 @@ function publish(event: StreamEvent): void {
   eventBus.publish(event)
 }
 
+/**
+ * MCP 失败提示：一个 run 只有一条 `role='system'` 消息（`msg_mcp_<runId>`），
+ * 后续来源（解析阶段 → 连接阶段）追加 part，不刷屏。
+ */
+async function appendMcpNotice(
+  conversationId: string,
+  runId: string,
+  text: string | null,
+): Promise<void> {
+  if (!text) return
+  const messageId = `msg_mcp_${runId}`
+  const now = Date.now()
+  const part: MessagePart = { type: 'text', content: text }
+  const existing = await db.query.messages.findFirst({
+    where: eq(schema.messages.id, messageId),
+  })
+
+  if (!existing) {
+    const message = {
+      id: messageId,
+      conversationId,
+      role: 'system' as const,
+      agentId: null,
+      parts: [part],
+      status: 'complete' as const,
+      parentMessageId: null,
+      mentionedAgentIds: [],
+      runId: null,
+      usage: null,
+      createdAt: now,
+    }
+    await db.insert(schema.messages).values(message)
+    await db
+      .update(schema.conversations)
+      .set({ updatedAt: now })
+      .where(eq(schema.conversations.id, conversationId))
+    publish({ type: 'message.added', conversationId, timestamp: now, message })
+    return
+  }
+
+  const parts = [...existing.parts, part]
+  await db.update(schema.messages).set({ parts }).where(eq(schema.messages.id, messageId))
+  publish({
+    type: 'part.start',
+    conversationId,
+    timestamp: now,
+    messageId,
+    partIndex: parts.length - 1,
+    part,
+  })
+}
+
 // ─── Adapter 输入构造 ─────────────────────────────────────
 async function buildAdapterInput(
   args: RunArgs,
@@ -1972,7 +2032,7 @@ async function buildAdapterInput(
   toolNames: string[],
   systemPromptOverride: string | undefined,
   attachments: AdapterAttachment[],
-): Promise<AdapterInput> {
+): Promise<{ input: AdapterInput; mcpWarnings: string[] }> {
   const effectiveCwd = getEffectiveCwd(workspace)
   const baseSystemPrompt = systemPromptOverride ?? agent.systemPrompt
   let systemPromptWithWorkspace = buildWorkspaceContextBlock(workspace) + '\n\n' + baseSystemPrompt
@@ -2036,35 +2096,40 @@ async function buildAdapterInput(
   // 外部 MCP server（specs/15-external-mcp.md）。custom / mock adapter 不支持，服务层直接返回空。
   // 单个 server 解析失败只降级为警告（spec 15 §「失败隔离」），不让整个 run 崩 —— 与上面 history 同一套路。
   let mcpServers: ResolvedMcpServer[] = []
+  const mcpWarnings: string[] = []
   try {
     const resolved = await resolveMcpServersForAgent(agent.mcpServerIds, agent.adapterName)
     mcpServers = resolved.servers
+    mcpWarnings.push(...resolved.warnings)
     for (const w of resolved.warnings) console.warn('[mcp]', w)
   } catch (err) {
     console.warn('[agent-runner] resolveMcpServersForAgent failed; continuing without MCP servers', err)
   }
 
   return {
-    agentId: agent.id,
-    conversationId: args.conversationId,
-    runId,
-    prompt: effectivePrompt,
-    workspacePath: effectiveCwd,
-    systemPrompt: systemPromptWithWorkspace,
-    apiKey: effectiveApiKey,
-    apiBaseUrl: effectiveApiBaseUrl,
-    modelId: agent.modelId,
-    toolNames,
-    mcpServers: mcpServers.length > 0 ? mcpServers : undefined,
-    attachments: attachments.length > 0 ? attachments : undefined,
-    history: history.length > 0 ? history : undefined,
-    customConfig:
-      agent.adapterName === 'custom' && agent.modelProvider && agent.modelId
-        ? {
-            modelProvider: agent.modelProvider,
-            supportsVision: agent.supportsVision,
-          }
-        : undefined,
+    input: {
+      agentId: agent.id,
+      conversationId: args.conversationId,
+      runId,
+      prompt: effectivePrompt,
+      workspacePath: effectiveCwd,
+      systemPrompt: systemPromptWithWorkspace,
+      apiKey: effectiveApiKey,
+      apiBaseUrl: effectiveApiBaseUrl,
+      modelId: agent.modelId,
+      toolNames,
+      mcpServers: mcpServers.length > 0 ? mcpServers : undefined,
+      attachments: attachments.length > 0 ? attachments : undefined,
+      history: history.length > 0 ? history : undefined,
+      customConfig:
+        agent.adapterName === 'custom' && agent.modelProvider && agent.modelId
+          ? {
+              modelProvider: agent.modelProvider,
+              supportsVision: agent.supportsVision,
+            }
+          : undefined,
+    },
+    mcpWarnings,
   }
 }
 
