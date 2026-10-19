@@ -104,6 +104,8 @@ P0 实现允许先使用「桌面端地址 + 设备 token」完成配对：
 - 打包版 Electron 在 `companion_mode !== 'off'` 且 token 存在时监听 `0.0.0.0:60646`；
 - 手机 App 手动填写地址与 token；扫码配对后续复用同一 payload。
 
+**鉴权来源（2026-10-20）**：`/api/mobile/*` 的期望 token 优先取环境变量（dev 注入 / Electron bootstrap），否则取 `app_settings.companion_mode + mobile_device_token`。设置表是持久来源 —— 进程重启后旧 token 仍有效；`companion_mode = 'off'` 时 DB token 不再放行（环境变量覆盖仅用于 dev）。`GET /api/mobile/snapshot` 的 `server.companionMode` 同样来自设置表，不再读单独的 `AGENTHUB_COMPANION_MODE` 环境变量。
+
 ### 4.2 Tailscale / Tailnet
 
 Tailscale 不作为 AgentHub 的 npm 依赖，也不嵌入代码。它是用户在手机和电脑上安装的网络层软件：

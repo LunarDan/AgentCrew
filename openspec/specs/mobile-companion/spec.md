@@ -14,6 +14,19 @@ The mobile app MUST connect to a desktop AgentHub host over trusted LAN or Tails
 - **WHEN** a user enters or scans a pairing token
 - **THEN** the host authorizes the device session before exposing conversation data.
 
+### Requirement: Mobile authentication SHALL use the persisted companion settings
+
+The companion token and companion mode saved through the settings API MUST remain the source of truth for `/api/mobile/*` authorization. A process environment token MAY override the stored token for development and packaged bootstrap, but a desktop restart MUST NOT invalidate a stored token, and turning companion mode off MUST stop the stored token from authorizing requests. The snapshot's reported companion mode MUST come from the same saved settings rather than a separate environment variable.
+
+#### Scenario: The host restarts with companion mode enabled
+- **WHEN** a mobile client presents the token stored in `app_settings`
+- **THEN** the request is authorized without the user re-saving settings
+- **AND** the snapshot reports the saved companion mode.
+
+#### Scenario: Companion mode is turned off
+- **WHEN** a mobile client presents the previously stored token
+- **THEN** the request is rejected as unconfigured.
+
 ### Requirement: Mobile APIs SHALL expose conversation snapshots
 
 Remote mobile APIs MUST provide a compact snapshot of conversations, messages, pending questions, pending writes, and run state needed for monitoring.
