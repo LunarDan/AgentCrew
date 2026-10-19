@@ -70,8 +70,8 @@ const POSIX_BANNED: RegExp[] = [
 ```typescript
 const WINDOWS_BANNED: RegExp[] = [
   // 删根 / 删盘
-  /\b(del|erase)\s+\/[fsq\s\/]*[a-z]:\\?/i,         // del /F /Q C:\
-  /\brd\s+\/[sq\s\/]*[a-z]:\\?/i,                   // rd /S /Q C:\
+  /\b(del|erase)\s+\/[fsq\s/"']*[a-z]:[\\/]?/i,   // del /F /Q C:\  （路径带引号也算）
+  /\brd\s+\/[sq\s/"']*[a-z]:[\\/]?/i,             // rd /S /Q "C:\"（路径带引号也算）
   /\bRemove-Item\b[^|;]*-Recurse[^|;]*-Force/i,     // Remove-Item -Recurse -Force
   /\bRemove-Item\b[^|;]*-Force[^|;]*-Recurse/i,     // 参数顺序反过来
   /\bri\b[^|;]*-Recurse[^|;]*-Force/i,              // ri = Remove-Item alias
