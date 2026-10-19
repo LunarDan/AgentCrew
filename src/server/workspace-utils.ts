@@ -1,4 +1,4 @@
-import { statSync } from 'node:fs'
+import { realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
 
@@ -36,12 +36,38 @@ export function isPathWithin(child: string, parent: string): boolean {
 /**
  * 把 target（可相对、可绝对）解析为绝对路径，并强制落在 workspace 的 effective cwd 子树内。
  * 越权返回 null（调用方决定怎么响应）。
+ *
+ * 只做词法比较不够：workspace 里的符号链接 / Windows junction 可以指向外部，
+ * 而 `path.resolve` 不会展开它。这里再按真实路径（realpath）比较一次；
+ * 目标不存在时展开最近的已存在祖先，防止「先指到不存在的链接目标，再写入」。
  */
 export function resolveSafePath(workspace: WorkspaceRow, target: string): string | null {
   const cwd = getEffectiveCwd(workspace)
   const abs = path.isAbsolute(target) ? path.resolve(target) : path.resolve(cwd, target)
   if (!isPathWithin(abs, cwd)) return null
+
+  const realCwd = realPathOrNull(cwd)
+  if (!realCwd) return abs // workspace 根尚不存在（刚创建）：词法检查已经足够
+  const realAbs = resolveRealPath(abs)
+  if (!realAbs || !isPathWithin(realAbs, realCwd)) return null
   return abs
+}
+
+function realPathOrNull(p: string): string | null {
+  try {
+    return realpathSync.native(p)
+  } catch {
+    return null
+  }
+}
+
+function resolveRealPath(abs: string): string | null {
+  const direct = realPathOrNull(abs)
+  if (direct) return direct
+  const parent = path.dirname(abs)
+  if (parent === abs) return null
+  const realParent = resolveRealPath(parent)
+  return realParent === null ? null : path.join(realParent, path.basename(abs))
 }
 
 export function assertPathWithinWorkspace(workspace: WorkspaceRow, target: string): string {
