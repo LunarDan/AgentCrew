@@ -64,7 +64,17 @@ export async function uploadAttachment(args: UploadFileArgs): Promise<Attachment
     createdAt: Date.now(),
   }
 
-  await db.insert(schema.attachments).values(row)
+  try {
+    await db.insert(schema.attachments).values(row)
+  } catch (err) {
+    // 入库失败时删掉已落盘的文件，避免留下没有元数据引用的孤儿文件
+    try {
+      rmSync(absPath, { force: true })
+    } catch {
+      // 文件已不存在时忽略
+    }
+    throw err
+  }
   return row
 }
 
