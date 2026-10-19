@@ -285,9 +285,9 @@ function ArtifactView({
     case 'web_app':
       return wrap(<WebAppView artifactId={artifact.id} content={content} onSaveVersion={onSaveVersion} />)
     case 'document':
-      return wrap(<DocumentView content={content} onSaveVersion={onSaveVersion} />)
+      return wrap(<DocumentView artifactId={artifact.id} content={content} onSaveVersion={onSaveVersion} />)
     case 'diagram':
-      return wrap(<DiagramView content={content} onSaveVersion={onSaveVersion} />)
+      return wrap(<DiagramView artifactId={artifact.id} content={content} onSaveVersion={onSaveVersion} />)
     case 'image':
       return <ImageView content={content} />
     case 'code_file':
@@ -305,7 +305,7 @@ function ArtifactView({
     case 'diff':
       return wrap(<DiffArtifactView content={content} />)
     case 'ppt':
-      return wrap(<SlideDeckView content={content} onSaveVersion={onSaveVersion} />)
+      return wrap(<SlideDeckView artifactId={artifact.id} content={content} onSaveVersion={onSaveVersion} />)
     default:
       return <Empty>该类型暂不支持预览</Empty>
   }
@@ -323,31 +323,40 @@ function WebAppView({
 }) {
   const [view, setView] = useState<'render' | 'edit'>('render')
   const [activeFile, setActiveFile] = useState<string>(content.entry)
-  const [draftFiles, setDraftFiles] = useState<Record<string, string>>(content.files)
+  const [draftFiles, setDraftFiles] = useState<Record<string, string>>(
+    () => readFilesDraft(artifactId) ?? content.files,
+  )
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const fileNames = Object.keys(content.files)
 
-  // 切版本/产物（content 每行是新对象）时重置编辑态
+  // 切版本/产物（content 每行是新对象）时重置编辑态，但要先找回这个版本没提交的草稿
   useEffect(() => {
-    setDraftFiles(content.files)
+    setDraftFiles(readFilesDraft(artifactId) ?? content.files)
     setActiveFile(content.entry)
     setView('render')
     setSaving(false)
     setError(null)
-  }, [content])
+  }, [content, artifactId])
 
   const dirty = useMemo(
     () => JSON.stringify(draftFiles) !== JSON.stringify(content.files),
     [draftFiles, content.files],
   )
 
+  const updateDraftFile = (name: string, value: string) => {
+    const next = { ...draftFiles, [name]: value }
+    setDraftFiles(next)
+    writeArtifactDraft(artifactId, JSON.stringify(next))
+  }
+
   const save = async () => {
     setSaving(true)
     setError(null)
     try {
       await onSaveVersion({ files: draftFiles, entry: content.entry })
+      clearArtifactDraft(artifactId)
       // 成功后面板切到新版本，本视图随 content 变化自动重置
     } catch (e) {
       setError(e instanceof Error ? e.message : '提交失败')
@@ -398,7 +407,7 @@ function WebAppView({
         {view === 'edit' && (
           <ArtifactCodeEditor
             value={draftFiles[activeFile] ?? ''}
-            onChange={(next) => setDraftFiles((d) => ({ ...d, [activeFile]: next }))}
+            onChange={(next) => updateDraftFile(activeFile, next)}
             filename={activeFile}
             type="web_app"
           />
@@ -412,6 +421,7 @@ function WebAppView({
           error={error}
           onSave={save}
           onReset={() => {
+            clearArtifactDraft(artifactId)
             setDraftFiles(content.files)
             setActiveFile(content.entry)
             setError(null)
@@ -424,23 +434,25 @@ function WebAppView({
 
 // ─── document: 预览 + 编辑 ─────────────────────────────
 function DocumentView({
+  artifactId,
   content,
   onSaveVersion,
 }: {
+  artifactId: string
   content: Extract<ArtifactContent, { type: 'document' }>
   onSaveVersion: SaveVersionFn
 }) {
   const [view, setView] = useState<'render' | 'edit'>('render')
-  const [draft, setDraft] = useState(content.content)
+  const [draft, setDraft] = useState(() => readArtifactDraft(artifactId) ?? content.content)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    setDraft(content.content)
+    setDraft(readArtifactDraft(artifactId) ?? content.content)
     setView('render')
     setSaving(false)
     setError(null)
-  }, [content])
+  }, [content, artifactId])
 
   const dirty = draft !== content.content
 
@@ -449,6 +461,7 @@ function DocumentView({
     setError(null)
     try {
       await onSaveVersion({ content: draft })
+      clearArtifactDraft(artifactId)
     } catch (e) {
       setError(e instanceof Error ? e.message : '提交失败')
       setSaving(false)
@@ -475,7 +488,15 @@ function DocumentView({
             </div>
           </ScrollArea>
         ) : (
-          <ArtifactCodeEditor value={draft} onChange={setDraft} filename="document.md" type="document" />
+          <ArtifactCodeEditor
+            value={draft}
+            onChange={(next) => {
+              setDraft(next)
+              writeArtifactDraft(artifactId, next)
+            }}
+            filename="document.md"
+            type="document"
+          />
         )}
       </div>
       {view === 'edit' && (
@@ -485,6 +506,7 @@ function DocumentView({
           error={error}
           onSave={save}
           onReset={() => {
+            clearArtifactDraft(artifactId)
             setDraft(content.content)
             setError(null)
           }}
@@ -496,23 +518,25 @@ function DocumentView({
 
 // ─── diagram: Mermaid 预览 + 源码编辑 ───────────────────
 function DiagramView({
+  artifactId,
   content,
   onSaveVersion,
 }: {
+  artifactId: string
   content: Extract<ArtifactContent, { type: 'diagram' }>
   onSaveVersion: SaveVersionFn
 }) {
   const [view, setView] = useState<'render' | 'edit'>('render')
-  const [draft, setDraft] = useState(content.source)
+  const [draft, setDraft] = useState(() => readArtifactDraft(artifactId) ?? content.source)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    setDraft(content.source)
+    setDraft(readArtifactDraft(artifactId) ?? content.source)
     setView('render')
     setSaving(false)
     setError(null)
-  }, [content])
+  }, [content, artifactId])
 
   const dirty = draft !== content.source
 
@@ -521,6 +545,7 @@ function DiagramView({
     setError(null)
     try {
       await onSaveVersion({ syntax: 'mermaid', source: draft, theme: content.theme })
+      clearArtifactDraft(artifactId)
     } catch (e) {
       setError(e instanceof Error ? e.message : '提交失败（请检查 Mermaid 源码）')
       setSaving(false)
@@ -543,7 +568,15 @@ function DiagramView({
         {view === 'render' ? (
           <MermaidPreview content={content} />
         ) : (
-          <ArtifactCodeEditor value={draft} onChange={setDraft} filename="diagram.mmd" type="diagram" />
+          <ArtifactCodeEditor
+            value={draft}
+            onChange={(next) => {
+              setDraft(next)
+              writeArtifactDraft(artifactId, next)
+            }}
+            filename="diagram.mmd"
+            type="diagram"
+          />
         )}
       </div>
       {view === 'edit' && (
@@ -553,6 +586,7 @@ function DiagramView({
           error={error}
           onSave={save}
           onReset={() => {
+            clearArtifactDraft(artifactId)
             setDraft(content.source)
             setError(null)
           }}
@@ -681,9 +715,11 @@ function MermaidPreview({ content }: { content: Extract<ArtifactContent, { type:
 
 // ─── ppt: 幻灯片分页预览 + JSON 编辑 ────────────────────
 function SlideDeckView({
+  artifactId,
   content,
   onSaveVersion,
 }: {
+  artifactId: string
   content: Extract<ArtifactContent, { type: 'ppt' }>
   onSaveVersion: SaveVersionFn
 }) {
@@ -691,7 +727,7 @@ function SlideDeckView({
   const deck = useMemo(() => normalizePptDeck(content), [content])
   const [view, setView] = useState<'render' | 'edit'>('render')
   const [idx, setIdx] = useState(0)
-  const [draft, setDraft] = useState(serialized)
+  const [draft, setDraft] = useState(() => readArtifactDraft(artifactId) ?? serialized)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -699,11 +735,11 @@ function SlideDeckView({
 
   useEffect(() => {
     setIdx(0)
-    setDraft(serialized)
+    setDraft(readArtifactDraft(artifactId) ?? serialized)
     setView('render')
     setSaving(false)
     setError(null)
-  }, [serialized])
+  }, [serialized, artifactId])
 
   // 全屏元素是整个 deck（工具栏 + 舞台），否则翻页/退出按钮会留在全屏之外点不到。
   useEffect(() => {
@@ -722,6 +758,7 @@ function SlideDeckView({
     setError(null)
     try {
       await onSaveVersion(JSON.parse(draft))
+      clearArtifactDraft(artifactId)
     } catch (e) {
       setError(e instanceof Error ? e.message : '提交失败（请检查 JSON 格式）')
       setSaving(false)
@@ -798,7 +835,15 @@ function SlideDeckView({
             </div>
           )
         ) : (
-          <ArtifactCodeEditor value={draft} onChange={setDraft} filename="slides.json" type="ppt" />
+          <ArtifactCodeEditor
+            value={draft}
+            onChange={(next) => {
+              setDraft(next)
+              writeArtifactDraft(artifactId, next)
+            }}
+            filename="slides.json"
+            type="ppt"
+          />
         )}
       </div>
       {view === 'edit' && (
@@ -808,6 +853,7 @@ function SlideDeckView({
           error={error}
           onSave={save}
           onReset={() => {
+            clearArtifactDraft(artifactId)
             setDraft(serialized)
             setError(null)
           }}
@@ -1958,4 +2004,48 @@ async function sha256(bytes: Uint8Array): Promise<string> {
   return Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
+}
+
+// 未提交的编辑按 artifact 存本标签页：切版本、关面板后回来还能接着改，不再静默丢失。
+function artifactDraftKey(artifactId: string): string {
+  return `agenthub:artifact-draft:${artifactId}`
+}
+
+function readArtifactDraft(artifactId: string): string | null {
+  try {
+    return window.sessionStorage.getItem(artifactDraftKey(artifactId))
+  } catch {
+    return null
+  }
+}
+
+function writeArtifactDraft(artifactId: string, value: string): void {
+  try {
+    window.sessionStorage.setItem(artifactDraftKey(artifactId), value)
+  } catch {
+    // 存储不可用时退化为仅内存草稿
+  }
+}
+
+function clearArtifactDraft(artifactId: string): void {
+  try {
+    window.sessionStorage.removeItem(artifactDraftKey(artifactId))
+  } catch {
+    // ignore
+  }
+}
+
+function readFilesDraft(artifactId: string): Record<string, string> | null {
+  const raw = readArtifactDraft(artifactId)
+  if (!raw) return null
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    for (const value of Object.values(parsed)) {
+      if (typeof value !== 'string') return null
+    }
+    return parsed as Record<string, string>
+  } catch {
+    return null
+  }
 }
