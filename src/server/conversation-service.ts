@@ -6,7 +6,7 @@ import { and, desc, eq, gte, inArray, ne } from 'drizzle-orm'
 
 import { db, schema } from '@/db/client'
 import type { ConversationWithMeta, MessageRow } from '@/db/schema'
-import { PIN_LIMIT_PER_CONVERSATION } from '@/shared/constants'
+import { MAX_MESSAGE_CHARS, PIN_LIMIT_PER_CONVERSATION } from '@/shared/constants'
 import type { MessagePart } from '@/shared/types'
 
 import { clearClaudeCodeSession, clearCodexSession } from './adapters/session-store'
@@ -634,6 +634,9 @@ export async function sendMessage(args: SendMessageArgs): Promise<SendMessageRes
   if (!conv) {
     throw new Error(`Conversation not found: ${args.conversationId}`)
   }
+  if (args.content && args.content.length > MAX_MESSAGE_CHARS) {
+    throw new Error(`Message is too long (max ${MAX_MESSAGE_CHARS} characters)`)
+  }
 
   const now = Date.now()
   const messageId = newMessageId()
@@ -678,6 +681,32 @@ export async function sendMessage(args: SendMessageArgs): Promise<SendMessageRes
     throw new Error('Message must contain text or at least one valid attachment')
   }
 
+  const deployIntent =
+    parts.length === 1 &&
+    !args.parentMessageId &&
+    !(args.mentionedAgentIds && args.mentionedAgentIds.length > 0) &&
+    !(args.attachmentIds && args.attachmentIds.length > 0)
+      ? parseDeployCommand(args.content)
+      : null
+
+  // 决定 responder 必须在落库之前：群聊没有 Orchestrator（且没有有效 @）时
+  // 消息会永远没有 run，用户看到一条「发了没人理」的孤儿消息。
+  const agentsInConv = deployIntent
+    ? []
+    : await db.query.agents.findMany({
+        where: (a, { inArray }) => inArray(a.id, conv.agentIds),
+      })
+  const responders = deployIntent
+    ? []
+    : decideResponders(conv, args.mentionedAgentIds ?? [], agentsInConv)
+  if (!deployIntent && responders.length === 0) {
+    throw new Error(
+      conv.mode === 'group'
+        ? '群聊缺少协调者：请 @ 一个 Agent，或先把 Orchestrator 加入群聊'
+        : 'No available agent in this conversation',
+    )
+  }
+
   await db.insert(schema.messages).values({
     id: messageId,
     conversationId: args.conversationId,
@@ -715,13 +744,6 @@ export async function sendMessage(args: SendMessageArgs): Promise<SendMessageRes
     },
   })
 
-  const deployIntent =
-    parts.length === 1 &&
-    !args.parentMessageId &&
-    !(args.mentionedAgentIds && args.mentionedAgentIds.length > 0) &&
-    !(args.attachmentIds && args.attachmentIds.length > 0)
-      ? parseDeployCommand(args.content)
-      : null
   if (deployIntent) {
     const deploy = await handleDeployCommand({
       conversationId: args.conversationId,
@@ -730,12 +752,6 @@ export async function sendMessage(args: SendMessageArgs): Promise<SendMessageRes
     })
     return { messageId, runIds: [], messages: [deploy.message], deploy }
   }
-
-  // 决定 responder
-  const agentsInConv = await db.query.agents.findMany({
-    where: (a, { inArray }) => inArray(a.id, conv.agentIds),
-  })
-  const responders = decideResponders(conv, args.mentionedAgentIds ?? [], agentsInConv)
 
   const runIds: string[] = []
   const { AgentRunner } = await getAgentRunner()
@@ -802,7 +818,19 @@ export async function reviseDispatchPlan(args: {
   })
 
   const ok = pendingDispatchPlans.revise(args.planId, args.feedback)
-  return ok ? { ok: true } : { ok: false, error: 'Failed to revise pending dispatch plan' }
+  if (!ok) {
+    // 计划已被别的端批准 / 拒绝 / 修订：刚写入的反馈没有 run 会消费，撤掉避免变成孤儿上下文
+    await db.delete(schema.messages).where(eq(schema.messages.id, messageId))
+    eventBus.publish({
+      type: 'message.removed',
+      conversationId: args.conversationId,
+      timestamp: Date.now(),
+      messageIds: [messageId],
+      artifactIds: [],
+    })
+    return { ok: false, error: 'Failed to revise pending dispatch plan' }
+  }
+  return { ok: true }
 }
 
 function decideResponders(
@@ -934,6 +962,20 @@ export async function withdrawLatestUserMessage(
   const runIds = runsToDelete.map((r) => r.id)
 
   db.transaction((tx) => {
+    // abort 等待窗口（最长 3s）里用户可能又发了新消息；按时间窗删除会把它一起删掉。
+    const newerUser = tx
+      .select({ id: schema.messages.id })
+      .from(schema.messages)
+      .where(
+        and(
+          eq(schema.messages.conversationId, conversationId),
+          eq(schema.messages.role, 'user'),
+          ne(schema.messages.id, messageId),
+          gte(schema.messages.createdAt, msg.createdAt),
+        ),
+      )
+      .get()
+    if (newerUser) throw new Error('A newer user message arrived; withdrawal cancelled')
     if (messageIds.length > 0) {
       tx.delete(schema.messages).where(inArray(schema.messages.id, messageIds)).run()
     }
@@ -1070,6 +1112,20 @@ export async function regenerateLatestResponse(
   const runIds = runsToDelete.map((r) => r.id)
 
   db.transaction((tx) => {
+    // abort 等待窗口内到达的新 user 消息不能被当成「旧回复」删掉
+    const newerUser = tx
+      .select({ id: schema.messages.id })
+      .from(schema.messages)
+      .where(
+        and(
+          eq(schema.messages.conversationId, conversationId),
+          eq(schema.messages.role, 'user'),
+          ne(schema.messages.id, latestUser.id),
+          gte(schema.messages.createdAt, latestUser.createdAt),
+        ),
+      )
+      .get()
+    if (newerUser) throw new Error('A newer user message arrived; regeneration cancelled')
     if (messageIds.length > 0) {
       tx.delete(schema.messages).where(inArray(schema.messages.id, messageIds)).run()
     }
@@ -1157,6 +1213,10 @@ export async function editAndResendLatestUserMessage(
 ): Promise<EditAndResendResult> {
   const trimmed = newContent.trim()
   if (!trimmed) throw new Error('Content cannot be empty')
+  // 先校验长度再撤回：否则撤回成功、sendMessage 才拒绝，原消息已经没了。
+  if (trimmed.length > MAX_MESSAGE_CHARS) {
+    throw new Error(`Message is too long (max ${MAX_MESSAGE_CHARS} characters)`)
+  }
 
   const original = await db.query.messages.findFirst({
     where: and(
