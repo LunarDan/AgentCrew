@@ -389,6 +389,17 @@ export async function clearConversationHistory(
   clearClaudeCodeSession(conversationId)
   clearCodexSession(conversationId)
 
+  // 清空历史同样是「消息消失」：其它标签页 / 移动端不能继续显示已删除的消息
+  if (messagesToDelete.length > 0) {
+    eventBus.publish({
+      type: 'message.removed',
+      conversationId,
+      timestamp: now,
+      messageIds: messagesToDelete.map((m) => m.id),
+      artifactIds: [],
+    })
+  }
+
   return {
     conversation: await withWorkspaceMeta({
       ...conv,
