@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server'
 import { eventBus } from '@/server/event-bus'
 import { getBearerToken, isMobileTokenHashValid, requireMobileAuth } from '@/server/mobile-auth'
 import { mobileCorsHeaders, mobileJson, mobileOptions } from '@/server/mobile-cors'
+import { acquireMobileStreamSlot } from '@/server/mobile-stream-slots'
 import { hashMobileDeviceToken } from '@/server/mobile-token-hash'
 import { consumeMobileStreamToken } from '@/server/mobile-stream-tokens'
 
@@ -34,6 +35,12 @@ export async function GET(req: NextRequest) {
   }
   const authorizedHash = authorizedTokenHash
 
+  // 每条流都会订阅全局 eventBus 并常驻内存：限制并发，避免手机侧反复重连把宿主拖垮。
+  const slot = acquireMobileStreamSlot(authorizedHash)
+  if (!slot) {
+    return mobileJson(req, { error: 'Too many open event streams' }, { status: 429 })
+  }
+
   const encoder = new TextEncoder()
   // start 里创建，cancel 在别的闭包里调用：通过它退订，避免客户端断开后订阅泄漏。
   let closeStream: (() => void) | undefined
@@ -53,6 +60,7 @@ export async function GET(req: NextRequest) {
         if (handles.heartbeat !== undefined) clearInterval(handles.heartbeat)
         handles.unsubscribe?.()
         req.signal.removeEventListener('abort', close)
+        slot.release()
         try {
           controller.close()
         } catch {
