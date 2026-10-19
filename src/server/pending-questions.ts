@@ -95,6 +95,29 @@ const globalForPQ = globalThis as unknown as {
   __agenthubPendingQuestions?: PendingQuestionsStore
 }
 
+/**
+ * 答案必须对得上原问题：乱填的 key / label 会原样进入工具结果、消息 part 与 LLM 上下文。
+ * 返回 null 表示通过，否则是给调用方的 400 文案。
+ */
+export function validateAskUserAnswers(
+  question: PendingQuestion,
+  answers: Record<string, AskUserAnswer>,
+): string | null {
+  const byQuestion = new Map(question.questions.map((q) => [q.question, q]))
+  for (const [key, answer] of Object.entries(answers)) {
+    const item = byQuestion.get(key)
+    if (!item) return `Unknown question: ${key}`
+    if (!item.multiSelect && answer.selectedLabels.length > 1) {
+      return `Question only accepts one option: ${key}`
+    }
+    const allowed = new Set(item.options.map((o) => o.label))
+    for (const label of answer.selectedLabels) {
+      if (!allowed.has(label)) return `Unknown option for question: ${key}`
+    }
+  }
+  return null
+}
+
 export const pendingQuestions =
   globalForPQ.__agenthubPendingQuestions ?? new PendingQuestionsStore()
 
