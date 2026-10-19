@@ -31,7 +31,9 @@ export function App() {
   const [snapshot, setSnapshot] = useState<MobileSnapshot | null>(null)
   const [conversationDetail, setConversationDetail] = useState<MobileConversationDetail | null>(null)
   const [artifactPreview, setArtifactPreview] = useState<MobileArtifact | null>(null)
-  const [artifactCache, setArtifactCache] = useState<Record<string, MobileArtifact>>({})
+  const [artifactCache, setArtifactCache] = useState<
+    Record<string, { artifact: MobileArtifact; cachedAt: number }>
+  >({})
   const [artifactLoadingId, setArtifactLoadingId] = useState<string | null>(null)
   const [artifactError, setArtifactError] = useState<string | null>(null)
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
@@ -43,6 +45,9 @@ export function App() {
   const selectedConversationRef = useRef<string | null>(null)
   const snapshotSeq = useRef(0)
   const artifactSeq = useRef(0)
+  const detailSeq = useRef(0)
+  const snapshotInFlight = useRef(false)
+  const detailInFlight = useRef(false)
   const busyRef = useRef(false)
 
   const api = useMemo(() => createMobileApiClient(connection), [connection])
@@ -100,10 +105,19 @@ export function App() {
     let cancelled = false
 
     async function refreshMobileSnapshot() {
+      // 上一次还没回来（弱网 / 黑洞）就不要再叠一个请求
+      if (snapshotInFlight.current) return
+      snapshotInFlight.current = true
       try {
         await loadSnapshot()
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+        if (!cancelled) {
+          // 连不上时状态页不能继续显示「在线」
+          setLastSuccessfulConnection(null)
+          setError(err instanceof Error ? err.message : String(err))
+        }
+      } finally {
+        snapshotInFlight.current = false
       }
     }
 
@@ -152,14 +166,23 @@ export function App() {
     const conversationId = selectedConversationId
 
     async function refreshConversationDetail() {
+      if (detailInFlight.current) return
+      detailInFlight.current = true
+      const seq = ++detailSeq.current
       try {
         const next = await api.getConversation(conversationId)
-        if (!cancelled && selectedConversationRef.current === conversationId) {
+        if (
+          !cancelled &&
+          selectedConversationRef.current === conversationId &&
+          seq === detailSeq.current
+        ) {
           setConversationDetail(next)
           setLastSuccessfulConnection(connectionFingerprint)
         }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        detailInFlight.current = false
       }
     }
 
@@ -183,6 +206,7 @@ export function App() {
     try {
       await loadSnapshot()
     } catch (err) {
+      setLastSuccessfulConnection(null)
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
@@ -198,16 +222,33 @@ export function App() {
     busyRef.current = true
     setOperationId(id)
     setError(null)
+    let succeeded = false
     try {
       await action()
-      await loadSnapshot()
-      return true
+      succeeded = true
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
-      return false
     } finally {
       busyRef.current = false
       setOperationId(null)
+    }
+    if (!succeeded) return false
+    // 操作已经落库：后续刷新失败只提示，不能返回 false 让用户重试一次（会重复发送 / 重新生成）
+    try {
+      await loadSnapshot()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+    return true
+  }
+
+  /** 操作后的详情刷新是可选的：失败不能把「已经成功」说成失败。 */
+  async function refreshDetailBestEffort(conversationId: string): Promise<void> {
+    try {
+      const detail = await api.getConversation(conversationId)
+      if (selectedConversationRef.current === conversationId) setConversationDetail(detail)
+    } catch {
+      // 周期轮询 / 事件流会补上
     }
   }
 
@@ -221,10 +262,11 @@ export function App() {
     setDrawerOpen(false)
     setLoading(true)
     setError(null)
+    const seq = ++detailSeq.current
     try {
       const detail = await api.getConversation(id)
       // 慢请求返回时用户可能已经返回列表或打开了别的会话：丢弃过期响应。
-      if (selectedConversationRef.current !== id) return
+      if (selectedConversationRef.current !== id || seq !== detailSeq.current) return
       setConversationDetail(detail)
       setLastSuccessfulConnection(connectionFingerprint)
     } catch (err) {
@@ -232,7 +274,8 @@ export function App() {
         setError(err instanceof Error ? err.message : String(err))
       }
     } finally {
-      setLoading(false)
+      // 只清自己这次导航的 spinner，别把后来者刚点开的会话 spinner 提前关掉
+      if (selectedConversationRef.current === id) setLoading(false)
     }
   }
 
@@ -260,8 +303,7 @@ export function App() {
     if (!conversationId) return false
     return runMobileAction('send-message', async () => {
       await api.sendMessage(conversationId, content)
-      const detail = await api.getConversation(conversationId)
-      if (selectedConversationRef.current === conversationId) setConversationDetail(detail)
+      await refreshDetailBestEffort(conversationId)
     })
   }
 
@@ -270,8 +312,7 @@ export function App() {
     if (!conversationId) return
     await runMobileAction(`withdraw-${messageId}`, async () => {
       await api.withdrawMessage(conversationId, messageId)
-      const detail = await api.getConversation(conversationId)
-      if (selectedConversationRef.current === conversationId) setConversationDetail(detail)
+      await refreshDetailBestEffort(conversationId)
     })
   }
 
@@ -280,8 +321,7 @@ export function App() {
     if (!conversationId) return
     await runMobileAction(`edit-${messageId}`, async () => {
       await api.editMessage(conversationId, messageId, content)
-      const detail = await api.getConversation(conversationId)
-      if (selectedConversationRef.current === conversationId) setConversationDetail(detail)
+      await refreshDetailBestEffort(conversationId)
     })
   }
 
@@ -290,8 +330,7 @@ export function App() {
     if (!conversationId) return
     await runMobileAction('regenerate', async () => {
       await api.regenerate(conversationId)
-      const detail = await api.getConversation(conversationId)
-      if (selectedConversationRef.current === conversationId) setConversationDetail(detail)
+      await refreshDetailBestEffort(conversationId)
     })
   }
 
@@ -301,9 +340,14 @@ export function App() {
       return
     }
     const cached = artifactCache[artifactId]
-    if (cached) {
+    if (cached && Date.now() - cached.cachedAt < ARTIFACT_CACHE_TTL_MS) {
       artifactSeq.current++
-      setArtifactPreview(cached)
+      // 命中即刷新时间戳：缓存按最近使用淘汰，而不是按写入顺序
+      setArtifactCache((current) => ({
+        ...current,
+        [artifactId]: { artifact: cached.artifact, cachedAt: Date.now() },
+      }))
+      setArtifactPreview(cached.artifact)
       setArtifactError(null)
       setArtifactLoadingId(null)
       return
@@ -316,7 +360,9 @@ export function App() {
     try {
       const artifact = await api.getArtifact(artifactId)
       if (seq !== artifactSeq.current) return
-      setArtifactCache((current) => ({ ...current, [artifact.id]: artifact }))
+      setArtifactCache((current) =>
+        cacheArtifact(current, { artifact, cachedAt: Date.now() }),
+      )
       setArtifactPreview(artifact)
     } catch (err) {
       if (seq === artifactSeq.current) {
@@ -517,4 +563,24 @@ export function App() {
 
 function normalizeBaseUrl(value: string): string {
   return value.trim().replace(/\/+$/, '')
+}
+
+/** 产物缓存的有效期：过期后重新拉取，避免一直显示桌面端已经改过的旧版本。 */
+const ARTIFACT_CACHE_TTL_MS = 30_000
+/** 缓存条数上限；超出按最近使用淘汰，防止长会话里无限增长。 */
+const ARTIFACT_CACHE_MAX = 5
+
+function cacheArtifact(
+  current: Record<string, { artifact: MobileArtifact; cachedAt: number }>,
+  entry: { artifact: MobileArtifact; cachedAt: number },
+): Record<string, { artifact: MobileArtifact; cachedAt: number }> {
+  const next = { ...current, [entry.artifact.id]: entry }
+  const keys = Object.keys(next)
+  if (keys.length > ARTIFACT_CACHE_MAX) {
+    keys
+      .sort((a, b) => next[a].cachedAt - next[b].cachedAt)
+      .slice(0, keys.length - ARTIFACT_CACHE_MAX)
+      .forEach((key) => delete next[key])
+  }
+  return next
 }
