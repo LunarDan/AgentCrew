@@ -704,6 +704,9 @@ export const useAppStore = create<AppState>()(
                 event.status,
                 event.error,
               )
+              // abort 时服务端只是静默 cancel，不发 resolved 事件：不在这里清理，
+              // 审批卡片 / ask_user 弹窗会永远挂住（弹窗还不可关闭）。
+              prunePendingByRun(s, event.conversationId, event.runId)
             }
             return
           }
@@ -1094,6 +1097,38 @@ function buildUnresolvedToolResult(status: 'failed' | 'aborted', error?: string)
   return error
     ? `工具调用未完成：本次运行失败。${error}`
     : '工具调用未完成：本次运行失败。'
+}
+
+/**
+ * run 失败 / 中止时清掉它留下的审批与问答条目。
+ * 服务端 abort 只做静默 cancel（不发 resolved 事件），不清理会让弹窗永远挂着。
+ */
+function prunePendingByRun(
+  s: {
+    pendingWritesByConv: Record<string, PendingWrite[]>
+    pendingBashCommandsByConv: Record<string, PendingBashCommand[]>
+    pendingMcpToolCallsByConv: Record<string, PendingMcpToolCall[]>
+    pendingQuestionsByConv: Record<string, PendingQuestion[]>
+  },
+  conversationId: string,
+  runId: string,
+): void {
+  prunePendingList(s.pendingWritesByConv, conversationId, runId)
+  prunePendingList(s.pendingBashCommandsByConv, conversationId, runId)
+  prunePendingList(s.pendingMcpToolCallsByConv, conversationId, runId)
+  prunePendingList(s.pendingQuestionsByConv, conversationId, runId)
+}
+
+function prunePendingList<T extends { runId: string }>(
+  lists: Record<string, T[]>,
+  conversationId: string,
+  runId: string,
+): void {
+  const list = lists[conversationId]
+  if (!list) return
+  const next = list.filter((item) => item.runId !== runId)
+  if (next.length === 0) delete lists[conversationId]
+  else lists[conversationId] = next
 }
 
 /**
