@@ -67,7 +67,7 @@ L1 Persistence                          src/db/**（Drizzle+SQLite） + workspac
 | 平台抽象（Win/POSIX） | ✅ | shell 选择 · 多盘符 DirPicker · 子进程清理 |
 | Electron 桌面版 | ✅ | DMG / EXE 打包 · userData 路径迁移 |
 | 全局 API Key 设置面板 | ✅ | app_settings 单行表 · 三层 key 优先级 |
-| 移动端伴随 App | ⏳ | 响应式 Web 已适配;Capacitor 原生壳脚手架已建;手动配对（地址 + 设备 token）可用并能跨桌面重启;快照/会话/审批/提问/产物预览/停止运行中任务已接通;事件流（`/api/mobile/events`）与 QR 配对码未实现 |
+| 移动端伴随 App | ⏳ | 响应式 Web 已适配;Capacitor 原生壳脚手架已建;手动配对（地址 + 设备 token）可用并能跨桌面重启;快照/会话/审批/提问/产物预览/停止运行中任务已接通;事件流（`/api/mobile/events` + 一次性 stream token）已实现,App 以事件触发刷新并保留轮询兜底;QR/一次性配对码未实现 |
 | 斜杠命令菜单 | ✅ | 输入 `/` 弹命令浮层（打开设置 / Agents 库等 UI 命令） |
 | 测试覆盖 | 🟡 | Vitest 纯函数（security / workspace-utils / dispatch-plan / artifact-content / ppt-export / ppt-theme / mock-adapter 编排契约）；Playwright **E2E 基建 + 核心 IM 流 + 产物预览/导出 + 群聊编排**（mock agent，见附录） |
 
@@ -175,6 +175,8 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 ## 附 · 当前现状（易过时,以代码为准）
 
 ### ✅ 近期完成（最新一批）
+- **移动端事件流（2026-10-20）**：新增 `GET /api/mobile/events`（Bearer 鉴权，SSE 格式）与 `POST /api/mobile/stream-token`（30 秒、一次性，供不能带 header 的 `EventSource` 走 query token）。移动 App 用事件流触发快照刷新（500ms 去抖），轮询保留为 WebView 不支持 fetch streaming 时的兜底
+- **沙箱与工具缺陷修复（2026-10-20）**：① workspace 路径校验补 realpath —— 此前只做词法比较,workspace 内的 symlink / junction 可直接读写外部文件;② Windows 黑名单 `del` / `rd` 支持带引号的盘符路径（`del /F /Q "C:\"` 此前可绕过）;③ `fs_write` 审批通过但写盘失败时返回真实错误,不再伪装成「用户拒绝」,并补上 review 结果的 `cwd`;④ sandbox 配额按覆盖增量计算,重写同一文件不再重复占用;⑤ 已中止的 run 不再启动新的 bash 进程;⑥ Anthropic / OpenAI 工具调用事件保持在 `message.end` 之前,工具产生的 part 不会再丢;`deploy.status` 不再以空缓冲覆盖已落库的 parts;`run.usage` 跨阶段累加;abort 时不再把消息收尾成 complete;⑦ 释放 abort / parent signal 监听,避免长会话累积
 - **移动端可停止运行中的任务（2026-10-20）**：新增 `POST /api/mobile/runs/:id/abort`（复用 `abortRun`），状态页列出 `runningRuns`（Agent 名 + 开始时间）并提供「停止」；此前移动端只能看到运行中计数，无法中止
 - **伴随模式远程暴露收口（2026-10-20）**：打包版此前在 companion 开启时把整个 Next server 绑到 `0.0.0.0:60646`，同一局域网任何设备都能直接 `GET /api/settings`（明文 provider key + 设备 token）、调用 `/api/conversations` 等桌面 API。现在 Next 固定 loopback + 系统端口，`0.0.0.0:60646` 改为只转发 `/api/mobile/*` 的反向代理，其余路径 404；移动端路由自身仍校验 Bearer token
 - **一批 UI / 移动端缺陷修复（2026-10-20）**：删除用过的 Agent 时把外键失败显示出来（此前只 console）；切换 provider 清空旧凭据与 Base URL；claude-code / anthropic 的 Base URL 做格式校验；name / description 输入加上限；设置面板开启伴随 / 重置 token 不再冲掉未保存的 key，读取失败时禁用保存；删除会话时同步清理客户端侧的产物与预览；移动端对未适配的产物类型与 `deploy_candidates` 给出说明而不是空白；移动端拒绝纯空白消息
@@ -203,7 +205,7 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 - 冲突检测盲区：bash / SDK adapter 写入（可加波次快照补全）
 - Codex 写盘审批 hook（当前 Review 模式用 read-only sandbox）
 - sandbox 配额对 Claude Code SDK 失效（SDK 自己写盘绕过 quota）
-- 移动端伴随 App：事件流（`/api/mobile/events`）与 QR/一次性配对码
+- 移动端伴随 App：QR/一次性配对码 + `device_sessions`（服务端只存 token hash、可吊销；涉及 schema 变更）
 - E2E 可观测性：本机 Playwright 浏览器版本与 `@playwright/test` 不匹配时需 `pnpm exec playwright install chromium`
 
 ### ⚠️ 关键约定（动手前必看）
@@ -216,4 +218,4 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 
 ---
 
-*最后更新：2026-10-20 · 记入伴随模式远程暴露收口（companion 端口只代理 `/api/mobile/*`）、一批 UI / 移动端缺陷修复、移动端鉴权改用设置表（重启后 token 不失效 + snapshot 模式来源修正）、Custom adapter 的 Anthropic Messages API 支持、Agent 配置导入 / 导出、头像选择器、POSIX 子进程 SIGKILL 升级与内置 `web_fetch`（含 SSRF 防护）。同日更早记入了流式可靠性两处修复与 F2 的 live 验证结果。2026-10-19 记入外部 MCP P1（custom 自建 MCP 客户端 + 审批门扩展到 custom）与外部 MCP 连接失败可见（F2：`mcp_server.unavailable` + 持久系统提示）。2026-10-18 记入了 shell 工具按身份识别（Windows 上 SDK 的 shell 工具是 `PowerShell`，此前按 `Bash` 字面量匹配导致黑名单与审批分类器整条失效）。2026-10-13 记入了 Claude Code adapter 的隔离启动（`settingSources: []` + `strictMcpConfig: true`）与 F1 修复（`partIndex` 归一，`src/server/part-slots.ts`）及两个相邻未修缺陷（`persistEvent` 空缓冲兜底、claude-code adapter 非流式回退重复渲染）。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*
+*最后更新：2026-10-20 · 记入移动端事件流与一次性 stream token、沙箱 realpath 校验 / Windows 引号路径黑名单 / fs_write 错误语义 / 配额增量 / bash abort / 流式事件顺序与 usage 累计等一批修复、伴随模式远程暴露收口（companion 端口只代理 `/api/mobile/*`）、一批 UI / 移动端缺陷修复、移动端鉴权改用设置表（重启后 token 不失效 + snapshot 模式来源修正）、Custom adapter 的 Anthropic Messages API 支持、Agent 配置导入 / 导出、头像选择器、POSIX 子进程 SIGKILL 升级与内置 `web_fetch`（含 SSRF 防护）。同日更早记入了流式可靠性两处修复与 F2 的 live 验证结果。2026-10-19 记入外部 MCP P1（custom 自建 MCP 客户端 + 审批门扩展到 custom）与外部 MCP 连接失败可见（F2：`mcp_server.unavailable` + 持久系统提示）。2026-10-18 记入了 shell 工具按身份识别（Windows 上 SDK 的 shell 工具是 `PowerShell`，此前按 `Bash` 字面量匹配导致黑名单与审批分类器整条失效）。2026-10-13 记入了 Claude Code adapter 的隔离启动（`settingSources: []` + `strictMcpConfig: true`）与 F1 修复（`partIndex` 归一，`src/server/part-slots.ts`）及两个相邻未修缺陷（`persistEvent` 空缓冲兜底、claude-code adapter 非流式回退重复渲染）。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*
