@@ -28,7 +28,11 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
   const { id } = await ctx.params
-  const raw = await req.json().catch(() => ({}))
+  // 畸形 JSON 不能被当成「空 body → 部署第一个候选」，那是用户没表达过的操作
+  const raw = await req.json().catch(() => null)
+  if (raw === null) {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+  }
   const parsed = DeployBody.safeParse(raw)
   if (!parsed.success) {
     return NextResponse.json({ error: 'Invalid body', issues: parsed.error.issues }, { status: 400 })

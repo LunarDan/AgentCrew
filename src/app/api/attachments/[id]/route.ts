@@ -54,6 +54,10 @@ export async function DELETE(_req: Request, ctx: RouteContext) {
     return NextResponse.json({ ok: true })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    return NextResponse.json({ error: message }, { status: 404 })
+    if (message.startsWith('Attachment not found')) {
+      return NextResponse.json({ error: message }, { status: 404 })
+    }
+    console.error('[attachments/delete] failed', err)
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
   }
 }
