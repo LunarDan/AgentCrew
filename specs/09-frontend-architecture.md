@@ -312,6 +312,8 @@ app/page.tsx
 
 时间窗有一个反向风险：3s 等待期间用户（或另一端设备）可能又发了一条新 user message，按时间窗会被一起删掉。因此两条路径都在**删除事务内**重新检查：只要存在 `id != 被操作消息` 且 `created_at >= 触发消息.createdAt` 的 user 消息，就抛 `A newer user message arrived`（接口返回 409），不执行任何删除。
 
+**并发重新生成**：同一会话同一时刻只允许一个 `regenerateLatestResponse`。两个请求（双击 / 两端同时点）会在各自「无运行中 run」的检查后一起启动 responder，产生重复回复、重复 run 与重复计费；第二个请求直接抛 `Regeneration already in progress`（409）。
+
 **为什么走 SSE 广播**：桌面端与移动端可能同时打开同一会话，其它客户端要实时移除被撤回 / 重新生成掉的消息与产物，所以 service 在事务提交后发 `message.removed`（含 `messageIds` / `artifactIds`，详见 Spec 02）。发起操作的客户端按接口返回值直接更新 store，并对广播做幂等处理。广播删掉的 artifact id 记入 `removedArtifactIds`：产物库的本地 meta 列表来自一次 `fetchArtifacts`，不订阅 store，必须用这个集合剪枝，否则会一直显示别处已删除的版本。
 
 ---
