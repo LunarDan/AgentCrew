@@ -150,23 +150,31 @@ interface AppState {
   clearPendingAttachments(conversationId: string): void
 
   setPendingWritesForConversation(conversationId: string, list: PendingWrite[]): void
+  removePendingWrite(conversationId: string, pendingId: string): void
 
   setPendingBashCommandsForConversation(
     conversationId: string,
     list: PendingBashCommand[],
   ): void
+  removePendingBashCommand(conversationId: string, pendingId: string): void
 
   setPendingMcpToolCallsForConversation(
     conversationId: string,
     list: PendingMcpToolCall[],
   ): void
+  removePendingMcpToolCall(conversationId: string, pendingId: string): void
 
   setPendingQuestionsForConversation(conversationId: string, list: PendingQuestion[]): void
 
   setPendingDispatchPlansForConversation(
     conversationId: string,
     list: PendingDispatchPlan[],
+    /** 请求发出时本地已有的 pendingPlanId；只有它们能被这份快照判死 */
+    pruneCandidateIds?: string[],
   ): void
+
+  /** SSE 的 resolved 事件丢失时，审批成功的卡片仍要能自行退场 */
+  resolveDispatchReviewLocally(runId: string, status: 'approved' | 'rejected'): void
 
   /** 高亮指定消息 1.5 秒（点击「引用」预览时的跳转反馈） */
   highlightedMessageId: string | null
@@ -301,8 +309,12 @@ export const useAppStore = create<AppState>()(
           if (snapshotSet.has(id)) return false
           const m = s.messages[id]
           if (!m) return false
-          // 本地乐观消息 / 正在流式的消息不能被快照判死
-          return id.startsWith('temp_') || m.status === 'streaming' || m.createdAt > latestSnapshotAt
+          // 本地乐观消息 / 正在流式的消息不能被快照判死；空快照不能靠 createdAt 兜底
+          return (
+            id.startsWith('temp_') ||
+            m.status === 'streaming' ||
+            (latestSnapshotAt > 0 && m.createdAt > latestSnapshotAt)
+          )
         })
         const preservedSet = new Set(preservedIds)
         for (const id of existingIds) {
@@ -550,10 +562,20 @@ export const useAppStore = create<AppState>()(
         else s.pendingWritesByConv[conversationId] = list
       }),
 
+    removePendingWrite: (conversationId, pendingId) =>
+      set((s) => {
+        removePendingById(s.pendingWritesByConv, conversationId, pendingId)
+      }),
+
     setPendingBashCommandsForConversation: (conversationId, list) =>
       set((s) => {
         if (list.length === 0) delete s.pendingBashCommandsByConv[conversationId]
         else s.pendingBashCommandsByConv[conversationId] = list
+      }),
+
+    removePendingBashCommand: (conversationId, pendingId) =>
+      set((s) => {
+        removePendingById(s.pendingBashCommandsByConv, conversationId, pendingId)
       }),
 
     setPendingMcpToolCallsForConversation: (conversationId, list) =>
@@ -562,15 +584,22 @@ export const useAppStore = create<AppState>()(
         else s.pendingMcpToolCallsByConv[conversationId] = list
       }),
 
+    removePendingMcpToolCall: (conversationId, pendingId) =>
+      set((s) => {
+        removePendingById(s.pendingMcpToolCallsByConv, conversationId, pendingId)
+      }),
+
     setPendingQuestionsForConversation: (conversationId, list) =>
       set((s) => {
         if (list.length === 0) delete s.pendingQuestionsByConv[conversationId]
         else s.pendingQuestionsByConv[conversationId] = list
       }),
 
-    setPendingDispatchPlansForConversation: (conversationId, list) =>
+    setPendingDispatchPlansForConversation: (conversationId, list, pruneCandidateIds) =>
       set((s) => {
         const validPendingIds = new Set(list.map((p) => p.id))
+        // 请求在途时 SSE 可能刚送来一个新计划：它不在快照里不代表已被处理，不能清掉
+        const pruneCandidates = pruneCandidateIds ? new Set(pruneCandidateIds) : null
         for (const pending of list) {
           if (pending.conversationId !== conversationId) continue
           const status: DispatchState['taskStatus'] = {}
@@ -592,10 +621,19 @@ export const useAppStore = create<AppState>()(
         for (const dispatch of Object.values(s.dispatchesByRunId)) {
           if (!dispatch.pendingPlanId || dispatch.reviewStatus !== 'pending') continue
           if (validPendingIds.has(dispatch.pendingPlanId)) continue
+          if (pruneCandidates && !pruneCandidates.has(dispatch.pendingPlanId)) continue
           if (s.messages[dispatch.messageId]?.conversationId !== conversationId) continue
           delete dispatch.pendingPlanId
           dispatch.reviewStatus = undefined
         }
+      }),
+
+    resolveDispatchReviewLocally: (runId, status) =>
+      set((s) => {
+        const dispatch = s.dispatchesByRunId[runId]
+        if (!dispatch || dispatch.reviewStatus !== 'pending') return
+        delete dispatch.pendingPlanId
+        dispatch.reviewStatus = status
       }),
 
     highlightMessage: (messageId) => {
@@ -1133,6 +1171,18 @@ function prunePendingList<T extends { runId: string }>(
   const list = lists[conversationId]
   if (!list) return
   const next = list.filter((item) => item.runId !== runId)
+  if (next.length === 0) delete lists[conversationId]
+  else lists[conversationId] = next
+}
+
+function removePendingById<T extends { id: string }>(
+  lists: Record<string, T[]>,
+  conversationId: string,
+  pendingId: string,
+): void {
+  const list = lists[conversationId]
+  if (!list) return
+  const next = list.filter((item) => item.id !== pendingId)
   if (next.length === 0) delete lists[conversationId]
   else lists[conversationId] = next
 }
