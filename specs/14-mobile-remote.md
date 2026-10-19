@@ -284,7 +284,7 @@ GET /api/mobile/events?streamToken=<short-lived-token>
 
 `streamToken` 30 秒内有效、一次性，用于 WebView 不支持 fetch streaming 而必须使用 `EventSource` 的平台。
 
-**实现状态（2026-10-20）**：`GET /api/mobile/events`（Bearer）与 `POST /api/mobile/stream-token`（30 秒一次性 token，`GET /api/mobile/events?streamToken=...`）已实现。移动端 App 用事件流触发快照刷新（500ms 去抖），同时保留 2–3s 轮询作为 WebView 不支持 fetch streaming 时的兜底。
+**实现状态（2026-10-20）**：`GET /api/mobile/events`（Bearer）与 `POST /api/mobile/stream-token`（30 秒一次性 token，`GET /api/mobile/events?streamToken=...`）已实现。移动端 App 用事件流触发快照刷新（500ms 去抖），同时保留 2–3s 轮询作为 WebView 不支持 fetch streaming 时的兜底。事件流每 15s 心跳时重新读取设置表比对期望 token：轮换 token 或关闭 companion mode 会主动关闭已建立的连接，吊销对长连接同样生效。
 
 ### 6.4 操作 API
 

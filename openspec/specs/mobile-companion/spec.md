@@ -57,6 +57,10 @@ The mobile event stream MUST require the same authorization as other `/api/mobil
 - **WHEN** a client presents a stream token that was already consumed or has expired
 - **THEN** the events endpoint rejects the request with 401.
 
+#### Scenario: The device token is rotated while a stream is open
+- **WHEN** the stored mobile token changes or companion mode is turned off while a client is subscribed
+- **THEN** the open stream is closed on the next revalidation instead of continuing to deliver events.
+
 ### Requirement: Mobile APIs SHALL expose conversation snapshots
 
 Remote mobile APIs MUST provide a compact snapshot of conversations, messages, pending questions, pending writes, and run state needed for monitoring.
