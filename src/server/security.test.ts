@@ -39,7 +39,11 @@ describe('findBannedPattern', () => {
 
   it('blocks destructive Windows commands', () => {
     expectBanned('del /F /Q C:\\', 'windows')
+    expectBanned('del /F /Q "C:\\"', 'windows')
+    expectBanned('erase /S /Q "C:\\"', 'windows')
     expectBanned('rd /S /Q C:\\', 'windows')
+    expectBanned('rd /S /Q "C:\\"', 'windows')
+    expectBanned('rd /S /Q "C:/"', 'windows')
     expectBanned('Remove-Item C:\\tmp -Recurse -Force', 'windows')
     expectBanned('Remove-Item C:\\tmp -Force -Recurse', 'windows')
     expectBanned('rm C:\\tmp -Recurse -Force', 'windows')

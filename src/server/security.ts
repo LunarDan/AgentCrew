@@ -25,8 +25,8 @@ const POSIX_BANNED: RegExp[] = [
 ]
 
 const WINDOWS_BANNED: RegExp[] = [
-  /\b(del|erase)\s+\/[fsq\s/]*[a-z]:\\?/i,
-  /\brd\s+\/[sq\s/]*[a-z]:\\?/i,
+  /\b(del|erase)\s+\/[fsq\s/"']*[a-z]:[\\/]?/i,
+  /\brd\s+\/[sq\s/"']*[a-z]:[\\/]?/i,
   /\bRemove-Item\b[^|;]*-Recurse[^|;]*-Force/i,
   /\bRemove-Item\b[^|;]*-Force[^|;]*-Recurse/i,
   /\bri\b[^|;]*-Recurse[^|;]*-Force/i,
