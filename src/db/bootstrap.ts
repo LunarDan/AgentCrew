@@ -182,6 +182,17 @@ const DDL: string[] = [
     enabled INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL
   )`,
+
+  // ─── device_sessions (specs/14-mobile-remote.md §5.2) ──
+  `CREATE TABLE IF NOT EXISTS device_sessions (
+    id TEXT PRIMARY KEY,
+    device_name TEXT NOT NULL,
+    token_hash TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_seen_at INTEGER,
+    revoked_at INTEGER
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_device_sessions_token_hash ON device_sessions(token_hash)`,
 ]
 
 /** 建表 / 建索引（幂等）。 */

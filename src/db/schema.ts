@@ -288,6 +288,22 @@ export const appSettings = sqliteTable('app_settings', {
 export type AppSettingsRow = typeof appSettings.$inferSelect
 export type AppSettingsInsert = typeof appSettings.$inferInsert
 
+// ─── Mobile device sessions (specs/14-mobile-remote.md §5.2) ──
+/**
+ * 一次配对一台设备：只存 token hash，明文只在配对响应里返回一次。
+ * `revoked_at` 非空即吊销；auth 每次都会检查，长连接也会在心跳时复核。
+ */
+export const deviceSessions = sqliteTable('device_sessions', {
+  id: text('id').primaryKey(),
+  deviceName: text('device_name').notNull(),
+  tokenHash: text('token_hash').notNull(),
+  createdAt: integer('created_at').notNull(),
+  lastSeenAt: integer('last_seen_at'),
+  revokedAt: integer('revoked_at'),
+})
+
+export type DeviceSessionRow = typeof deviceSessions.$inferSelect
+
 // ─── External MCP servers (specs/15-external-mcp.md) ────────
 /**
  * 用户登记的外部 MCP server。全局一张表，Agent 通过 `agents.mcp_server_ids` 引用。

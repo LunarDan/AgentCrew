@@ -19,3 +19,4 @@ export const newPendingDispatchPlanId = () => `pdp_${nano()}`
 export const newContextSummaryId = () => `ctx_${nano()}`
 export const newDeploymentId = () => `dep_${nano()}`
 export const newMcpServerId = () => `mcp_${nano()}`
+export const newDeviceSessionId = () => `dev_${nano()}`
