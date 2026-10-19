@@ -2,7 +2,7 @@ import { accessSync, constants, mkdirSync, statSync } from 'node:fs'
 import { rm as fsRm } from 'node:fs/promises'
 import path from 'node:path'
 
-import { and, desc, eq, gt, gte, inArray } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, ne } from 'drizzle-orm'
 
 import { db, schema } from '@/db/client'
 import type { ConversationWithMeta, MessageRow } from '@/db/schema'
@@ -947,11 +947,12 @@ export async function regenerateLatestResponse(
   })
   if (!latestUser) throw new Error('No user message to regenerate from')
 
-  // abort 任何还在跑的 run（不一定有）
+  // abort 任何还在跑的 run（不一定有）。边界用 >=：run 的 startedAt 可能与
+  // 触发它的 user message 同一毫秒，严格 > 会把它漏在删除窗口之外继续写。
   const runsToAbort = await db.query.agentRuns.findMany({
     where: and(
       eq(schema.agentRuns.conversationId, conversationId),
-      gt(schema.agentRuns.startedAt, latestUser.createdAt),
+      gte(schema.agentRuns.startedAt, latestUser.createdAt),
       eq(schema.agentRuns.status, 'running'),
     ),
   })
@@ -965,11 +966,13 @@ export async function regenerateLatestResponse(
   clearClaudeCodeSession(conversationId)
   clearCodexSession(conversationId)
 
-  // 删除 latestUser 之后的所有 message（保留 latestUser 本身）
+  // 删除 latestUser 之后的所有 message（保留 latestUser 本身）。同毫秒的回复也
+  // 必须一起删，否则旧回复会留在新 run 前面。
   const messagesToDelete = await db.query.messages.findMany({
     where: and(
       eq(schema.messages.conversationId, conversationId),
-      gt(schema.messages.createdAt, latestUser.createdAt),
+      gte(schema.messages.createdAt, latestUser.createdAt),
+      ne(schema.messages.id, latestUser.id),
     ),
   })
   const messageIds = messagesToDelete.map((m) => m.id)
@@ -984,7 +987,7 @@ export async function regenerateLatestResponse(
   const runsToDelete = await db.query.agentRuns.findMany({
     where: and(
       eq(schema.agentRuns.conversationId, conversationId),
-      gt(schema.agentRuns.startedAt, latestUser.createdAt),
+      gte(schema.agentRuns.startedAt, latestUser.createdAt),
     ),
   })
   const runIds = runsToDelete.map((r) => r.id)
