@@ -295,7 +295,7 @@ GET /api/mobile/events?streamToken=<short-lived-token>
 
 **错误面收敛**：`/api/mobile/*` 的错误响应不得把内部字符串（宿主绝对路径、SQLite 错误、errno）回给局域网设备。`src/server/mobile-errors.ts` 是统一出口：`mobileErrorJson` 只放行 `MobileNotFoundError`，其余记日志后返回 `Internal error` + 500；`mobileUserErrorJson` 额外放行会话服务里用户可理解、可操作的输入错误（撤回非最新消息、内容为空 / 超长、附件不存在等）。写盘审批失败在桌面端仍返回真实原因（便于排查），移动端只回通用文案。ask_user 答案同样有上限（≤4 题、每题 ≤8 个选项、备注 ≤4000 字），且 key / label 必须存在于原问题，否则 400。
 
-**桌面写接口的 CSRF 门**：桌面 API 虽只监听 loopback，浏览器仍可从任意网页发起跨站简单请求（例如无 body 的 `POST /api/settings/mobile-token` 会重置设备凭据）。`/api/settings` 的 PATCH 与 `mobile-token` 的 POST 统一经 `rejectCrossOriginWrite`：`Origin` 与请求 origin 不一致、或 `Sec-Fetch-Site` 为 `cross-site` / `same-site` 时返回 403；无这些头的非浏览器调用不受影响。
+**桌面写接口的 CSRF 门**：桌面 API 虽只监听 loopback，浏览器仍可从任意网页发起跨站简单请求（例如无 body 的 `POST /api/settings/mobile-token` 会重置设备凭据）。**所有**桌面写接口（`src/app/api/**` 下除 `/api/mobile/*`、`/api/internal/*` 以外的 POST / PUT / PATCH / DELETE）统一经 `rejectCrossOriginWrite`：`Origin` 与请求 origin 不一致、或 `Sec-Fetch-Site` 为 `cross-site` / `same-site` 时返回 403；无这些头的非浏览器调用不受影响。`/api/mobile/*` 已由 Bearer 鉴权保护，跨站页面无法带上该头，因此不重复加这道门。
 
 事件流的生命周期必须完整：客户端断开（含反向代理一侧销毁）时通过 `ReadableStream.cancel` 退订 eventBus、停心跳并移除 abort 监听；鉴权是异步的，订阅建立后要再检查一次 `req.signal.aborted`。手机读得慢时按 `controller.desiredSize` 丢弃事件，不让服务端无界缓冲 —— 丢失的增量由重连后的快照补齐。
 
