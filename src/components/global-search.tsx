@@ -54,6 +54,7 @@ export function GlobalSearch() {
   }, [hits])
 
   function handleKey(e: React.KeyboardEvent) {
+    if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return
     if (e.key === 'ArrowDown') {
       e.preventDefault()
       setActive((a) => Math.min(a + 1, Math.max(hits.length - 1, 0)))

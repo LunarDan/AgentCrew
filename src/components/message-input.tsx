@@ -249,6 +249,7 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
   const [sending, setSending] = useState(false)
   const [aborting, setAborting] = useState(false)
   const [uploading, setUploading] = useState<Array<{ tempId: string; name: string }>>([])
+  const [sendError, setSendError] = useState<string | null>(null)
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -269,6 +270,7 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
   const addPendingAttachment = useAppStore((s) => s.addPendingAttachment)
   const removePendingAttachment = useAppStore((s) => s.removePendingAttachment)
   const clearPendingAttachments = useAppStore((s) => s.clearPendingAttachments)
+  const removeMessages = useAppStore((s) => s.removeMessages)
   const [modeBusy, setModeBusy] = useState(false)
 
   // 引用回复目标
@@ -562,6 +564,7 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
     clearSlashCommandInput()
     if (pendingQuote) setPendingQuote(null)
     if (replyTargetId) setReplyTarget(conversationId, null)
+    setSendError(null)
 
     const tempId = `temp_${nanoid()}`
     addLocalUserMessage({
@@ -578,6 +581,8 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
       upsertReturnedMessages(result.messages)
     } catch (err) {
       console.error('[MessageInput] deploy failed', err)
+      removeMessages(conversationId, [tempId])
+      setSendError(err instanceof Error ? err.message : String(err))
     } finally {
       setSending(false)
     }
@@ -621,6 +626,8 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // 输入法组合中的 Enter 用于确认候选词，不能触发发送 / 菜单选择
+    if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return
     if (slashTrigger && filteredSlashCommands.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
@@ -685,12 +692,15 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
     // 反馈会由服务端落库 + 广播成一条 user 消息回显到对话。
     if (planReview) {
       if (!text || sending) return
+      setSendError(null)
       setContent('')
       setSending(true)
       try {
         await reviseDispatchPlan(conversationId, planReview.planId, text)
       } catch (err) {
         console.error('[MessageInput] revise plan failed', err)
+        setContent(text)
+        setSendError(err instanceof Error ? err.message : String(err))
       } finally {
         setSending(false)
       }
@@ -712,6 +722,7 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
 
     const tempId = `temp_${nanoid()}`
     const parentId = replyTargetId ?? undefined
+    setSendError(null)
     addLocalUserMessage({
       tempId,
       conversationId,
@@ -720,11 +731,12 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
       parentMessageId: parentId,
       attachments: pending,
     })
+    const quote = pendingQuote
     setContent('')
     setMentionedIds([])
     setTrigger(null)
     setSlashTrigger(null)
-    if (pendingQuote) setPendingQuote(null)
+    if (quote) setPendingQuote(null)
     const attachmentIds = pending.map((a) => a.id)
     clearPendingAttachments(conversationId)
     if (replyTargetId) setReplyTarget(conversationId, null)
@@ -741,6 +753,14 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
       upsertReturnedMessages(result.messages)
     } catch (err) {
       console.error('[MessageInput] send failed', err)
+      // 发送失败：撤掉乐观消息，并把用户输入原样放回输入框，避免留下永远等不到回复的假消息
+      removeMessages(conversationId, [tempId])
+      setContent(text)
+      setMentionedIds(mentionedIds)
+      setPendingQuote(quote)
+      if (parentId) setReplyTarget(conversationId, parentId)
+      for (const attachment of pending) addPendingAttachment(conversationId, attachment)
+      setSendError(err instanceof Error ? err.message : String(err))
     } finally {
       setSending(false)
     }
@@ -938,6 +958,13 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
               </div>
             </button>
           ))}
+        </div>
+      )}
+
+      {sendError && (
+        <div role="alert" className="flex items-start gap-1 text-xs text-destructive">
+          <AlertTriangle className="mt-0.5 size-3 shrink-0" />
+          <span className="min-w-0 break-words">发送失败：{sendError}</span>
         </div>
       )}
 

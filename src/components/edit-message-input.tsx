@@ -44,6 +44,7 @@ export function EditMessageInput({
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => {
+          if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault()
             commit()
