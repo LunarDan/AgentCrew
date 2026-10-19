@@ -519,9 +519,16 @@ function normaliseMermaidTheme(value: unknown): MermaidTheme | undefined {
     : undefined
 }
 
+/** PPT 的单字段正常远小于此；超长字符串基本只可能是内嵌的 base64 图片 */
+const MAX_PPT_STRING_FIELD_CHARS = 100_000
+const BINARY_DATA_URI_PATTERN = /data:[^,;\s]+;base64,/i
+
 function containsUnboundedBinaryPayload(value: unknown): boolean {
   if (typeof value === 'string') {
-    return /^data:[^,]+;base64,/i.test(value.trim())
+    // 不锚定开头：模型常把 data URI 藏在 markdown 的 ![](...) 或 CSS 中间
+    return (
+      value.length > MAX_PPT_STRING_FIELD_CHARS || BINARY_DATA_URI_PATTERN.test(value)
+    )
   }
   if (!value || typeof value !== 'object') return false
   if (Array.isArray(value)) return value.some(containsUnboundedBinaryPayload)
