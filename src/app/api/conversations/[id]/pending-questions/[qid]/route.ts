@@ -19,7 +19,7 @@ const Body = z.object({
 
 /** POST /api/conversations/:id/pending-questions/:qid  body { answers } —— 提交答案。 */
 export async function POST(req: NextRequest, ctx: RouteContext) {
-  const { qid } = await ctx.params
+  const { id, qid } = await ctx.params
   const raw = await req.json().catch(() => null)
   const parsed = Body.safeParse(raw)
   if (!parsed.success) {
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   }
 
   const existing = pendingQuestions.get(qid)
-  if (!existing) {
+  if (!existing || existing.conversationId !== id) {
     return NextResponse.json({ error: 'Pending question not found' }, { status: 404 })
   }
 

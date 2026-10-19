@@ -13,7 +13,7 @@ const Body = z.object({
 
 /** POST /api/conversations/:id/pending-writes/:pwId  body { action } —— 应用或拒绝一个 pending fs_write。 */
 export async function POST(req: NextRequest, ctx: RouteContext) {
-  const { pwId } = await ctx.params
+  const { id, pwId } = await ctx.params
   const raw = await req.json().catch(() => null)
   const parsed = Body.safeParse(raw)
   if (!parsed.success) {
@@ -21,7 +21,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   }
 
   const existing = pendingWrites.get(pwId)
-  if (!existing) {
+  if (!existing || existing.conversationId !== id) {
     return NextResponse.json({ error: 'Pending write not found' }, { status: 404 })
   }
 
