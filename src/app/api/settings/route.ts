@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
+import { rejectCrossOriginWrite } from '@/server/local-origin'
 import { getAppSettings, updateAppSettings } from '@/server/settings-service'
 
 /** GET /api/settings —— 返回全局设置（key 字段会原样返回；用户已自行选择填明文） */
@@ -26,6 +27,8 @@ const PatchBody = z.object({
 
 /** PATCH /api/settings —— upsert 部分字段 */
 export async function PATCH(req: NextRequest) {
+  const rejected = rejectCrossOriginWrite(req)
+  if (rejected) return rejected
   const raw = await req.json().catch(() => null)
   const parsed = PatchBody.safeParse(raw)
   if (!parsed.success) {
