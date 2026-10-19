@@ -91,15 +91,20 @@ export const askUserTool: ToolDef = {
       questions: parsed.data.questions,
     })
 
-    const decision = await new Promise<Record<string, AskUserAnswer> | null>((resolve) => {
-      pendingQuestions.attachResolver(pending.id, resolve)
-      const onAbort = () => {
-        pendingQuestions.cancel(pending.id)
-        resolve(null)
-      }
-      if (ctx.abortSignal.aborted) onAbort()
-      else ctx.abortSignal.addEventListener('abort', onAbort, { once: true })
+    let resolveDecision: (decision: Record<string, AskUserAnswer> | null) => void = () => {}
+    const decisionPromise = new Promise<Record<string, AskUserAnswer> | null>((resolve) => {
+      resolveDecision = resolve
     })
+    const onAbort = () => {
+      pendingQuestions.cancel(pending.id)
+      resolveDecision(null)
+    }
+    pendingQuestions.attachResolver(pending.id, resolveDecision)
+    if (ctx.abortSignal.aborted) onAbort()
+    else ctx.abortSignal.addEventListener('abort', onAbort, { once: true })
+
+    const decision = await decisionPromise
+    ctx.abortSignal.removeEventListener('abort', onAbort)
 
     if (!decision) {
       return { ok: false, error: 'User did not answer the question (aborted)' }

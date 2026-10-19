@@ -406,4 +406,14 @@ describe('buildArtifactContent', () => {
     expect(buildArtifactContent('ppt', { slides: [{}] })).toBeNull()
     expect(buildArtifactContent('ppt', 123)).toBeNull()
   })
+
+  it('拒绝空白正文而不是创建空产物', () => {
+    expect(buildArtifactContent('document', '   ')).toBeNull()
+    expect(buildArtifactContent('document', { content: '' })).toBeNull()
+    expect(buildArtifactContent('web_app', '')).toBeNull()
+    expect(buildArtifactContent('web_app', { html: '', css: '   ' })).toBeNull()
+    expect(buildArtifactContent('web_app', { files: { 'index.html': '  ' } })).toBeNull()
+    expect(buildArtifactContent('image', { url: '' })).toBeNull()
+    expect(buildArtifactContent('image', '   ')).toBeNull()
+  })
 })

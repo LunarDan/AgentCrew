@@ -4,6 +4,11 @@ import type { ArtifactContent, ArtifactType, DiffHunk, MermaidTheme, PptLayout, 
 
 const MAX_DIAGRAM_SOURCE_CHARS = 50_000
 
+/** 空串 / 纯空白在产物预览里等于「什么都没有」：按缺失处理。 */
+function hasText(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
 /**
  * 把 LLM 或用户给的松散 content 规整成强类型 ArtifactContent;非法返回 null。
  *
@@ -27,6 +32,8 @@ export function buildArtifactContent(type: ArtifactType, rawInput: unknown): Art
           if (typeof v === 'string') normalised[k] = v
         }
         if (Object.keys(normalised).length === 0) return null
+        // 全部文件都是空串同样没有可渲染内容。
+        if (!Object.values(normalised).some((value) => value.trim().length > 0)) return null
         return {
           type: 'web_app',
           files: normalised,
@@ -35,27 +42,23 @@ export function buildArtifactContent(type: ArtifactType, rawInput: unknown): Art
       }
 
       // 情况 2: 扁平 { html, css, js }
-      if (
-        typeof obj.html === 'string' ||
-        typeof obj.css === 'string' ||
-        typeof obj.js === 'string'
-      ) {
+      if (hasText(obj.html) || hasText(obj.css) || hasText(obj.js)) {
         const files: Record<string, string> = {}
-        if (typeof obj.html === 'string') files['index.html'] = obj.html
-        if (typeof obj.css === 'string') files['style.css'] = obj.css
-        if (typeof obj.js === 'string') files['script.js'] = obj.js
+        if (hasText(obj.html)) files['index.html'] = obj.html
+        if (hasText(obj.css)) files['style.css'] = obj.css
+        if (hasText(obj.js)) files['script.js'] = obj.js
         return { type: 'web_app', files, entry: 'index.html' }
       }
 
       // 情况 3: { content: '<html>...</html>' } 或 { code: '...' }
-      if (typeof obj.content === 'string') {
+      if (hasText(obj.content)) {
         return {
           type: 'web_app',
           files: { 'index.html': obj.content },
           entry: 'index.html',
         }
       }
-      if (typeof obj.code === 'string') {
+      if (hasText(obj.code)) {
         return {
           type: 'web_app',
           files: { 'index.html': obj.code },
@@ -65,7 +68,7 @@ export function buildArtifactContent(type: ArtifactType, rawInput: unknown): Art
     }
 
     // 情况 4: 直接传 HTML 字符串
-    if (typeof raw === 'string') {
+    if (hasText(raw)) {
       return { type: 'web_app', files: { 'index.html': raw }, entry: 'index.html' }
     }
 
@@ -75,17 +78,17 @@ export function buildArtifactContent(type: ArtifactType, rawInput: unknown): Art
   if (type === 'document') {
     if (raw && typeof raw === 'object') {
       const obj = raw as Record<string, unknown>
-      if (typeof obj.content === 'string') {
+      if (hasText(obj.content)) {
         return { type: 'document', format: 'markdown', content: obj.content }
       }
-      if (typeof obj.markdown === 'string') {
+      if (hasText(obj.markdown)) {
         return { type: 'document', format: 'markdown', content: obj.markdown }
       }
-      if (typeof obj.text === 'string') {
+      if (hasText(obj.text)) {
         return { type: 'document', format: 'markdown', content: obj.text }
       }
     }
-    if (typeof raw === 'string') {
+    if (hasText(raw)) {
       return { type: 'document', format: 'markdown', content: raw }
     }
     return null
@@ -123,7 +126,7 @@ export function buildArtifactContent(type: ArtifactType, rawInput: unknown): Art
   if (type === 'image') {
     if (raw && typeof raw === 'object') {
       const obj = raw as Record<string, unknown>
-      if (typeof obj.url === 'string') {
+      if (hasText(obj.url)) {
         return {
           type: 'image',
           url: obj.url,
@@ -131,7 +134,7 @@ export function buildArtifactContent(type: ArtifactType, rawInput: unknown): Art
         }
       }
     }
-    if (typeof raw === 'string') {
+    if (hasText(raw)) {
       return { type: 'image', url: raw, alt: '' }
     }
     return null
