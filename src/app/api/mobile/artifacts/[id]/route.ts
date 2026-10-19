@@ -11,7 +11,7 @@ interface RouteContext {
 export const OPTIONS = mobileOptions
 
 export async function GET(req: NextRequest, ctx: RouteContext) {
-  const authError = requireMobileAuth(req)
+  const authError = await requireMobileAuth(req)
   if (authError) return authError
 
   const { id } = await ctx.params

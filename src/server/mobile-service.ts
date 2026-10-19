@@ -13,6 +13,7 @@ import {
 } from '@/server/conversation-service'
 import { pendingQuestions } from '@/server/pending-questions'
 import { pendingWrites } from '@/server/pending-writes'
+import { getAppSettings } from '@/server/settings-service'
 import type {
   ArtifactContent,
   ArtifactType,
@@ -147,9 +148,10 @@ export interface MobileSnapshot {
 }
 
 export async function getMobileSnapshot(): Promise<MobileSnapshot> {
-  const [conversations, agents] = await Promise.all([
+  const [conversations, agents, settings] = await Promise.all([
     listConversations(),
     listAgentsOrdered(),
+    getAppSettings(),
   ])
 
   const runningRuns = await listActiveRuns(conversations.map((conversation) => conversation.id))
@@ -181,7 +183,8 @@ export async function getMobileSnapshot(): Promise<MobileSnapshot> {
       .map(toMobilePendingQuestion),
     server: {
       version: packageJson.version,
-      companionMode: process.env.AGENTHUB_COMPANION_MODE === 'tailnet' ? 'tailnet' : 'lan',
+      // 只暴露已保存的模式；off 时移动端本不该能通过鉴权，这里退回 'lan' 保持协议形状。
+      companionMode: settings.companionMode === 'tailnet' ? 'tailnet' : 'lan',
     },
   }
 }

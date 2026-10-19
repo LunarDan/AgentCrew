@@ -22,7 +22,7 @@ const Body = z.object({
 export const OPTIONS = mobileOptions
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
-  const authError = requireMobileAuth(req)
+  const authError = await requireMobileAuth(req)
   if (authError) return authError
 
   const raw = await req.json().catch(() => null)

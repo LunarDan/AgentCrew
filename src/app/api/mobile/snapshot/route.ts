@@ -7,7 +7,7 @@ import { getMobileSnapshot } from '@/server/mobile-service'
 export const OPTIONS = mobileOptions
 
 export async function GET(req: NextRequest) {
-  const authError = requireMobileAuth(req)
+  const authError = await requireMobileAuth(req)
   if (authError) return authError
 
   const snapshot = await getMobileSnapshot()
