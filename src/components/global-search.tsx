@@ -4,6 +4,7 @@ import { CornerDownLeft, Loader2, Search, SearchX, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { useAppStore } from '@/stores/app-store'
 import { useSearchStore } from '@/stores/search-store'
 
 import { SearchResultItem } from './search-result-item'
@@ -26,6 +27,9 @@ export function GlobalSearch() {
   const loading = useSearchStore((s) => s.loading)
   const error = useSearchStore((s) => s.error)
   const jumpToHit = useSearchStore((s) => s.jumpToHit)
+  const onlyCurrentConversation = useSearchStore((s) => s.onlyCurrentConversation)
+  const setOnlyCurrentConversation = useSearchStore((s) => s.setOnlyCurrentConversation)
+  const activeConversationId = useAppStore((s) => s.activeConversationId)
 
   const [active, setActive] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -90,10 +94,25 @@ export function GlobalSearch() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKey}
-            placeholder="搜索所有会话的消息…"
+            placeholder={onlyCurrentConversation ? '搜索当前会话的消息…' : '搜索所有会话的消息…'}
             maxLength={200}
             className="h-full flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground"
           />
+          {activeConversationId && (
+            <button
+              type="button"
+              onClick={() => setOnlyCurrentConversation(!onlyCurrentConversation)}
+              aria-pressed={onlyCurrentConversation}
+              title="只在当前打开的会话里搜索"
+              className={`h-7 shrink-0 rounded-md border px-2 text-xs transition-colors ${
+                onlyCurrentConversation
+                  ? 'border-primary/40 bg-primary/10 text-foreground'
+                  : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground'
+              }`}
+            >
+              仅当前会话
+            </button>
+          )}
           {query && (
             <button
               type="button"
@@ -120,7 +139,9 @@ export function GlobalSearch() {
             <div className="flex flex-col items-center justify-center gap-2 px-6 py-12 text-center">
               <Search className="size-7 text-muted-foreground/70" />
               <p className="text-sm font-medium text-foreground">输入至少 2 个字符开始搜索</p>
-              <p className="text-xs text-muted-foreground">支持中英文 · 跨所有会话查找消息内容</p>
+              <p className="text-xs text-muted-foreground">
+                {onlyCurrentConversation ? '仅在当前会话内查找消息内容' : '支持中英文 · 跨所有会话查找消息内容'}
+              </p>
             </div>
           )}
 
