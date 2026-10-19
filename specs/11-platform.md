@@ -236,6 +236,19 @@ export function isPathWithin(child: string, parent: string): boolean {
 
 `resolveSafePath` 与 `attachment-service` 的 traversal 检查统一走此 helper。
 
+### 真实路径（symlink / junction）
+
+词法比较只能挡住 `..`，挡不住 workspace **内部**指向外部的符号链接：`ln -s /etc inside/etc-link` 后，`inside/etc-link/passwd` 词法上完全在子树内。Windows 的目录 junction（`mklink /J`）同理。因此 `resolveSafePath` 在词法检查通过后，再按真实路径比较一次：
+
+1. `realpathSync.native(cwd)` 得到 workspace 的真实根；
+2. 目标存在时取 `realpathSync.native(target)`；
+3. 目标不存在时（写入新文件），向上找到最近的已存在祖先做 realpath，再把剩余路径段拼回；
+4. 真实路径不在真实根内 → 返回 `null`（与词法越权同一处理）。
+
+workspace 根尚不存在时（刚建会话）退化为纯词法检查：此时没有可解析的真实路径，也没有可逃逸的链接。
+
+这覆盖 `fs_read` / `fs_write` / `fs_list` / `readIfExists` / 部署脚本路径——它们都走 `assertPathWithinWorkspace`。`scanWorkspaceUsage` 的递归遍历另有 realpath 去重（见下文），两者互补。
+
 ### 系统根（systemRoots）
 
 | 平台 | 路径 | 说明 |

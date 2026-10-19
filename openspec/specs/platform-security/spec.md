@@ -27,6 +27,11 @@ Workspace path checks MUST handle case sensitivity, path separators, drive roots
 - **WHEN** a path differs only by drive-letter case
 - **THEN** containment checks still evaluate correctly.
 
+#### Scenario: A symlink or junction points outside the workspace
+- **WHEN** a path lexically inside the workspace resolves, through a symbolic link, directory symlink, or NTFS junction, to a location outside the effective cwd
+- **THEN** the path is rejected as outside the workspace
+- **AND** this holds for writes to targets that do not exist yet.
+
 ### Requirement: Command blacklist SHALL be shared
 
 POSIX and Windows banned command patterns MUST be defined in one shared server security module and used by both tools and SDK approval bridges where applicable.
