@@ -230,6 +230,12 @@ export const useAppStore = create<AppState>()(
         delete s.pendingBashCommandsByConv[id]
         delete s.pendingMcpToolCallsByConv[id]
         delete s.pendingQuestionsByConv[id]
+        // 服务端删会话会级联删产物；客户端同步清掉，否则预览面板 / 产物库会继续显示已删除的行
+        for (const [artifactId, artifact] of Object.entries(s.artifacts)) {
+          if (artifact.conversationId !== id) continue
+          delete s.artifacts[artifactId]
+          if (s.previewArtifactId === artifactId) s.previewArtifactId = null
+        }
         if (s.activeConversationId === id) s.activeConversationId = null
       }),
 
