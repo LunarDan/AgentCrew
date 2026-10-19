@@ -3,12 +3,13 @@ import { z } from 'zod'
 
 import { createConversation, listConversations } from '@/server/conversation-service'
 import { rejectCrossOriginWrite } from '@/server/local-origin'
+import { MAX_ID_CHARS, MAX_ID_LIST_LENGTH } from '@/shared/constants'
 
 const CreateBody = z.object({
-  title: z.string().optional(),
+  title: z.string().max(100).optional(),
   mode: z.enum(['single', 'group']),
-  agentIds: z.array(z.string()).min(1),
-  boundPath: z.string().optional(),
+  agentIds: z.array(z.string().max(MAX_ID_CHARS)).min(1).max(MAX_ID_LIST_LENGTH),
+  boundPath: z.string().max(4096).optional(),
 })
 
 export async function GET() {

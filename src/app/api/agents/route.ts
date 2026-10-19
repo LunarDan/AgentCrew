@@ -3,6 +3,13 @@ import { z } from 'zod'
 
 import { createCustomAgent, listAgentsOrdered } from '@/server/agent-service'
 import { rejectCrossOriginWrite } from '@/server/local-origin'
+import {
+  MAX_API_KEY_CHARS,
+  MAX_ID_CHARS,
+  MAX_ID_LIST_LENGTH,
+  MAX_SYSTEM_PROMPT_CHARS,
+  MAX_URL_CHARS,
+} from '@/shared/constants'
 
 export async function GET() {
   const agents = await listAgentsOrdered()
@@ -14,18 +21,18 @@ const CreateBody = z
     name: z.string().min(1).max(64),
     avatar: z.string().max(8).optional(),
     description: z.string().min(1).max(280),
-    capabilities: z.array(z.string()).default([]),
-    systemPrompt: z.string().min(1),
+    capabilities: z.array(z.string().max(MAX_ID_CHARS)).max(MAX_ID_LIST_LENGTH).default([]),
+    systemPrompt: z.string().min(1).max(MAX_SYSTEM_PROMPT_CHARS),
     adapterName: z.enum(['custom', 'claude-code', 'codex']).default('custom'),
     modelProvider: z
       .enum(['anthropic', 'openai', 'deepseek', 'volcano-ark', 'openai-compatible'])
       .optional(),
-    modelId: z.string().min(1).optional(),
-    toolNames: z.array(z.string()).default([]),
-    mcpServerIds: z.array(z.string()).default([]),
+    modelId: z.string().min(1).max(MAX_ID_CHARS).optional(),
+    toolNames: z.array(z.string().max(MAX_ID_CHARS)).max(MAX_ID_LIST_LENGTH).default([]),
+    mcpServerIds: z.array(z.string().max(MAX_ID_CHARS)).max(MAX_ID_LIST_LENGTH).default([]),
     supportsVision: z.boolean().optional(),
-    apiKey: z.string().optional(),
-    apiBaseUrl: z.string().optional(),
+    apiKey: z.string().max(MAX_API_KEY_CHARS).optional(),
+    apiBaseUrl: z.string().max(MAX_URL_CHARS).optional(),
   })
   .refine(
     (d) => d.adapterName !== 'custom' || (d.modelProvider && d.modelId),

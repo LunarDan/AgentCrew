@@ -3,6 +3,7 @@ import { z } from 'zod'
 
 import { rejectCrossOriginWrite } from '@/server/local-origin'
 import { createMcpServer, listMcpServers, toMcpServerView } from '@/server/mcp-server-service'
+import { MAX_API_KEY_CHARS, MAX_URL_CHARS } from '@/shared/constants'
 
 export async function GET() {
   const servers = await listMcpServers()
@@ -11,14 +12,22 @@ export async function GET() {
 
 const TransportEnum = z.enum(['stdio', 'sse', 'http'])
 
+/** env / headers 是用户自填的键值表；限制条目与取值长度，避免把任意大对象塞进 DB。 */
+const MAX_MCP_ENV_ENTRIES = 100
+const EnvRecord = z
+  .record(z.string().max(256), z.string().max(MAX_API_KEY_CHARS))
+  .refine((value) => Object.keys(value).length <= MAX_MCP_ENV_ENTRIES, {
+    message: `Too many entries (max ${MAX_MCP_ENV_ENTRIES})`,
+  })
+
 const CreateBody = z.object({
   name: z.string().min(1).max(64),
   transport: TransportEnum,
-  command: z.string().optional(),
-  args: z.array(z.string()).optional(),
-  env: z.record(z.string(), z.string()).nullish(),
-  url: z.string().optional(),
-  headers: z.record(z.string(), z.string()).nullish(),
+  command: z.string().max(MAX_URL_CHARS).optional(),
+  args: z.array(z.string().max(MAX_URL_CHARS)).max(100).optional(),
+  env: EnvRecord.nullish(),
+  url: z.string().max(MAX_URL_CHARS).optional(),
+  headers: EnvRecord.nullish(),
   trust: z.enum(['always', 'ask']).optional(),
   enabled: z.boolean().optional(),
 })

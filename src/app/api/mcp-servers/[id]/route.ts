@@ -8,6 +8,7 @@ import {
   toMcpServerView,
   updateMcpServer,
 } from '@/server/mcp-server-service'
+import { MAX_API_KEY_CHARS, MAX_URL_CHARS } from '@/shared/constants'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -20,20 +21,27 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
   return NextResponse.json({ server: toMcpServerView(server) })
 }
 
+const MAX_MCP_ENV_ENTRIES = 100
+const EnvRecord = z
+  .record(z.string().max(256), z.union([z.string().max(MAX_API_KEY_CHARS), z.null()]))
+  .refine((value) => Object.keys(value).length <= MAX_MCP_ENV_ENTRIES, {
+    message: `Too many entries (max ${MAX_MCP_ENV_ENTRIES})`,
+  })
+
 const PatchBody = z
   .object({
     name: z.string().min(1).max(64).optional(),
     transport: z.enum(['stdio', 'sse', 'http']).optional(),
-    command: z.union([z.string(), z.null()]).optional(),
-    args: z.array(z.string()).optional(),
-    url: z.union([z.string(), z.null()]).optional(),
+    command: z.union([z.string().max(MAX_URL_CHARS), z.null()]).optional(),
+    args: z.array(z.string().max(MAX_URL_CHARS)).max(100).optional(),
+    url: z.union([z.string().max(MAX_URL_CHARS), z.null()]).optional(),
     /**
      * 密钥按 key 合并：不给 = 完全不动；给 null = 清空整张 map；
      * 给 { KEY: 'v' } = 设置；给 { KEY: null } 或 { KEY: '' } = 删除该 key。
      * 前端只回传用户真正改过的 key，**不要**把掩码回传。
      */
-    env: z.union([z.record(z.string(), z.union([z.string(), z.null()])), z.null()]).optional(),
-    headers: z.union([z.record(z.string(), z.union([z.string(), z.null()])), z.null()]).optional(),
+    env: EnvRecord.nullable().optional(),
+    headers: EnvRecord.nullable().optional(),
     trust: z.enum(['always', 'ask']).optional(),
     enabled: z.boolean().optional(),
   })

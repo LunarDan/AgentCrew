@@ -3,7 +3,7 @@ import { z } from 'zod'
 
 import { clearConversationHistory, listMessages, sendMessage } from '@/server/conversation-service'
 import { rejectCrossOriginWrite } from '@/server/local-origin'
-import { MAX_MESSAGE_CHARS } from '@/shared/constants'
+import { MAX_ID_CHARS, MAX_ID_LIST_LENGTH, MAX_MESSAGE_CHARS } from '@/shared/constants'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -12,9 +12,12 @@ interface RouteContext {
 const SendBody = z
   .object({
     content: z.string().max(MAX_MESSAGE_CHARS).default(''),
-    mentionedAgentIds: z.array(z.string()).optional(),
-    parentMessageId: z.string().optional(),
-    attachmentIds: z.array(z.string()).optional(),
+    mentionedAgentIds: z
+      .array(z.string().max(MAX_ID_CHARS))
+      .max(MAX_ID_LIST_LENGTH)
+      .optional(),
+    parentMessageId: z.string().max(MAX_ID_CHARS).optional(),
+    attachmentIds: z.array(z.string().max(MAX_ID_CHARS)).max(MAX_ID_LIST_LENGTH).optional(),
   })
   .refine(
     (d) => d.content.trim().length > 0 || (d.attachmentIds && d.attachmentIds.length > 0),

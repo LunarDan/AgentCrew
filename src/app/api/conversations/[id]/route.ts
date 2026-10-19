@@ -10,6 +10,7 @@ import {
   togglePinConversation,
 } from '@/server/conversation-service'
 import { rejectCrossOriginWrite } from '@/server/local-origin'
+import { MAX_ID_CHARS, MAX_ID_LIST_LENGTH } from '@/shared/constants'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -35,7 +36,11 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
 
 const PatchBody = z
   .object({
-    addAgentIds: z.array(z.string()).min(1).optional(),
+    addAgentIds: z
+      .array(z.string().max(MAX_ID_CHARS))
+      .min(1)
+      .max(MAX_ID_LIST_LENGTH)
+      .optional(),
     title: z.string().min(1).max(100).optional(),
     fsWriteApprovalMode: z.enum(['auto', 'review']).optional(),
     togglePin: z.literal(true).optional(),
