@@ -15,7 +15,9 @@ export const claudeCodeSessions = createAdapterSessionStore('claude-code')
 export const codexSessions = createAdapterSessionStore('codex')
 
 export function clearClaudeCodeSession(conversationId: string): void {
-  claudeCodeSessions.delete(conversationId)
+  for (const key of claudeCodeSessions.keys()) {
+    if (key.startsWith(`${conversationId}:`)) claudeCodeSessions.delete(key)
+  }
 }
 
 export function clearCodexSession(conversationId: string): void {

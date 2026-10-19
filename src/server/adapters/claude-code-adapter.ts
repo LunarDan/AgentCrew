@@ -38,7 +38,7 @@ import type {
 import { buildChildProcessEnv, createAdapterEvent } from './adapter-utils'
 import { composeSystemPrompt, projectMemoryPath, readProjectMemory } from './project-memory'
 import { sdkIsolationOptions } from './sdk-isolation'
-import { claudeCodeSessions } from './session-store'
+import { adapterSessionKey, claudeCodeSessions } from './session-store'
 import { collectUnavailableServers } from './mcp-status'
 import { isShellTool } from './shell-tool'
 import type { AdapterInput, AgentPlatformAdapter } from './types'
@@ -436,8 +436,9 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
     })
 
     // 同一 conversation 的多轮 query 共享 session（resume）—— 否则每轮都是新对话上下文，
-    // agent 就不记得上一轮说了什么。
-    const previousSessionId = claudeCodeSessions.get(input.conversationId)
+    // agent 就不记得上一轮说了什么。按 agent 分键：群聊里多个 claude-code agent 不能共用一份 SDK 记录。
+    const sessionKey = adapterSessionKey(input.conversationId, input.agentId)
+    const previousSessionId = claudeCodeSessions.get(sessionKey)
 
     // init 消息到达后填入，canUseTool 用它识别 shell 工具（SDK 按平台命名，不能写死 Bash）
     let sdkToolNames: readonly string[] | null = null
@@ -487,7 +488,7 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
         // SDKSystemMessage init 携带 session_id / 工具表 / 外部 MCP 连接状态
         if (m.type === 'system') {
           const sid = (m as { session_id?: string }).session_id
-          if (sid) claudeCodeSessions.set(input.conversationId, sid)
+          if (sid) claudeCodeSessions.set(sessionKey, sid)
           if ((m as { subtype?: string }).subtype !== 'init') continue
 
           const tools = (m as { tools?: unknown }).tools
