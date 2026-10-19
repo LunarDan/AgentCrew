@@ -45,7 +45,7 @@ A newly created user message MUST be published as a `message.added` event carryi
 
 ### Requirement: Message removals SHALL be broadcast to all clients
 
-When messages are deleted server-side (withdraw, edit-and-resend, or regenerate), the deletion MUST be published as a `message.removed` event carrying the removed `messageIds` and `artifactIds`, so that clients other than the initiator drop them in real time. Subscribers MUST apply it idempotently (re-removing already-removed ids is a no-op), so the initiating client — which already reconciled via the HTTP response — is unaffected.
+When messages are deleted server-side (withdraw, edit-and-resend, or regenerate), the deletion MUST be published as a `message.removed` event carrying the removed `messageIds` and `artifactIds`, so that clients other than the initiator drop them in real time. Deleting an artifact on its own MUST publish the same event with an empty `messageIds`, so other clients stop listing it. Subscribers MUST apply it idempotently (re-removing already-removed ids is a no-op), so the initiating client — which already reconciled via the HTTP response — is unaffected.
 
 #### Scenario: A second client sees a withdraw/edit/regenerate
 - **WHEN** withdraw, edit-and-resend, or regenerate deletes messages from any client
