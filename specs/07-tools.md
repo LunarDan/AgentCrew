@@ -329,6 +329,7 @@ write_artifact({
   显示 `react-diff-viewer-continued` 双栏 diff。用户决定后：
   - **应用** → handler 调 `writeFileInWorkspace` 真写盘，发 `fs_write.resolved { applied: true }`，工具返回 `applied: 'review'`
   - **拒绝** → 不写盘，发 `fs_write.resolved { applied: false }`，工具返回 `{ ok: false, error: 'User rejected the file change' }`
+  - **应用但写盘失败**（配额超限、路径不可写等）→ 发 `fs_write.resolved { applied: false }`，工具返回真实失败原因（`File write failed: ...`），不伪装成用户拒绝
   - **run abort** → 静默取消（不发 SSE），工具返回 rejected
 
 实现细节：
