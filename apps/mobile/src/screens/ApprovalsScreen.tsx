@@ -16,27 +16,29 @@ const FREE_OTHER = '__other__'
 export function ApprovalsScreen({
   connected,
   busyId,
+  hiddenIds,
   snapshot,
   onWriteDecision,
   onQuestionAnswer,
 }: {
   connected: boolean
   busyId: string | null
+  /** 已经提交过决定、但快照还没确认移除的条目：立即从可操作列表里拿掉，避免重复提交。 */
+  hiddenIds: ReadonlySet<string>
   snapshot: MobileSnapshot | null
   onWriteDecision: (id: string, action: 'approve' | 'reject') => void
   onQuestionAnswer: (id: string, answers: MobileAskUserAnswers) => void
 }) {
   const [drafts, setDrafts] = useState<Record<string, MobileAskUserAnswers>>({})
 
-  if (!connected) {
-    return <div className="empty-state">先在设置中配对桌面端。</div>
-  }
-
-  const writes = snapshot?.pendingWrites ?? []
-  const questions = snapshot?.pendingQuestions ?? []
+  // 离线时保留旧卡片仅供查看，但所有决定按钮禁用（spec 14 §9：不缓存旧状态当成可操作状态）。
+  const offline = !connected
+  const writes = (snapshot?.pendingWrites ?? []).filter((item) => !hiddenIds.has(item.id))
+  const questions = (snapshot?.pendingQuestions ?? []).filter((item) => !hiddenIds.has(item.id))
 
   return (
     <div className="screen-stack">
+      {offline && <div className="error-banner">未连接桌面端，审批暂不可用。</div>}
       <section className="card-list">
         <h2 className="section-title">
           <FileText className="section-icon" aria-hidden="true" />
@@ -48,6 +50,7 @@ export function ApprovalsScreen({
               key={write.id}
               write={write}
               busyId={busyId}
+              offline={offline}
               onDecide={onWriteDecision}
             />
           ))
@@ -159,7 +162,7 @@ export function ApprovalsScreen({
                 <button
                   type="button"
                   className="primary-action full"
-                  disabled={!canSubmit || busyId !== null}
+                  disabled={!canSubmit || busyId !== null || offline}
                   onClick={() => onQuestionAnswer(item.id, buildAnswers(item, draft))}
                 >
                   <Send className="button-icon" aria-hidden="true" />
@@ -183,10 +186,12 @@ export function ApprovalsScreen({
 function WriteApprovalCard({
   write,
   busyId,
+  offline,
   onDecide,
 }: {
   write: MobilePendingWrite
   busyId: string | null
+  offline: boolean
   onDecide: (id: string, action: 'approve' | 'reject') => void
 }) {
   const lines = useMemo(
@@ -211,7 +216,7 @@ function WriteApprovalCard({
         <button
           type="button"
           className="danger-action"
-          disabled={busyId !== null}
+          disabled={busyId !== null || offline}
           onClick={() => onDecide(write.id, 'reject')}
         >
           <X className="button-icon" aria-hidden="true" />
@@ -220,7 +225,7 @@ function WriteApprovalCard({
         <button
           type="button"
           className="primary-action small"
-          disabled={busyId !== null}
+          disabled={busyId !== null || offline}
           onClick={() => onDecide(write.id, 'approve')}
         >
           <Check className="button-icon" aria-hidden="true" />

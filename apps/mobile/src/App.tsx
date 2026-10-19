@@ -39,6 +39,7 @@ export function App() {
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [operationId, setOperationId] = useState<string | null>(null)
+  const [decidedPendingIds, setDecidedPendingIds] = useState<ReadonlySet<string>>(new Set())
   const [error, setError] = useState<string | null>(null)
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null)
 
@@ -62,6 +63,16 @@ export function App() {
       setRecentHosts(rememberRecentHost(connection.baseUrl))
       setLastSyncedAt(Date.now())
       setError(null)
+      // 已提交的决定在新快照里消失后才真正忘掉；旧快照仍会把它们保持隐藏，防止重复点击
+      setDecidedPendingIds((current) => {
+        if (current.size === 0) return current
+        const live = new Set([
+          ...next.pendingWrites.map((item) => item.id),
+          ...next.pendingQuestions.map((item) => item.id),
+        ])
+        const remaining = [...current].filter((id) => live.has(id))
+        return remaining.length === current.size ? current : new Set(remaining)
+      })
     },
     [connection.baseUrl, connectionFingerprint],
   )
@@ -316,13 +327,44 @@ export function App() {
     })
   }
 
-  async function editMessageFromMobile(messageId: string, content: string) {
+  async function editMessageFromMobile(messageId: string, content: string): Promise<boolean> {
     const conversationId = selectedConversationId
-    if (!conversationId) return
-    await runMobileAction(`edit-${messageId}`, async () => {
+    if (!conversationId) return false
+    return runMobileAction(`edit-${messageId}`, async () => {
       await api.editMessage(conversationId, messageId, content)
       await refreshDetailBestEffort(conversationId)
     })
+  }
+
+  /** 先把条目从可操作列表里拿掉，避免决定已生效、快照还没回来时被点第二次。 */
+  async function decidePendingWriteFromMobile(
+    id: string,
+    action: 'approve' | 'reject',
+  ): Promise<void> {
+    setDecidedPendingIds((current) => new Set(current).add(id))
+    const ok = await runMobileAction(id, () => api.decidePendingWrite(id, action))
+    if (!ok) {
+      setDecidedPendingIds((current) => {
+        const next = new Set(current)
+        next.delete(id)
+        return next
+      })
+    }
+  }
+
+  async function answerPendingQuestionFromMobile(
+    id: string,
+    answers: MobileAskUserAnswers,
+  ): Promise<void> {
+    setDecidedPendingIds((current) => new Set(current).add(id))
+    const ok = await runMobileAction(id, () => api.answerPendingQuestion(id, answers))
+    if (!ok) {
+      setDecidedPendingIds((current) => {
+        const next = new Set(current)
+        next.delete(id)
+        return next
+      })
+    }
   }
 
   async function regenerateFromMobile() {
@@ -422,7 +464,7 @@ export function App() {
         onOpenArtifact={(id) => void openArtifactPreview(id)}
         onSendMessage={(content) => sendMessageFromMobile(content)}
         onWithdrawMessage={(messageId) => void withdrawMessageFromMobile(messageId)}
-        onEditMessage={(messageId, content) => void editMessageFromMobile(messageId, content)}
+        onEditMessage={editMessageFromMobile}
         onRegenerate={() => void regenerateFromMobile()}
         busy={operationId !== null}
       />
@@ -454,14 +496,13 @@ export function App() {
         />
         {hasPending && (
           <ApprovalsScreen
-            connected={configured}
+            connected={connectionOk}
             busyId={operationId}
+            hiddenIds={decidedPendingIds}
             snapshot={snapshot}
-            onWriteDecision={(id, action) =>
-              void runMobileAction(id, () => api.decidePendingWrite(id, action))
-            }
+            onWriteDecision={(id, action) => void decidePendingWriteFromMobile(id, action)}
             onQuestionAnswer={(id, answers: MobileAskUserAnswers) =>
-              void runMobileAction(id, () => api.answerPendingQuestion(id, answers))
+              void answerPendingQuestionFromMobile(id, answers)
             }
           />
         )}

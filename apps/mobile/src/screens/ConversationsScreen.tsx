@@ -64,7 +64,8 @@ export function ConversationsScreen({
   onOpenArtifact: (id: string) => void
   onSendMessage: (content: string) => Promise<boolean> | boolean
   onWithdrawMessage: (messageId: string) => void
-  onEditMessage: (messageId: string, content: string) => void
+  /** 返回是否成功；失败时调用方保留编辑框内容。 */
+  onEditMessage: (messageId: string, content: string) => Promise<boolean>
   onRegenerate: () => void
   busy: boolean
 }) {
@@ -264,7 +265,7 @@ function MessageCard({
   isLatestAgent: boolean
   busy: boolean
   onWithdraw: (messageId: string) => void
-  onEdit: (messageId: string, content: string) => void
+  onEdit: (messageId: string, content: string) => Promise<boolean>
   onRegenerate: () => void
 }) {
   const isUser = message.role === 'user'
@@ -282,11 +283,12 @@ function MessageCard({
     setConfirmingWithdraw(false)
     setEditing(true)
   }
-  function saveEdit() {
+  // 失败时保留编辑框（里面的文字还没落到任何地方），只在成功后才关闭
+  async function saveEdit() {
     const next = editDraft.trim()
-    if (!next) return
-    onEdit(message.id, next)
-    setEditing(false)
+    if (!next || busy) return
+    const ok = await onEdit(message.id, next)
+    if (ok) setEditing(false)
   }
 
   return (
@@ -312,7 +314,7 @@ function MessageCard({
                 className="msg-action danger"
                 aria-label="保存并重发"
                 disabled={busy || !editDraft.trim()}
-                onClick={saveEdit}
+                onClick={() => void saveEdit()}
               >
                 <Check className="button-icon" aria-hidden="true" />
               </button>
