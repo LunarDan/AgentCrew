@@ -28,6 +28,11 @@ export interface DeploymentManifest {
   sourceFiles: string[]
   sourceType?: 'artifact' | 'workspace'
   workspacePath?: string
+  /** workspace 部署没有 artifact 行，靠它随会话一起清理 */
+  conversationId?: string
+  /** 已发布到外部静态目录时记录目标；删除产物 / 会话时一并清理 */
+  publishPath?: string
+  publishRoot?: string
 }
 
 interface DeploymentOptions {
@@ -61,6 +66,7 @@ interface CreateWorkspaceStaticDeploymentArgs extends DeploymentOptions {
   sourceDir: string
   workspacePath: string
   entry?: string
+  conversationId?: string
   createdAt?: number
 }
 
@@ -177,6 +183,7 @@ export function createWorkspaceStaticDeployment(
     sourceFiles,
     sourceType: 'workspace',
     workspacePath: args.workspacePath,
+    ...(args.conversationId ? { conversationId: args.conversationId } : {}),
   }
 
   try {
@@ -294,6 +301,13 @@ export function publishDeploymentToStaticDirectory(
     rmSync(tempDir, { recursive: true, force: true })
     throw err
   }
+
+  // 记下外部发布位置：删产物 / 会话时要把公开目录一起删，否则旧站点会一直可访问。
+  writeTextFileWithin(
+    deploymentDir,
+    MANIFEST_PATH,
+    JSON.stringify({ ...manifest, publishPath: publishDir, publishRoot }, null, 2),
+  )
 
   return {
     publicUrl: publicDeploymentUrl(target.publicBaseUrl, deploymentId),
@@ -440,18 +454,54 @@ export function deleteDeploymentsForArtifact(
   artifactId: string,
   options: DeploymentOptions = {},
 ): void {
+  deleteMatchingDeployments(
+    (manifest) => manifest.artifactId === artifactId,
+    options,
+  )
+}
+
+/** workspace 部署没有 artifactId，只能按会话归属清理。 */
+export function deleteDeploymentsForConversation(
+  conversationId: string,
+  options: DeploymentOptions = {},
+): void {
+  deleteMatchingDeployments(
+    (manifest) => manifest.conversationId === conversationId,
+    options,
+  )
+}
+
+function deleteMatchingDeployments(
+  matches: (manifest: DeploymentManifest) => boolean,
+  options: DeploymentOptions,
+): void {
   const deploymentsRoot = getDeploymentsRoot(options)
   if (!existsSync(deploymentsRoot)) return
 
   for (const entry of readdirSync(deploymentsRoot, { withFileTypes: true })) {
     if (!entry.isDirectory() || !isDeploymentId(entry.name)) continue
     const manifest = readDeploymentManifest(entry.name, options)
-    if (manifest?.artifactId !== artifactId) continue
+    if (!manifest || !matches(manifest)) continue
+    removePublishedCopy(manifest, entry.name)
     try {
       rmSync(getDeploymentDir(entry.name, options), { recursive: true, force: true })
     } catch (err) {
       console.warn(`[deployment] failed to remove deployment dir ${entry.name}`, err)
     }
+  }
+}
+
+/** 只删除 manifest 记录且仍落在记录根目录内的公开副本，防止被篡改的 manifest 指向任意路径。 */
+function removePublishedCopy(manifest: DeploymentManifest, deploymentId: string): void {
+  const publishedPath = manifest.publishPath
+  const publishRoot = manifest.publishRoot
+  if (!publishedPath || !publishRoot) return
+  if (path.basename(publishedPath) !== deploymentId) return
+  if (!isPathWithin(publishedPath, publishRoot)) return
+  try {
+    rmSync(publishedPath, { recursive: true, force: true })
+  } catch (err) {
+    console.warn(`[deployment] failed to remove published copy ${publishedPath}`, err)
   }
 }
 

@@ -13,6 +13,7 @@ import {
   createLocalStaticDeployment,
   createWorkspaceStaticDeployment,
   deleteDeploymentsForArtifact,
+  deleteDeploymentsForConversation,
   publishDeploymentToStaticDirectory,
   readDeploymentAsset,
 } from './deployment-service'
@@ -265,6 +266,51 @@ describe('deployment-service', () => {
     expect(readFileSync(path.join(publishDir, 'dep_publish123', 'index.html'), 'utf8'))
       .toContain('<main id="app">hello</main>')
     expect(existsSync(path.join(publishDir, 'dep_publish123', '.agenthub'))).toBe(false)
+  })
+
+  it('removes the externally published copy when the artifact deployment is deleted', () => {
+    const dataDir = tempDataDir()
+    const publishDir = tempDataDir()
+    createLocalStaticDeployment({
+      id: 'dep_publishdel',
+      artifactId: 'art_publishdel',
+      title: 'Published then deleted',
+      version: 1,
+      content: webAppContent,
+      dataDir,
+    })
+    publishDeploymentToStaticDirectory(
+      'dep_publishdel',
+      { publishDir, publicBaseUrl: 'https://example.com/apps' },
+      { dataDir },
+    )
+    expect(existsSync(path.join(publishDir, 'dep_publishdel', 'index.html'))).toBe(true)
+
+    deleteDeploymentsForArtifact('art_publishdel', { dataDir })
+
+    expect(existsSync(path.join(dataDir, 'deployments', 'dep_publishdel'))).toBe(false)
+    expect(existsSync(path.join(publishDir, 'dep_publishdel'))).toBe(false)
+  })
+
+  it('deletes workspace deployments by conversation on conversation removal', () => {
+    const dataDir = tempDataDir()
+    const workspaceDir = tempDataDir()
+    const sourceDir = path.join(workspaceDir, 'dist')
+    mkdirSync(sourceDir, { recursive: true })
+    writeFileSync(path.join(sourceDir, 'index.html'), '<main>workspace</main>', 'utf8')
+
+    createWorkspaceStaticDeployment({
+      id: 'dep_wsdel1',
+      title: 'Workspace deploy',
+      sourceDir,
+      workspacePath: 'dist',
+      conversationId: 'conv_wsdel',
+      dataDir,
+    })
+
+    deleteDeploymentsForConversation('conv_wsdel', { dataDir })
+
+    expect(existsSync(path.join(dataDir, 'deployments', 'dep_wsdel1'))).toBe(false)
   })
 
   it('rejects unsafe publish target settings', () => {

@@ -85,6 +85,7 @@ export async function deployWorkspaceForConversation(
       title,
       sourceDir,
       workspacePath,
+      conversationId,
       entry: args.entry,
     })
     return maybePublishExternally(local)
