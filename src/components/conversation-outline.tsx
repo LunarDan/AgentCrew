@@ -105,7 +105,7 @@ export function ConversationOutline({ conversationId }: { conversationId: string
             <button
               type="button"
               onClick={() => setOnlyStarred((v) => !v)}
-              disabled={starredCount === 0}
+              disabled={starredCount === 0 && !onlyStarred}
               className={cn(
                 'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] transition disabled:cursor-not-allowed disabled:opacity-40',
                 onlyStarred
