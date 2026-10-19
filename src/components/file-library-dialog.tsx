@@ -43,6 +43,7 @@ export function FileLibraryDialog({
   const [attachments, setAttachments] = useState<AttachmentRow[]>([])
   const [loading, setLoading] = useState(true)
   const [uploadingCount, setUploadingCount] = useState(0)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -85,6 +86,7 @@ export function FileLibraryDialog({
 
   const handleUpload = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return
+    setUploadError(null)
     setUploadingCount((n) => n + fileList.length)
     await Promise.all(
       Array.from(fileList).map(async (f) => {
@@ -96,6 +98,8 @@ export function FileLibraryDialog({
           }
         } catch (err) {
           console.error('[FileLibraryDialog] upload', err)
+          const reason = err instanceof Error ? err.message : String(err)
+          setUploadError(`「${f.name}」上传失败：${reason}`)
         } finally {
           setUploadingCount((n) => Math.max(0, n - 1))
         }
@@ -152,6 +156,12 @@ export function FileLibraryDialog({
               {uploadingCount > 0 ? `上传中 (${uploadingCount})…` : '上传文件 / 图片'}
             </Button>
           </div>
+
+          {uploadError && (
+            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-200">
+              {uploadError}
+            </div>
+          )}
 
           <ScrollArea className="-mx-6 max-h-[55vh] overflow-x-hidden">
             <div className="min-w-0 space-y-5 overflow-hidden px-6 py-2">

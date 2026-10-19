@@ -1,7 +1,7 @@
 'use client'
 
 import { ChevronRight, Folder, HardDrive, Home, Loader2 } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -45,19 +45,24 @@ export function DirPickerDialog({
   const [entries, setEntries] = useState<DirEntry[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const requestSeqRef = useRef(0)
 
   const navigate = useCallback(async (target?: string) => {
+    // 快速连点目录会并发请求；慢的旧响应不能覆盖新目录
+    const seq = ++requestSeqRef.current
     setLoading(true)
     setError(null)
     try {
       const result = await listDirectory(target)
+      if (seq !== requestSeqRef.current) return
       setCurrentPath(result.path)
       setParent(result.parent)
       setEntries(result.entries)
     } catch (err) {
+      if (seq !== requestSeqRef.current) return
       setError(err instanceof Error ? err.message : String(err))
     } finally {
-      setLoading(false)
+      if (seq === requestSeqRef.current) setLoading(false)
     }
   }, [])
 

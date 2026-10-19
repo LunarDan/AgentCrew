@@ -383,6 +383,9 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
     setTrigger(null)
     setSlashTrigger(null)
     setUploading([])
+    // 上一个会话的错误 / 进行中的发送不能把新会话的输入框也锁住
+    setSendError(null)
+    setSending(false)
   }, [conversationId])
 
   const mentionedAgents = mentionedIds.map((id) => agents[id]).filter(Boolean)
@@ -487,6 +490,8 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
           addPendingAttachment(conversationId, att)
         } catch (err) {
           console.error('[MessageInput] upload failed', err)
+          const reason = err instanceof Error ? err.message : String(err)
+          setSendError(`附件「${file.name}」上传失败：${reason}`)
         } finally {
           setUploading((prev) => prev.filter((p) => p.tempId !== tempId))
         }

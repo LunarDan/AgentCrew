@@ -293,6 +293,7 @@ function ArtifactView({
     case 'code_file':
       return wrap(
         <CodeFileView
+          key={`${artifact.id}:${content.workspacePath}`}
           artifactId={artifact.id}
           conversationId={artifact.conversationId}
           content={content}

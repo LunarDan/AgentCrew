@@ -108,9 +108,7 @@ export const useSearchStore = create<SearchState>()(
         s.pendingJumpConversationId = hit.conversationId
         s.highlightedMessageId = hit.messageId
       })
-      setTimeout(() => {
-        useSearchStore.getState().clearHighlight()
-      }, 2000)
+      // 由 MessageHighlightLayer 在真正闪烁后清除高亮：目标会话可能要等消息加载完才渲染
     },
 
     consumePendingJump: () => {

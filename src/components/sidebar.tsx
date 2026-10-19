@@ -606,6 +606,8 @@ function RenameInput({
       onClick={(e) => e.stopPropagation()}
       onBlur={() => onCommit(draft)}
       onKeyDown={(e) => {
+        // 输入法确认候选词也会发 Enter，不能当成提交
+        if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return
         if (e.key === 'Enter') {
           e.preventDefault()
           onCommit(draft)
