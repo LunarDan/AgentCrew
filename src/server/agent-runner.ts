@@ -2096,7 +2096,7 @@ async function buildAdapterInput(
     })
   }
 
-  // 外部 MCP server（specs/15-external-mcp.md）。custom / mock adapter 不支持，服务层直接返回空。
+  // 外部 MCP server（specs/15-external-mcp.md）。mock adapter 不支持，服务层直接返回空。
   // 单个 server 解析失败只降级为警告（spec 15 §「失败隔离」），不让整个 run 崩 —— 与上面 history 同一套路。
   let mcpServers: ResolvedMcpServer[] = []
   const mcpWarnings: string[] = []

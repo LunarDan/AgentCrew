@@ -23,12 +23,12 @@
 
 ## 3. Implementation（commit 3）
 
-- [ ] 3.1 `src/shared/mcp.ts` — `ADAPTER_TRANSPORTS.custom = ['stdio', 'sse', 'http']`；`agent-runner.ts:2099` 与 `agent-service.ts:72` 的注释同步。
-- [ ] 3.2 新增 `src/server/adapters/custom-mcp-tools.ts` — 名字清洗 / 冲突后缀 / 运行期映射 / 结果转紧凑值 / 50k 截断（纯函数）。
-- [ ] 3.3 新增 `src/server/adapters/custom-mcp-client.ts` — `McpClients`：并行 connect + `listTools`、失败收集、`callTool`、`closeAll`；stdio 传 `buildChildProcessEnv()` 与 workspace cwd。
-- [ ] 3.4 `src/server/child-process.ts` — `killProcessTreeByPid(pid, platform)`。
-- [ ] 3.5 `src/server/adapters/custom-agent-adapter.ts` — 建连 → 合并工具表 → 路由执行（内置优先）→ 审批门 → 失败发 `mcp_server.unavailable` → `finally` 清理。
-- [ ] 3.6 `pnpm typecheck`、`pnpm lint`、`pnpm test`。
+- [x] 3.1 `src/shared/mcp.ts` — `ADAPTER_TRANSPORTS.custom = ['stdio', 'sse', 'http']`；`agent-runner.ts:2099` 与 `agent-service.ts:72` 的注释同步。
+- [x] 3.2 新增 `src/server/adapters/custom-mcp-tools.ts` — 名字清洗 / 冲突后缀 / 运行期映射 / 结果转紧凑值 / 50k 截断（纯函数）。
+- [x] 3.3 新增 `src/server/adapters/custom-mcp-client.ts` — `McpClients`：并行 connect + `listTools`、失败收集、`callTool`、`closeAll`；stdio 传 `buildChildProcessEnv()` 与 workspace cwd。
+- [x] 3.4 `src/server/child-process.ts` — `killProcessTreeByPid(pid, platform)`。
+- [x] 3.5 `src/server/adapters/custom-agent-adapter.ts` — 建连 → 合并工具表 → 路由执行（内置优先）→ 审批门 → 失败发 `mcp_server.unavailable` → `finally` 清理。
+- [x] 3.6 `pnpm typecheck`、`pnpm lint`、`pnpm test`。
 
 ## 4. Tests（commit 4）
 
