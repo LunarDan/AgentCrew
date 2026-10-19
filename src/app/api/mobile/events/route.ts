@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server'
 
 import { eventBus } from '@/server/event-bus'
-import { requireMobileAuth } from '@/server/mobile-auth'
+import { getExpectedMobileToken, requireMobileAuth } from '@/server/mobile-auth'
 import { mobileCorsHeaders, mobileJson, mobileOptions } from '@/server/mobile-cors'
 import { consumeMobileStreamToken } from '@/server/mobile-stream-tokens'
 
@@ -25,6 +25,12 @@ export async function GET(req: NextRequest) {
     if (authError) return authError
   }
 
+  // 连接期间定期用它比对：token 轮换 / 关闭伴随模式后必须让已建立的流失效。
+  const authorizedToken = await getExpectedMobileToken()
+  if (!authorizedToken) {
+    return mobileJson(req, { error: 'Mobile companion is not configured' }, { status: 503 })
+  }
+
   const encoder = new TextEncoder()
 
   const stream = new ReadableStream<Uint8Array>({
@@ -46,10 +52,6 @@ export async function GET(req: NextRequest) {
         send(event)
       })
 
-      const heartbeat = setInterval(() => {
-        send({ type: 'heartbeat', timestamp: Date.now() })
-      }, 15000)
-
       const close = () => {
         if (closed) return
         closed = true
@@ -61,6 +63,24 @@ export async function GET(req: NextRequest) {
           // 已关闭
         }
       }
+
+      let revalidating = false
+      const heartbeat = setInterval(() => {
+        if (revalidating) return
+        revalidating = true
+        void getExpectedMobileToken()
+          .then((current) => {
+            if (current !== authorizedToken) {
+              close()
+              return
+            }
+            send({ type: 'heartbeat', timestamp: Date.now() })
+          })
+          .catch(() => close())
+          .finally(() => {
+            revalidating = false
+          })
+      }, 15000)
 
       req.signal.addEventListener('abort', close)
     },

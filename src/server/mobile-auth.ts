@@ -30,12 +30,17 @@ export function resolveExpectedMobileToken(
   return settings.mobileDeviceToken?.trim() || null
 }
 
-export async function requireMobileAuth(req: NextRequest): Promise<NextResponse | null> {
+/** 当前生效的期望 token（事件流需要在连接存续期间复用它判断是否被吊销）。 */
+export async function getExpectedMobileToken(): Promise<string | null> {
   const settings = await getAppSettings()
-  const expectedToken = resolveExpectedMobileToken(
+  return resolveExpectedMobileToken(
     process.env[MOBILE_TOKEN_ENV] ?? process.env[MOBILE_DEV_TOKEN_ENV],
     settings,
   )
+}
+
+export async function requireMobileAuth(req: NextRequest): Promise<NextResponse | null> {
+  const expectedToken = await getExpectedMobileToken()
   if (!expectedToken) {
     return mobileJson(
       req,
