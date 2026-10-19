@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm'
 import JSZip from 'jszip'
 
 import { db, schema } from '@/db/client'
+import { normalizeDeploymentFilePath } from '@/server/deployment-service'
 import { getWorkspaceForConversation } from '@/server/fs-service'
 import { zipProjectFromWorkspace } from '@/server/project-artifact'
 import { getEffectiveCwd } from '@/server/workspace-utils'
@@ -41,7 +42,12 @@ export async function exportArtifactResponse(
   if (content.type === 'web_app') {
     const zip = new JSZip()
     for (const [name, body] of Object.entries(content.files)) {
-      zip.file(name, body)
+      // 文件名来自 LLM / 用户输入，导出 ZIP 时同样要防 zip-slip（../ 或绝对路径）
+      const safeName = normalizeDeploymentFilePath(name)
+      if (!safeName) {
+        return jsonResponse({ error: `Artifact contains an unsafe file path: ${name}` }, 400)
+      }
+      zip.file(safeName, body)
     }
     // README 提示如何打开
     zip.file(
