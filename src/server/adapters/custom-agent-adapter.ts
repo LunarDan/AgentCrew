@@ -120,8 +120,8 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
     }
 
     // 构造 user message content：若 agent 声明 vision + 实际有图片，走 multimodal blocks
-    const imageAttachments =
-      input.attachments?.filter((a) => a.kind === 'image').slice(0, MAX_IMAGES_PER_MESSAGE) ?? []
+    const allImageAttachments = input.attachments?.filter((a) => a.kind === 'image') ?? []
+    const imageAttachments = allImageAttachments.slice(0, MAX_IMAGES_PER_MESSAGE)
 
     if (modelProvider === 'anthropic') {
       yield* this.runAnthropicToolLoop(input, signal, ctx, toolDefs, mcpToolTable, connectionsByName)
@@ -136,9 +136,16 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
 
     const useMultimodal = !!supportsVision && imageAttachments.length > 0
 
+    const omittedImages = omittedImageNotes(
+      supportsVision ? imageAttachments : [],
+      allImageAttachments,
+      supportsVision ? `over the ${MAX_IMAGES_PER_MESSAGE}-image limit` : 'the model does not support image input',
+    )
     const userContent: ChatMessage['content'] = useMultimodal
-      ? buildMultimodalUserContent(input.prompt, imageAttachments)
-      : input.prompt
+      ? buildMultimodalUserContent(input.prompt, imageAttachments, omittedImages)
+      : omittedImages.length > 0
+        ? `${input.prompt}\n\n${omittedImages.join('\n')}`
+        : input.prompt
 
     const messages: ChatMessage[] = [
       { role: 'system', content: systemPrompt },
@@ -483,10 +490,16 @@ export class CustomAgentAdapter implements AgentPlatformAdapter {
       })),
     ]
 
-    const images = input.customConfig?.supportsVision
-      ? (input.attachments?.filter((a) => a.kind === 'image').slice(0, MAX_IMAGES_PER_MESSAGE) ?? [])
-      : []
-    const userBlocks = buildAnthropicUserContent(input.prompt, images)
+    const allImages =
+      input.attachments?.filter((a) => a.kind === 'image') ?? []
+    const visionEnabled = !!input.customConfig?.supportsVision
+    const images = visionEnabled ? allImages.slice(0, MAX_IMAGES_PER_MESSAGE) : []
+    const omittedImages = omittedImageNotes(
+      images,
+      allImages,
+      visionEnabled ? `over the ${MAX_IMAGES_PER_MESSAGE}-image limit` : 'the model does not support image input',
+    )
+    const userBlocks = buildAnthropicUserContent(input.prompt, images, omittedImages)
 
     const messages = toAnthropicMessages(input.history ?? [])
     const lastMessage = messages[messages.length - 1]
@@ -860,11 +873,15 @@ export function toAnthropicMessages(history: ChatMessage[]): Anthropic.MessagePa
 function buildAnthropicUserContent(
   prompt: string,
   images: AdapterAttachment[],
+  omittedImages: string[],
 ): Anthropic.ContentBlockParam[] {
   const blocks: Anthropic.ContentBlockParam[] = [{ type: 'text', text: prompt }]
   for (const img of images) {
     const loaded = readVisionImage(img)
-    if (!loaded) continue
+    if (!loaded.ok) {
+      blocks.push({ type: 'text', text: imageNotSentNote(img, loaded.reason) })
+      continue
+    }
     blocks.push({
       type: 'image',
       source: {
@@ -874,14 +891,32 @@ function buildAnthropicUserContent(
       },
     })
   }
+  for (const note of omittedImages) blocks.push({ type: 'text', text: note })
   return blocks
 }
 
-/** 读图前先过格式 + 体积；不满足的图直接跳过（附 warn），调用方无需再判。 */
-function readVisionImage(img: AdapterAttachment): { mimeType: string; base64: string } | null {
+function imageNotSentNote(img: AdapterAttachment, reason: string): string {
+  return `[image "${img.fileName}" was not sent: ${reason}]`
+}
+
+/** 被数量上限 / 非 vision 模型丢掉的图片也要告诉模型，否则它会假装看过。 */
+function omittedImageNotes(
+  sent: AdapterAttachment[],
+  all: AdapterAttachment[],
+  reason: string,
+): string[] {
+  return all.slice(sent.length).map((img) => imageNotSentNote(img, reason))
+}
+
+type VisionImageResult =
+  | { ok: true; mimeType: string; base64: string }
+  | { ok: false; reason: string }
+
+/** 读图前先过格式 + 体积；失败的原因会写回 prompt 附近，调用方无需再判。 */
+function readVisionImage(img: AdapterAttachment): VisionImageResult {
   if (!SUPPORTED_VISION_IMAGE_TYPES.has(img.mimeType)) {
     console.warn(`[CustomAgentAdapter] skip image with unsupported mime type ${img.mimeType}`)
-    return null
+    return { ok: false, reason: `unsupported mime type ${img.mimeType}` }
   }
   try {
     const buf = readFileSync(img.absPath)
@@ -890,12 +925,12 @@ function readVisionImage(img: AdapterAttachment): { mimeType: string; base64: st
         `[CustomAgentAdapter] skip image ${buf.byteLength} bytes > ${MAX_VISION_IMAGE_BYTES}`,
         img.absPath,
       )
-      return null
+      return { ok: false, reason: `file is too large (${buf.byteLength} bytes)` }
     }
-    return { mimeType: img.mimeType, base64: buf.toString('base64') }
+    return { ok: true, mimeType: img.mimeType, base64: buf.toString('base64') }
   } catch (err) {
     console.warn('[CustomAgentAdapter] failed to read image', img.absPath, err)
-    return null
+    return { ok: false, reason: 'the file could not be read' }
   }
 }
 
@@ -917,13 +952,17 @@ function serializeToolResult(value: unknown): string {
 function buildMultimodalUserContent(
   prompt: string,
   images: AdapterAttachment[],
+  omittedImages: string[],
 ): OpenAI.Chat.Completions.ChatCompletionContentPart[] {
   const blocks: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
     { type: 'text', text: prompt },
   ]
   for (const img of images) {
     const loaded = readVisionImage(img)
-    if (!loaded) continue
+    if (!loaded.ok) {
+      blocks.push({ type: 'text', text: imageNotSentNote(img, loaded.reason) })
+      continue
+    }
     blocks.push({
       type: 'image_url',
       image_url: {
@@ -931,6 +970,7 @@ function buildMultimodalUserContent(
       },
     })
   }
+  for (const note of omittedImages) blocks.push({ type: 'text', text: note })
   return blocks
 }
 
