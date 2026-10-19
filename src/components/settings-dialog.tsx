@@ -77,6 +77,9 @@ export function SettingsDialog({
   const [hintsLoading, setHintsLoading] = useState(false)
   const [tokenBusy, setTokenBusy] = useState(false)
   const [restartRequired, setRestartRequired] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [reloadNonce, setReloadNonce] = useState(0)
   const [connectionHints, setConnectionHints] = useState<ConnectionHint[]>([])
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null)
   const [tab, setTab] = useState('keys')
@@ -114,13 +117,19 @@ export function SettingsDialog({
         if (!cancelled) {
           setRestartRequired(false)
           setLoading(true)
+          setLoadError(null)
+          setSaveError(null)
         }
         return fetchAppSettings()
       })
       .then((s) => {
         if (!cancelled) setForm(rowToForm(s))
       })
-      .catch((err) => console.error('[SettingsDialog] load failed', err))
+      .catch((err) => {
+        // 读不到已保存的值时不能渲染空白表单：「保存」会用空串把全部 key 清掉。
+        console.error('[SettingsDialog] load failed', err)
+        if (!cancelled) setLoadError('读取设置失败，请检查服务端后重试。')
+      })
       .finally(() => {
         if (!cancelled) setLoading(false)
       })
@@ -128,7 +137,7 @@ export function SettingsDialog({
     return () => {
       cancelled = true
     }
-  }, [open])
+  }, [open, reloadNonce])
 
   useEffect(() => {
     if (!open) return
@@ -153,8 +162,9 @@ export function SettingsDialog({
   }, [open])
 
   const handleSave = async () => {
-    if (busy) return
+    if (busy || loadError) return
     setBusy(true)
+    setSaveError(null)
     try {
       // 空串归一 null，明确「清空」语义
       const patch: AppSettingsPatchBody = {
@@ -173,6 +183,7 @@ export function SettingsDialog({
       onOpenChange(false)
     } catch (err) {
       console.error('[SettingsDialog] save failed', err)
+      setSaveError(err instanceof Error ? err.message : '保存失败')
     } finally {
       setBusy(false)
     }
@@ -206,7 +217,7 @@ export function SettingsDialog({
         companionMode: 'tailnet',
         mobileDeviceToken: form.mobileDeviceToken.trim() || null,
       })
-      setForm(rowToForm(next))
+      setForm((prev) => ({ ...prev, ...companionFormPatch(next) }))
       setConnectionHints(await fetchConnectionHints())
       setRestartRequired(true)
     } catch (err) {
@@ -221,7 +232,7 @@ export function SettingsDialog({
     setBusy(true)
     try {
       const next = await updateAppSettings({ companionMode: 'off' })
-      setForm(rowToForm(next))
+      setForm((prev) => ({ ...prev, ...companionFormPatch(next) }))
       setConnectionHints(await fetchConnectionHints())
       setRestartRequired(true)
     } catch (err) {
@@ -236,7 +247,7 @@ export function SettingsDialog({
     setTokenBusy(true)
     try {
       const next = await regenerateMobileDeviceToken()
-      setForm(rowToForm(next))
+      setForm((prev) => ({ ...prev, ...companionFormPatch(next) }))
     } catch (err) {
       console.error('[SettingsDialog] regenerate mobile token failed', err)
     } finally {
@@ -255,6 +266,14 @@ export function SettingsDialog({
         {loading ? (
           <div className="flex min-h-0 items-center justify-center">
             <Loader2 className="size-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : loadError ? (
+          <div className="flex min-h-0 flex-col items-center justify-center gap-3 text-center">
+            <AlertTriangle className="size-5 text-amber-600" />
+            <p className="max-w-sm text-xs leading-5 text-muted-foreground">{loadError}</p>
+            <Button variant="outline" size="sm" onClick={() => setReloadNonce((n) => n + 1)}>
+              重试
+            </Button>
           </div>
         ) : (
           <Tabs value={tab} onValueChange={setTab} className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3">
@@ -382,10 +401,15 @@ export function SettingsDialog({
         )}
 
         <DialogFooter>
+          {saveError && (
+            <p className="mr-auto min-w-0 truncate text-xs text-red-600" title={saveError}>
+              保存失败：{saveError}
+            </p>
+          )}
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             取消
           </Button>
-          <Button onClick={() => void handleSave()} disabled={busy || loading}>
+          <Button onClick={() => void handleSave()} disabled={busy || loading || !!loadError}>
             {busy ? '保存中…' : '保存'}
           </Button>
         </DialogFooter>
@@ -698,5 +722,15 @@ function rowToForm(row: AppSettingsRow): SettingsForm {
     deploymentPublishEnabled: row.deploymentPublishEnabled,
     deploymentPublishDir: row.deploymentPublishDir ?? '',
     deploymentPublicBaseUrl: row.deploymentPublicBaseUrl ?? '',
+  }
+}
+
+/** 只覆盖 mobile 相关字段 —— 开启/关闭/重置 token 不应冲掉用户尚未保存的其他编辑。 */
+function companionFormPatch(
+  row: AppSettingsRow,
+): Pick<SettingsForm, 'companionMode' | 'mobileDeviceToken'> {
+  return {
+    companionMode: row.companionMode,
+    mobileDeviceToken: row.mobileDeviceToken ?? '',
   }
 }
