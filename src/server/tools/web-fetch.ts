@@ -253,13 +253,13 @@ function requestOnce(url: URL, signal: AbortSignal): Promise<FetchResponse> {
         const location = res.headers.location
 
         if (status >= 300 && status < 400 && location) {
-          res.resume()
           resolve({ kind: 'redirect', status, location })
+          res.destroy()
           return
         }
         if (!isTextualContentType(contentType)) {
-          res.resume()
           resolve({ kind: 'binary', status, contentType })
+          res.destroy()
           return
         }
 
