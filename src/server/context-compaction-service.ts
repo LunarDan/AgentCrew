@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { and, desc, eq, gte, inArray, ne } from 'drizzle-orm'
 import OpenAI from 'openai'
 
-import { db, schema } from '@/db/client'
+import { db, schema, sqlite } from '@/db/client'
 import type {
   AgentRow,
   ArtifactRow,
@@ -106,6 +106,8 @@ export async function compactConversation(
   }
 
   const coveredUntil = rendered.includedMessages[rendered.includedMessages.length - 1]
+  // 摘要生成期间用户可能清空 / 撤回了历史；提交前要确认被总结的内容还在。
+  const messageCountAtSnapshot = countConversationMessages(conversationId)
   const prompt = buildCompactionPrompt(latest, rendered.text)
   const choice = await chooseSummaryModel(conv.agentIds)
   const summaryText = normalizeSummary(await choice.summarize(prompt, signal))
@@ -154,6 +156,15 @@ export async function compactConversation(
     if ((currentLatest?.id ?? null) !== (latest?.id ?? null)) {
       throw new Error('Compaction is already in progress for this conversation')
     }
+    // 摘要生成期间历史被清空 / 撤回：不能再把已删除的内容写回上下文。
+    if (
+      !sqlite
+        .prepare('SELECT 1 FROM messages WHERE id = ? AND conversation_id = ?')
+        .get(coveredUntil.id, conversationId) ||
+      countConversationMessages(conversationId) < messageCountAtSnapshot
+    ) {
+      throw new Error('History changed during compaction; please retry')
+    }
     tx.insert(schema.contextSummaries).values(summaryInsert).run()
     tx.insert(schema.messages).values(systemMessageInsert).run()
     tx.update(schema.conversations)
@@ -177,6 +188,13 @@ export async function compactConversation(
     summary: summaryInsert as ContextSummaryRow,
     message: systemMessageInsert as MessageRow,
   }
+}
+
+function countConversationMessages(conversationId: string): number {
+  const row = sqlite
+    .prepare('SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ?')
+    .get(conversationId) as { n: number }
+  return row.n
 }
 
 /**
