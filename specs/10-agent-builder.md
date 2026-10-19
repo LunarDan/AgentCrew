@@ -36,7 +36,7 @@
 | `modelProvider` | enum | — | `'deepseek'` | 见下方 Provider 矩阵 |
 | `modelId` | string | — | provider 默认 | 切换 provider 时自动重置 |
 | `apiKey` | string | — | `''` | 命名 provider 留空走 env var；`openai-compatible` 必填 per-agent key |
-| `apiBaseUrl` | string | — | `''` | Claude Code 可填 Anthropic 兼容 endpoint；Codex 仅可填 Codex/Responses 兼容 endpoint；Custom `openai-compatible` 必填 Chat Completions 兼容 endpoint |
+| `apiBaseUrl` | string | — | `''` | Claude Code 可填 Anthropic 兼容 endpoint；Codex 仅可填 Codex/Responses 兼容 endpoint；Custom `openai-compatible` 必填 Chat Completions 兼容 endpoint；Custom `anthropic` 可填 Anthropic 兼容网关（可选） |
 | `toolNames` | string[] | — | 全栈通用预设 | 当前可勾选：`write_artifact` / `deploy_artifact` / `deploy_workspace` / `read_artifact` / `read_attachment` / `ask_user` / `fs_list` / `fs_read` / `fs_write` / `bash` / `web_fetch` |
 | `mcpServerIds` | string[] | — | `[]` | 该 agent 启用的外部 MCP server id；在「工具集」tab 的多选里勾选，只列出当前 adapter 能跑的 server（矩阵见 `src/shared/mcp.ts`）。与 `toolNames` 独立，SDK adapter 也不清空（Spec 15） |
 | `supportsVision` | boolean | — | `true` | 决定是否把图片 base64 注入 messages |
@@ -64,7 +64,7 @@
 - `claude-code`：使用 `@anthropic-ai/claude-agent-sdk`，`toolNames=[]`，SDK 内置工具集；Review 模式通过 `canUseTool` 桥到 AgentHub 审批。
 - `codex`：使用 `@openai/codex-sdk`，`toolNames=[]`，SDK 内置本地命令 / 文件变更 / MCP / 计划事件；Review 模式以 read-only sandbox 运行，Auto 模式以 workspace-write sandbox 运行；自定义 Base URL 必须支持 Codex/Responses，DeepSeek 没有 `/responses`，不能走 Codex adapter。
 
-**Anthropic provider**：创建 / 编辑时可选，运行时由 CustomAgentAdapter 走 Messages API（流式文本、thinking、tool_use / tool_result）。key 回退顺序 `agent.apiKey → ANTHROPIC_API_KEY → ANTHROPIC_AUTH_TOKEN`；`apiBaseUrl` 可填 Anthropic 兼容网关（UI 只在 custom 的 `openai-compatible` 下暴露 Base URL，Anthropic 网关可通过 API 写入）。
+**Anthropic provider**：创建 / 编辑时可选，运行时由 CustomAgentAdapter 走 Messages API（流式文本、thinking、tool_use / tool_result）。key 回退顺序 `agent.apiKey → ANTHROPIC_API_KEY → ANTHROPIC_AUTH_TOKEN`；`apiBaseUrl` 可填 Anthropic 兼容网关（UI 对 custom 的 `openai-compatible` 与 `anthropic` 都暴露 Base URL；前者必填，后者留空走官方 endpoint）。
 
 ---
 

@@ -287,7 +287,7 @@ mcp_servers {
   env         text JSON             // stdio：Record<string,string> 附加环境变量，可含 ${ENV_NAME} 占位
   url         text                  // sse / http：端点
   headers     text JSON             // sse / http：Record<string,string> 静态请求头，可含 ${ENV_NAME} 占位
-  trust       text NOT NULL default 'ask'     // 'always'|'ask'，仅 Claude Code adapter 实际拦
+  trust       text NOT NULL default 'ask'     // 'always'|'ask'，Claude Code 与 custom adapter 实际拦截（Codex 不受此门约束）
   enabled     int  bool NOT NULL default 0    // 全局开关，默认 false
   created_at  int  NOT NULL
 }

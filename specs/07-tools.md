@@ -562,7 +562,7 @@ AgentHub 额外给 Codex 注入一个 stdio MCP bridge，只暴露 allowlist：`
 
 - `toolNames` / `AVAILABLE_AGENT_TOOLS` 里**不列**这些名字。一个 agent「能调到哪些外部工具」由 `agents.mcp_server_ids`（引用 `mcp_servers` 表）决定，与内置工具表相互独立（详见 Spec 08 / 10 / 15）。
 - **命名规则**：`__` 是 server 名与 tool 名的分隔符，故 server 名校验禁止包含 `__`，并保留 `agenthub` 不可占用（`src/server/mcp-server-service.ts`）。
-- **审批门**：`trust='ask'`（默认）的外部工具，在支持 AgentHub 侧审批的 adapter（当前仅 Claude Code）里，调用前必须过 `bridgePermission` 的 `mcp__*` 分支 —— per-tool-per-conversation 记忆，事件走 `mcp_tool.pending` / `mcp_tool.resolved`；`trust='always'` 直接放行。该门同样以**隔离启动**为前提（`settingSources: []` + `strictMcpConfig: true`），否则 workspace 的 `.claude/settings.json` 会在 CLI 侧先放行 `mcp__*`。Codex 有自身的审批策略与沙箱，AgentHub 拦不到它的工具决策，故 `trust` 对 Codex 只是建议性的（UI 不得把它显示成生效的保护）。调用失败 / 被用户拒绝 → 返回 `isError` tool result，**run 继续**。
+- **审批门**：`trust='ask'`（默认）的外部工具，在支持 AgentHub 侧审批的 adapter（Claude Code 与 custom）里，调用前必须过 `bridgePermission` 的 `mcp__*` 分支（custom 走 `executeMcpTool` 的同一审批队列）—— per-tool-per-conversation 记忆，事件走 `mcp_tool.pending` / `mcp_tool.resolved`；`trust='always'` 直接放行。该门同样以**隔离启动**为前提（`settingSources: []` + `strictMcpConfig: true`），否则 workspace 的 `.claude/settings.json` 会在 CLI 侧先放行 `mcp__*`。Codex 有自身的审批策略与沙箱，AgentHub 拦不到它的工具决策，故 `trust` 对 Codex 只是建议性的（UI 不得把它显示成生效的保护）。调用失败 / 被用户拒绝 → 返回 `isError` tool result，**run 继续**。
 - 外部 MCP server **不在 workspace 沙箱内运行**，stdio 子进程还继承完整进程环境（可读到 provider key）——这是本特性的安全前提，详见 Spec 15 §6 与 Spec 11。
 
 详见 Spec 15。

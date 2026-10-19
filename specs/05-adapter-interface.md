@@ -11,7 +11,7 @@
 | Adapter | 状态 |
 |---|---|
 | `MockAdapter` | ✅ 已实现，用于开发期不烧 token |
-| `CustomAgentAdapter` | ✅ 已实现，覆盖 DeepSeek / OpenAI / 火山方舟 / per-agent OpenAI-compatible Base URL（OpenAI Chat Completions 兼容协议）；**Anthropic 路径在 buildClient 里直接 throw，待实装** |
+| `CustomAgentAdapter` | ✅ 已实现，覆盖 DeepSeek / OpenAI / 火山方舟 / per-agent OpenAI-compatible Base URL（OpenAI Chat Completions 兼容协议）与 Anthropic（Messages API，见下方「Anthropic Messages API 路径」） |
 | `ClaudeCodeAdapter` | ✅ 已实现，基于 `@anthropic-ai/claude-agent-sdk` `query()` + `canUseTool` 审批桥 |
 | `CodexAdapter` | ✅ 已实现，基于 `@openai/codex-sdk` `runStreamed()`；Review 模式只读，Auto 模式 workspace-write；自定义 Base URL 必须支持 Codex/Responses |
 

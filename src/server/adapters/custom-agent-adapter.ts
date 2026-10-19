@@ -800,13 +800,7 @@ function isDeployStatusRecord(value: unknown): value is DeployStatusRecord {
   )
 }
 
-/**
- * 构造 OpenAI 风格的多模态 user message content：
- *   [{ type: 'text', text: ... }, { type: 'image_url', image_url: { url: 'data:...' } }, ...]
- *
- * DeepSeek 兼容 OpenAI schema；Anthropic 的 image block 形态不同，目前 CustomAgentAdapter
- * 走 openai SDK + OpenAI-compatible endpoint，先只支持这一套。
- */
+/** 把历史消息的 content 归一成 Anthropic content block 数组，便于在当前 user message 上追加图片。 */
 function toAnthropicBlocks(content: Anthropic.MessageParam['content']): Anthropic.ContentBlockParam[] {
   return typeof content === 'string' ? [{ type: 'text', text: content }] : content
 }
@@ -885,6 +879,13 @@ function serializeToolResult(value: unknown): string {
   }
 }
 
+/**
+ * 构造 OpenAI 风格的多模态 user message content：
+ *   [{ type: 'text', text: ... }, { type: 'image_url', image_url: { url: 'data:...' } }, ...]
+ *
+ * DeepSeek / 火山方舟 / OpenAI-compatible 都兼容这套 schema；Anthropic 走
+ * buildAnthropicUserContent 的 image block。
+ */
 function buildMultimodalUserContent(
   prompt: string,
   images: AdapterAttachment[],
