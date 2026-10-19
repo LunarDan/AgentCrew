@@ -828,24 +828,36 @@ async function executeDag(
         throw new Error('Circular dependency or unresolved task in plan')
       }
 
-      // allSettled：单个子任务抛错时也要等同波次其它子任务收尾，避免遗留孤儿 run
+      // allSettled：单个子任务抛错时也要等同波次其它子任务收尾，避免遗留孤儿 run。
+      // 一次子任务失败只应让依赖它的任务 skipped，不能把同波次已完成的结果和后续独立任务一起丢掉。
       const settled = await Promise.allSettled(
         ready.map((t) => runChildTask(t, results, planContext, ctx)),
       )
       const wave: DispatchTaskResult[] = []
-      let failure: unknown = null
       for (let i = 0; i < ready.length; i++) {
         const outcome = settled[i]
         if (outcome.status === 'fulfilled') {
           wave[i] = outcome.value
           results.set(ready[i].id, outcome.value)
           remaining.delete(ready[i].id)
-        } else if (failure === null) {
-          failure = outcome.reason
+          continue
         }
-      }
-      if (failure !== null) {
-        throw failure instanceof Error ? failure : new Error(String(failure))
+        // 整个 run 被中止才算致命；子任务本身抛错降级成 failed，交给依赖跳过与重规划处理
+        if (ctx.signal.aborted) {
+          throw outcome.reason instanceof Error ? outcome.reason : new Error(String(outcome.reason))
+        }
+        const failed: DispatchTaskResult = {
+          runId: null,
+          status: 'failed',
+          error: outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason),
+          artifactIds: [],
+          outputMessageIds: [],
+          outputArtifacts: {},
+        }
+        wave[i] = failed
+        results.set(ready[i].id, failed)
+        remaining.delete(ready[i].id)
+        publishDispatchEnd(ctx, ready[i].id, failed)
       }
 
       // 同波次「代码冲突」检测：本波 ≥2 个子 run 经 fs_write 写了同一文件且内容不同
