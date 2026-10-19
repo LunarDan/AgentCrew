@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server'
 
 import { mobileJson, mobileOptions } from '@/server/mobile-cors'
+import { mobileUserErrorJson } from '@/server/mobile-errors'
 import { requireMobileAuth } from '@/server/mobile-auth'
 import { regenerateMobileResponse } from '@/server/mobile-service'
 
@@ -19,7 +20,6 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const result = await regenerateMobileResponse({ conversationId: id })
     return mobileJson(req, result, { status: 202 })
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    return mobileJson(req, { error: message }, { status: 400 })
+    return mobileUserErrorJson(req, err, 'mobile message action')
   }
 }

@@ -24,7 +24,18 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     return NextResponse.json(result)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    const status = message.includes('not found') ? 404 : 400
+    const status = message.includes('not found')
+      ? 404
+      : message.startsWith('A newer user message arrived')
+        ? 409
+        : message.startsWith('Only the latest user message') ||
+            message.startsWith('Only user messages')
+          ? 400
+          : 500
+    if (status === 500) {
+      console.error('[withdraw] failed', err)
+      return NextResponse.json({ error: 'Internal error' }, { status })
+    }
     return NextResponse.json({ error: message }, { status })
   }
 }

@@ -42,7 +42,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (result.reason === 'not_found') {
       return mobileJson(req, { error: 'Pending write not found' }, { status: 404 })
     }
-    return mobileJson(req, { error: result.message }, { status: 500 })
+    // 写盘失败原因可能带宿主绝对路径 / errno，不能回给局域网设备
+    console.error('[mobile] pending write approve failed', result.message)
+    return mobileJson(req, { error: 'Failed to write file' }, { status: 500 })
   }
   return mobileJson(req, { ok: true })
 }

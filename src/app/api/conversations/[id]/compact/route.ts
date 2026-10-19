@@ -13,6 +13,15 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     return NextResponse.json(result)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    return NextResponse.json({ error: message }, { status: 400 })
+    const status = message.startsWith('Conversation not found')
+      ? 404
+      : /No compactable|Compaction is already in progress|History changed/.test(message)
+        ? 409
+        : 500
+    if (status === 500) {
+      console.error('[compact] failed', err)
+      return NextResponse.json({ error: 'Internal error' }, { status })
+    }
+    return NextResponse.json({ error: message }, { status })
   }
 }

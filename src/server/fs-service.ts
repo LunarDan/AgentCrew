@@ -69,7 +69,8 @@ export interface ReadResult {
 
 export function readFileInWorkspace(workspace: WorkspaceRow, target: string): ReadResult {
   const absPath = assertPathWithinWorkspace(workspace, target)
-  const stat = statSync(absPath)
+  const stat = statSync(absPath, { throwIfNoEntry: false })
+  if (!stat) throw new Error(`Path not found: ${target}`)
   if (!stat.isFile()) throw new Error(`Not a file: ${target}`)
   if (stat.size > MAX_READ_BYTES) {
     throw new Error(`File too large (${(stat.size / 1024 / 1024).toFixed(2)} MB > 1 MB limit)`)
@@ -160,7 +161,8 @@ export function listDirInWorkspace(workspace: WorkspaceRow, target: string): Lis
   const relPath = target === '' ? '' : target
   const absPath = relPath === '' ? getEffectiveCwd(workspace) : assertPathWithinWorkspace(workspace, target)
 
-  const stat = statSync(absPath)
+  const stat = statSync(absPath, { throwIfNoEntry: false })
+  if (!stat) throw new Error(`Path not found: ${target || '(root)'}`)
   if (!stat.isDirectory()) throw new Error(`Not a directory: ${target || '(root)'}`)
 
   const raw = readdirSync(absPath, { withFileTypes: true })

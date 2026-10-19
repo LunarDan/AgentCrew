@@ -23,7 +23,19 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
     return NextResponse.json(result)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    const status = msg.includes('outside') ? 403 : msg.includes('too large') ? 413 : msg.includes('Not a file') ? 400 : 500
+    const status = msg.includes('outside')
+      ? 403
+      : msg.includes('too large')
+        ? 413
+        : msg.includes('Not a file')
+          ? 400
+          : msg.includes('Path not found')
+            ? 404
+            : 500
+    if (status === 500) {
+      console.error('[fs/read] failed', err)
+      return NextResponse.json({ error: 'Internal error' }, { status })
+    }
     return NextResponse.json({ error: msg }, { status })
   }
 }

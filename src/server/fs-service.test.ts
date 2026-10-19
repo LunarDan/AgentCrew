@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import type { WorkspaceRow } from '@/db/schema'
 
-import { listDirInWorkspace } from './fs-service'
+import { listDirInWorkspace, readFileInWorkspace } from './fs-service'
 
 const roots: string[] = []
 
@@ -54,5 +54,19 @@ describe('listDirInWorkspace', () => {
     expect(() => listDirInWorkspace(workspace, '..')).toThrow(
       'Path ".." is outside workspace',
     )
+  })
+
+  it('reports missing paths without leaking the host path', () => {
+    const workspace = makeWorkspace()
+
+    expect(() => readFileInWorkspace(workspace, 'missing.txt')).toThrow('Path not found: missing.txt')
+    expect(() => listDirInWorkspace(workspace, 'missing')).toThrow('Path not found: missing')
+
+    try {
+      readFileInWorkspace(workspace, 'missing.txt')
+      expect.unreachable()
+    } catch (err) {
+      expect((err as Error).message).not.toContain(workspace.rootPath)
+    }
   })
 })

@@ -30,7 +30,15 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     return NextResponse.json(result)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    const status = msg.includes('outside') ? 403 : msg.includes('too large') || msg.includes('quota') ? 413 : 500
+    const status = msg.includes('outside')
+      ? 403
+      : msg.includes('too large') || msg.includes('quota')
+        ? 413
+        : 500
+    if (status === 500) {
+      console.error('[fs/write] failed', err)
+      return NextResponse.json({ error: 'Internal error' }, { status })
+    }
     return NextResponse.json({ error: msg }, { status })
   }
 }

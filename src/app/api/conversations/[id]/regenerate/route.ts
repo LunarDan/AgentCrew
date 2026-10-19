@@ -18,6 +18,17 @@ export async function POST(_req: NextRequest, ctx: RouteContext) {
     return NextResponse.json(result)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    return NextResponse.json({ error: message }, { status: 400 })
+    const status = message.startsWith('Conversation not found')
+      ? 404
+      : message.startsWith('A newer user message arrived')
+        ? 409
+        : message.startsWith('No user message')
+          ? 400
+          : 500
+    if (status === 500) {
+      console.error('[regenerate] failed', err)
+      return NextResponse.json({ error: 'Internal error' }, { status })
+    }
+    return NextResponse.json({ error: message }, { status })
   }
 }
