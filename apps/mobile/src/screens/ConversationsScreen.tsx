@@ -138,6 +138,8 @@ export function ConversationsScreen({
   }
 
   function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    // 中文输入法用 Enter 确认候选词；此时不能当成发送（keyCode 229 是老 WebView 的信号）
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
       void submitDraft()
