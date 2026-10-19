@@ -9,6 +9,12 @@ interface RouteContext {
 }
 
 /**
+ * 只有常见位图允许 inline。SVG 是 active content（内嵌 script / onload 会在
+ * 应用同源下执行），上传者又能自报 mimeType，所以一律按附件下载。
+ */
+const INLINE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
+
+/**
  * GET → 下载（或在浏览器内嵌预览，按 mimeType inline）
  * DELETE → 从文件库移除
  */
@@ -24,11 +30,8 @@ export async function GET(_req: Request, ctx: RouteContext) {
   }
 
   const buf = readFileSync(abs)
-  // 图片走 inline 直接预览；其他走 attachment 下载
-  const disposition =
-    row.kind === 'image'
-      ? `inline; filename*=UTF-8''${encodeURIComponent(row.fileName)}`
-      : `attachment; filename*=UTF-8''${encodeURIComponent(row.fileName)}`
+  const inline = INLINE_IMAGE_TYPES.has(row.mimeType)
+  const disposition = `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(row.fileName)}`
 
   // Next.js 16 expects BodyInit; Buffer is acceptable
   return new Response(new Uint8Array(buf), {
@@ -37,6 +40,9 @@ export async function GET(_req: Request, ctx: RouteContext) {
       'Content-Length': String(buf.length),
       'Content-Disposition': disposition,
       'Cache-Control': 'private, max-age=3600',
+      // mimeType 来自上传者；禁止浏览器嗅探成 HTML，并给可能的直接打开再加一层沙箱。
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "sandbox; default-src 'none'",
     },
   })
 }
