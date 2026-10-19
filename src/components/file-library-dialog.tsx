@@ -98,8 +98,11 @@ export function FileLibraryDialog({
           }
         } catch (err) {
           console.error('[FileLibraryDialog] upload', err)
-          const reason = err instanceof Error ? err.message : String(err)
-          setUploadError(`「${f.name}」上传失败：${reason}`)
+          // 上传期间切了会话：不要把旧会话的失败横幅显示在新会话里
+          if (conversationIdRef.current === conversationId) {
+            const reason = err instanceof Error ? err.message : String(err)
+            setUploadError(`「${f.name}」上传失败：${reason}`)
+          }
         } finally {
           setUploadingCount((n) => Math.max(0, n - 1))
         }

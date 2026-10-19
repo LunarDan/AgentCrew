@@ -497,8 +497,11 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
           addPendingAttachment(conversationId, att)
         } catch (err) {
           console.error('[MessageInput] upload failed', err)
-          const reason = err instanceof Error ? err.message : String(err)
-          setSendError(`附件「${file.name}」上传失败：${reason}`)
+          // 上传可能在切走后才失败：错误提示只属于发起上传的那个会话
+          if (isCurrentConversation()) {
+            const reason = err instanceof Error ? err.message : String(err)
+            setSendError(`附件「${file.name}」上传失败：${reason}`)
+          }
         } finally {
           setUploading((prev) => prev.filter((p) => p.tempId !== tempId))
         }
