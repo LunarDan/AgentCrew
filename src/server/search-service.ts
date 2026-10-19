@@ -91,7 +91,9 @@ function runFtsPath(
 ): SearchResult {
   const start = Date.now()
   const ftsQuery = maybeQuote(q)
-  const stmt = target.prepare(`
+  let rows: HitRow[]
+  try {
+    const stmt = target.prepare(`
     SELECT
       m.id AS messageId,
       m.conversation_id AS conversationId,
@@ -112,8 +114,6 @@ function runFtsPath(
     ORDER BY bm25(messages_fts)
     LIMIT ? OFFSET ?
   `)
-  let rows: HitRow[]
-  try {
     rows = stmt.all(
       ftsQuery,
       opts.conversationId ?? null, opts.conversationId ?? null,
@@ -121,7 +121,11 @@ function runFtsPath(
       limit, offset,
     ) as HitRow[]
   } catch (err) {
-       if (err instanceof Error && (/(?:fts5|SQLITE_ERROR)/.test(err.message))) {
+    // 老库 / 迁移失败时 FTS 表可能不存在：退回 LIKE，搜索至少还能用。
+    if (err instanceof Error && /no such table: messages_fts/.test(err.message)) {
+      return runLikePath(target, q, limit, offset, opts)
+    }
+    if (err instanceof Error && (/(?:fts5|SQLITE_ERROR)/.test(err.message))) {
       return { hits: [], total: 0, tookMs: 0, error: 'INVALID_QUERY' }
     }
     throw err
@@ -158,6 +162,8 @@ function runLikePath(
   opts: SearchOptions,
 ): SearchResult {
   const start = Date.now()
+  // LIKE 的 % 和 _ 是通配符：用户搜「100%」时不能变成「100 + 任意内容」。
+  const likeQuery = q.replace(/[\\%_]/g, (ch) => `\\${ch}`)
   const rows = target.prepare(`
     SELECT
       m.id AS messageId,
@@ -172,13 +178,13 @@ function runLikePath(
     FROM messages m
     JOIN conversations c ON c.id = m.conversation_id
     LEFT JOIN agents a   ON a.id = m.agent_id
-    WHERE m.parts LIKE '%' || ? || '%'
+    WHERE m.parts LIKE '%' || ? || '%' ESCAPE '\\'
       AND (? IS NULL OR m.conversation_id = ?)
       AND (? IS NULL OR m.role = ?)
     ORDER BY m.created_at DESC
     LIMIT ? OFFSET ?
   `).all(
-    q, q,
+    q, likeQuery,
     opts.conversationId ?? null, opts.conversationId ?? null,
     opts.role ?? null, opts.role ?? null,
     limit, offset,

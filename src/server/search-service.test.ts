@@ -159,6 +159,24 @@ describe('searchMessages (FTS5 path)', () => {
     expect(r.hits[0].conversationId).toBe('c2')
   })
 
+  it('LIKE fallback treats % and _ as literal characters', async () => {
+    insertMessage(db, 'm1', 'c1', 'user', [{ type: 'text', content: 'coverage 100% done' }])
+    insertMessage(db, 'm2', 'c1', 'user', [{ type: 'text', content: 'coverage 100 apples' }])
+
+    const percent = await searchMessages({
+      query: '100%', fallback: 'like', db: db as Database.Database,
+    })
+    expect(percent.total).toBe(1)
+    expect(percent.hits[0].messageId).toBe('m1')
+
+    insertMessage(db, 'm3', 'c1', 'user', [{ type: 'text', content: 'snake_case_name' }])
+    const underscore = await searchMessages({
+      query: 'e_c', fallback: 'like', db: db as Database.Database,
+    })
+    expect(underscore.total).toBe(1)
+    expect(underscore.hits[0].messageId).toBe('m3')
+  })
+
   it('defaultSqlite is a raw better-sqlite3 connection with .prepare()', async () => {
     // Regression test: production path must work without injecting db.
     // The Drizzle wrapper has .run()/.all() but NOT .prepare(); a previous
