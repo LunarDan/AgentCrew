@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { AgentAvatar } from '@/components/agent-avatar'
 import { Button } from '@/components/ui/button'
@@ -33,6 +33,16 @@ export function AddAgentDialog({
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [submitting, setSubmitting] = useState(false)
 
+  // 勾选只属于某一次「添加」：关掉弹窗或切会话后不能带到下一次
+  useEffect(() => {
+    setSelected(new Set())
+  }, [conversationId])
+
+  const handleOpenChange = (next: boolean) => {
+    if (!next) setSelected(new Set())
+    onOpenChange(next)
+  }
+
   const candidates = allAgents.filter((a) => !existingAgentIds.includes(a.id))
 
   const toggle = (id: string) => {
@@ -60,7 +70,7 @@ export function AddAgentDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>添加 Agent 到会话</DialogTitle>
@@ -107,7 +117,7 @@ export function AddAgentDialog({
 
         <DialogFooter>
           <div className="mr-auto text-xs text-muted-foreground">已选 {selected.size} 位</div>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => handleOpenChange(false)}>
             取消
           </Button>
           <Button onClick={() => void submit()} disabled={selected.size === 0 || submitting}>
