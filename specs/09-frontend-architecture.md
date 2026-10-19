@@ -69,6 +69,7 @@ interface AppState {
 - **实体 normalize 成 `Record<id, Row>`**，不放在 conversations 的嵌套里（避免重复存储 + 局部更新困难）
 - **关系用「id 列表」分桶**，渲染时 map 拿实体。这样新增 / 删除消息只动 id 列表 + 实体 map，不破坏 React shallow equality
 - **UI 状态按 conversationId 分桶**（pendingAttachments / replyTarget），切会话不会污染
+- **异步回调只改「发起它的那个会话」**：上传 / 发送 / 部署 / 压缩等请求返回时，若用户已切到别的会话，回滚只作用于原会话分桶（消息、待发附件、回复目标），输入框内容、错误提示、`sending` 这些组件内状态不得写到新会话上
 - **不放在 store 的东西**：表单 draft、modal 开关、临时 hover 状态——这些用组件内 `useState`
 
 ---
@@ -83,7 +84,7 @@ interface AppState {
 |---|---|
 | `heartbeat` | 无变更（仅作连接保活信号，由 SSE 端定期发） |
 | `run.start` | `runsByConv[convId][runId] = { ...event, status: 'running', usage: null }` |
-| `run.end` | 更新 run 的 `status` / `finishedAt` / `error`；当 status 为 `failed` / `aborted` 时，把同 run 的 streaming 消息改为 `error` / `aborted`，并为未配对 `tool_result` 的 `tool_use` 补本地错误结果，避免工具卡停在「调用中」 |
+| `run.end` | 更新 run 的 `status` / `finishedAt` / `error`；当 status 为 `failed` / `aborted` 时，把同 run 的 streaming 消息改为 `error` / `aborted`，并为未配对 `tool_result` 的 `tool_use` 补本地错误结果，避免工具卡停在「调用中」；同时按 `runId` 移除四个审批队列（writes / bash / MCP / questions）里属于该 run 的条目 —— run 已经结束，这些审批永远不会再有 `*.resolved`，留在面板上会让弹窗永远关不掉 |
 | `run.usage` | adapter 每轮发的是**增量**；reducer 把 input/output/cache tokens 累加到 run 的 `usage` 上（`lastInputTokens` / `model` 取最新），与服务端 `agent_runs.usage` 的累计语义一致；派生 hook `useConversationUsageTotal` 据此聚合 |
 | `message.start` | 在 `messages[messageId]` 创建空 parts 的 streaming agent 消息，挂入 `messageIdsByConv` |
 | `message.end` | `messages[messageId].status = 'complete'`；若用户不在该会话（`activeConversationId !== conversationId`）则 `unreadByConv[conversationId] +1`。**不在 message.start 计未读**——claude-code-adapter 整 run 只发一次 message.start，那时用户通常仍在该会话被抑制，后续切走再无 +1 机会 |
@@ -258,6 +259,8 @@ app/page.tsx
 | `messages` | 切换会话时一次性拉全量（`fetchMessages`）；请求期间的 SSE 消息用并集保留，不能整桶覆盖 | `messageIdsByConv` + `messages` |
 | `artifacts` | 不预加载；首次见到 `artifact_ref` part 时 lazy fetch 详情（`ArtifactRefPart` 组件内 effect） | `artifacts[id]` |
 | `attachments` | 打开 `FileLibraryDialog` 时拉该会话列表；附件 chip 渲染时也按需拉 | 组件内 useState |
+
+附件删除成功后必须同时 `removePendingAttachment(conversationId, id)`：待发附件桶里留着一个已删附件，之后每次发送都会被服务端以「附件不存在」拒绝，而用户看不出原因。
 | `agents` / `conversations` | 应用启动时全量拉一次 | 同名 maps |
 
 **挂载兜底请求**：pending writes / bash commands / MCP tools / questions 在面板挂载时 GET 一次兜底，但若该会话的 store 桶已经有条目（说明 SSE 已推来更新的数据），必须跳过这次快照，不能用更旧的响应覆盖。消息首次加载失败时展示错误 + 重试，而不是误显示「还没有消息」。
