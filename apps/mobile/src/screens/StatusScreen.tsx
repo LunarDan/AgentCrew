@@ -1,6 +1,6 @@
 import { CheckCircle2, Link } from "lucide-react"
 
-import { formatRelative } from "../lib/format"
+import { formatRelative, formatTime } from "../lib/format"
 import type { MobileSnapshot } from "../types"
 import { ConversationRow } from "./ConversationRow"
 
@@ -9,15 +9,19 @@ export function StatusScreen({
   snapshot,
   lastSyncedAt,
   error,
+  busyRunId,
   onOpenSettings,
   onOpenConversation,
+  onAbortRun,
 }: {
   connected: boolean
   snapshot: MobileSnapshot | null
   lastSyncedAt: number | null
   error: string | null
+  busyRunId: string | null
   onOpenSettings: () => void
   onOpenConversation: (id: string) => void
+  onAbortRun: (runId: string) => void
 }) {
   const hasSnapshot = snapshot !== null
   const running = snapshot?.runningRuns.length ?? 0
@@ -50,6 +54,35 @@ export function StatusScreen({
         <Metric label="待审批" value={pendingWrites} loading={!hasSnapshot} tone={pendingWrites > 0 ? "orange" : undefined} />
         <Metric label="待回答" value={pendingQuestions} loading={!hasSnapshot} tone={pendingQuestions > 0 ? "accent" : undefined} />
       </section>
+
+      {running > 0 && (
+        <section className="card-list">
+          <h2 className="section-title">运行中</h2>
+          {(snapshot?.runningRuns ?? []).map((run) => {
+            const agentName =
+              snapshot?.agents.find((agent) => agent.id === run.agentId)?.name ?? "Agent"
+            const busy = busyRunId === run.id
+            return (
+              <article key={run.id} className="approval-card">
+                <div>
+                  <h3>{agentName}</h3>
+                  <p>开始于 {formatTime(run.startedAt)}</p>
+                </div>
+                <div className="approval-actions">
+                  <button
+                    type="button"
+                    className="danger-action"
+                    disabled={busy}
+                    onClick={() => onAbortRun(run.id)}
+                  >
+                    {busy ? "停止中" : "停止"}
+                  </button>
+                </div>
+              </article>
+            )
+          })}
+        </section>
+      )}
 
       {allClear && (
         <div className="all-clear">

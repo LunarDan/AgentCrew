@@ -14,6 +14,7 @@ export interface MobileApiClient {
   withdrawMessage(conversationId: string, messageId: string): Promise<void>
   editMessage(conversationId: string, messageId: string, content: string): Promise<void>
   regenerate(conversationId: string): Promise<void>
+  abortRun(runId: string): Promise<void>
   decidePendingWrite(id: string, action: 'approve' | 'reject'): Promise<void>
   answerPendingQuestion(id: string, answers: MobileAskUserAnswers): Promise<void>
 }
@@ -91,6 +92,9 @@ export function createMobileApiClient(config: ConnectionConfig): MobileApiClient
     },
     regenerate: async (conversationId) => {
       await request(`/api/mobile/conversations/${conversationId}/regenerate`, { method: 'POST' })
+    },
+    abortRun: async (runId) => {
+      await request(`/api/mobile/runs/${runId}/abort`, { method: 'POST' })
     },
   }
 }

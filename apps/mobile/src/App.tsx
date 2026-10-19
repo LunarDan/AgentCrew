@@ -291,8 +291,12 @@ export function App() {
           error={error}
           snapshot={snapshot}
           lastSyncedAt={lastSyncedAt}
+          busyRunId={operationId}
           onOpenSettings={openSettings}
           onOpenConversation={(id) => void openConversation(id)}
+          onAbortRun={(runId) =>
+            void runMobileAction(runId, () => api.abortRun(runId))
+          }
         />
         {hasPending && (
           <ApprovalsScreen
