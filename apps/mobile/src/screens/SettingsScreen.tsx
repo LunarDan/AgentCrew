@@ -76,7 +76,7 @@ export function SettingsScreen({
           <span>设备 token</span>
           <input
             value={connection.deviceToken}
-            placeholder="AGENTHUB_MOBILE_DEV_TOKEN"
+            placeholder="从桌面端「设置」里复制设备 token"
             autoCapitalize="none"
             autoComplete="off"
             onChange={(e) => onChange({ ...connection, deviceToken: e.target.value })}
