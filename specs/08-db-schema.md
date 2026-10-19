@@ -201,6 +201,8 @@ INDEX idx_runs_parent ON (parent_run_id)
 
 **生命周期**：`queued → running → (complete|failed|aborted)`，单向流转，service 层 enforce 不允许回退。
 
+**进程重启收口**：runner 在进程内，进程退出后 `queued` / `running` 的 run 不可能再继续。`src/instrumentation.ts` 在 Node server 启动时把这类行改成 `failed`（`error` 说明是重启中断、`finished_at` 补当前时间），同时把仍是 `streaming` 的消息改成 `aborted`。不清理的话会话会永远显示「运行中」，删除会话 / 清空历史也会被 409 永久挡住。
+
 ---
 
 ## 8. conversation_context_summaries

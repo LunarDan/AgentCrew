@@ -175,6 +175,7 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 ## 附 · 当前现状（易过时,以代码为准）
 
 ### ✅ 近期完成（最新一批）
+- **进程重启后的残留 run 收口（2026-10-20）**：runner 在进程内，崩溃 / 重启后 `agent_runs` 里的 `queued` / `running` 行永远不再推进 —— 会话一直显示「运行中」，删除会话 / 清空历史被 409 永久挡住。新增 `src/instrumentation.ts`，在 Node server 启动时把这类 run 标成 `failed`（带「重启中断」原因与 `finished_at`），并把残留 `streaming` 消息标成 `aborted`；构建阶段跳过，避免误伤开发库
 - **重新生成的同毫秒漏删（2026-10-20）**：`regenerateLatestResponse` 用严格 `>` 圈定要删的旧回复与要中止的 run，而消息 `createdAt` 与 run `startedAt` 可能和触发它的 user message 落在同一毫秒 —— 旧回复残留、仍在跑的 run 继续写新消息。改为 `>=` + 排除保留的 user message id（撤回路径原本就是这么做的）
 - **附件下载的 stored XSS 修复（2026-10-20）**：`GET /api/attachments/:id` 此前按 `kind==='image'` 对 SVG 也发 `Content-Disposition: inline`，而 mimeType 是上传者自报值 —— 打开附件 URL 即可在应用同源下执行 SVG 里的脚本。现在只有 jpeg/png/gif/webp inline，其余一律 `attachment`，并加 `X-Content-Type-Options: nosniff` 与 `CSP: sandbox`
 - **Electron / 移动端审计修复（2026-10-20）**：① companion 反向代理双向拆除连接（手机断开即销毁 upstream，SSE 不再残留订阅与 15s 心跳），代理监听失败（如端口占用）不再只写日志 —— 原因经 `AGENTHUB_COMPANION_PROXY_ERROR` → `/api/connection-hints` 显示在设置页；② 代理路径判定拒绝编码后的反斜杠（`%5C`）；③ Electron 用 `will-redirect` 拦截服务端 302 跳到外链（`will-navigate` 不覆盖这种情况），启动/加载失败弹系统错误框；④ 移动端事件流补 `cancel` 退订、断线后关闭、按 `desiredSize` 丢弃事件防止无界缓冲；⑤ 一次性 stream token 绑定设备 token 哈希，轮换后旧 token 作废；⑥ 移动端路由统一错误出口：已知 404 原样返回，其余回通用 500 且不把内部错误串发给局域网设备
