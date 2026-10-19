@@ -52,6 +52,11 @@ Long-running child processes spawned by tool or SDK boundaries — including use
 - **WHEN** any module must terminate a spawned process tree
 - **THEN** it uses one shared implementation rather than a private copy.
 
+#### Scenario: A process ignores graceful termination
+- **WHEN** a POSIX process tree is still alive 5 seconds after the graceful signal
+- **THEN** the remaining process group or tracked pids are sent SIGKILL
+- **AND** on Windows the tree is terminated forcibly in the first place.
+
 ### Requirement: SDK child process environment SHALL preserve required host basics
 
 Child process environments MUST preserve required values such as PATH and HOME/USERPROFILE while applying adapter-specific isolation. A user-registered stdio MCP server is spawned with the shared child environment builder, so it inherits the parent environment; this MUST be stated wherever the external MCP security model is described.

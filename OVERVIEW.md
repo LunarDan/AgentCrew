@@ -175,6 +175,7 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 ## 附 · 当前现状（易过时,以代码为准）
 
 ### ✅ 近期完成（最新一批）
+- **POSIX 子进程清理补 SIGKILL 升级（2026-10-20）**：`killProcessTree` / `killProcessTreeByPid` 在发出 SIGTERM 后 5 秒对同一进程组 / 已收集的 pid 补发 SIGKILL（定时器 `unref()`），覆盖忽略优雅信号的 bash 子进程与 stdio MCP server；Windows 仍由 `taskkill /F /T` 一步强制
 - **内置工具 `web_fetch`（2026-10-20）**：抓取 http/https URL 的文本内容。SSRF 防护包括协议白名单、URL 内嵌凭据、`localhost` / `*.localhost`、IP 字面量与 DNS 解析结果的非公网判定（回环 / 私网 / link-local / 组播 / 保留段 / 云 metadata / IPv6 ULA 与内嵌 IPv4 形式），域名在建连时用自定义 `lookup` 复核（覆盖 DNS rebinding）；重定向手动跟随且每跳重校验；整体 20s 超时、2 MiB 上限、50,000 字符截断；非文本响应只返回元信息
 - **流式可靠性两处修复（2026-10-20）**：① `persistEvent` 的 parts 缓冲缺失时改为从 DB 回读，`message.end` 之后到达的 part / tool 事件不再把已落库的 `parts` 覆盖成单元素数组（消息不存在或已完成则丢弃该事件）；② claude-code adapter 的完整消息兜底只在整轮**没有**收到 partial text 时启用，`[tool_use, text]` 顺序下不再把已流出的文本整段重发一份。同时补跑完 F2 的 5 格 live 验证：SDK init 对坏 `command` 实际报 `failed`，健康 server 无假阳性，解析失败与持久化均符合预期
 - **外部 MCP 工具接入 P1**（`specs/15`）：custom adapter 自建 MCP 客户端层 —— 每个 `stream()` 并行 connect + listTools（stdio/sse/http）、工具清洗为 `mcp__*` 并合并进 OpenAI function list（内置优先、运行期 Map 路由）、`trust='ask'` 审批门复用现有队列、`mcp_server.unavailable` 上报建连失败、`finally` 关闭连接并杀 stdio 进程树。`CLAUDE.md §5.5` 的审批门适用范围已扩展为 Claude Code + custom
@@ -207,4 +208,4 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 
 ---
 
-*最后更新：2026-10-20 · 记入内置 `web_fetch`（含 SSRF 防护）。同日更早记入了流式可靠性两处修复与 F2 的 live 验证结果。2026-10-19 记入外部 MCP P1（custom 自建 MCP 客户端 + 审批门扩展到 custom）与外部 MCP 连接失败可见（F2：`mcp_server.unavailable` + 持久系统提示）。2026-10-18 记入了 shell 工具按身份识别（Windows 上 SDK 的 shell 工具是 `PowerShell`，此前按 `Bash` 字面量匹配导致黑名单与审批分类器整条失效）。2026-10-13 记入了 Claude Code adapter 的隔离启动（`settingSources: []` + `strictMcpConfig: true`）与 F1 修复（`partIndex` 归一，`src/server/part-slots.ts`）及两个相邻未修缺陷（`persistEvent` 空缓冲兜底、claude-code adapter 非流式回退重复渲染）。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*
+*最后更新：2026-10-20 · 记入 POSIX 子进程 SIGKILL 升级与内置 `web_fetch`（含 SSRF 防护）。同日更早记入了流式可靠性两处修复与 F2 的 live 验证结果。2026-10-19 记入外部 MCP P1（custom 自建 MCP 客户端 + 审批门扩展到 custom）与外部 MCP 连接失败可见（F2：`mcp_server.unavailable` + 持久系统提示）。2026-10-18 记入了 shell 工具按身份识别（Windows 上 SDK 的 shell 工具是 `PowerShell`，此前按 `Bash` 字面量匹配导致黑名单与审批分类器整条失效）。2026-10-13 记入了 Claude Code adapter 的隔离启动（`settingSources: []` + `strictMcpConfig: true`）与 F1 修复（`partIndex` 归一，`src/server/part-slots.ts`）及两个相邻未修缺陷（`persistEvent` 空缓冲兜底、claude-code adapter 非流式回退重复渲染）。改动较大后请同步本文件的「功能矩阵」与「当前现状」两节。*

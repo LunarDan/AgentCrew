@@ -133,7 +133,7 @@ const SHARED_BANNED: RegExp[] = [
 
 ## 进程清理
 
-**POSIX**：优先按进程组杀 —— `process.kill(-child.pid, signal)`（要求子进程以 `detached: true` 启动），拿不到 pid 时回退 `child.kill(signal)`。5 秒未退升级 `SIGKILL`（现状未实现升级，Phase 3 再补）。
+**POSIX**：优先按进程组杀 —— `process.kill(-child.pid, signal)`（要求子进程以 `detached: true` 启动），拿不到 pid 时回退 `child.kill(signal)`。若 5 秒后目标仍存活，对同一进程组 / pid 补发 `SIGKILL`（`killProcessTree` / `killProcessTreeByPid` 内统一实现；定时器 `unref()`，不阻止进程退出）。
 
 **Windows**：Node 的 `child.kill('SIGTERM')` 在 Windows 下等价于 `TerminateProcess`，**杀不到孙子进程**（如 `powershell → npm → node`，npm 退了但 node 留下）。因此走：
 
@@ -143,6 +143,9 @@ function killProcessTree(child: ChildProcess, platform: Platform, signal = 'SIGT
     spawn('taskkill', ['/F', '/T', '/PID', String(child.pid)], { windowsHide: true })
   } else if (typeof child.pid === 'number') {
     process.kill(-child.pid, signal)   // 进程组；ESRCH 等失败时回退 child.kill(signal)
+    if (signal !== 'SIGKILL') {
+      setTimeout(() => process.kill(-child.pid, 'SIGKILL'), 5000).unref()
+    }
   } else {
     child.kill(signal)
   }
