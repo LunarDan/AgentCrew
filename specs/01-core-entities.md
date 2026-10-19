@@ -144,7 +144,7 @@ type ArtifactType = 'web_app' | 'code_file' | 'diff' | 'document' | 'image' | 'p
 - `project` 的 content 仅记 workspace 内相对文件清单，文件本体在 workspace 磁盘
 
 **约束**：
-- 「修改一个 artifact」 = 创建新 Artifact 记录，`parentArtifactId` 指向旧版本，`version` 递增（**当前未实装写入新版本的工具/UI 路径**，详见 Spec 04 「版本链 TODO」）
+- 「修改一个 artifact」 = 创建新 Artifact 记录，`parentArtifactId` 指向旧版本，`version` 递增（三条写新版本的路径已实现，详见 Spec 04 「版本链 + 二次编辑」）
 - 删除 Conversation 级联删除其下所有 Artifact
 
 ---
@@ -210,7 +210,7 @@ type ToolResult =
 
 **约束**：
 - Tool 实现必须 honor `ctx.abortSignal`
-- `bash` 的命令在执行前必须通过黑名单校验（详见 CLAUDE.md §5.2；bash 工具目前 **TODO**，详见 Spec 07）
+- `bash` 的命令在执行前必须通过黑名单校验（详见 CLAUDE.md §5.2；实现见 Spec 07）
 
 ---
 
