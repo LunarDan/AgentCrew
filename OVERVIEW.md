@@ -67,7 +67,7 @@ L1 Persistence                          src/db/**（Drizzle+SQLite） + workspac
 | 平台抽象（Win/POSIX） | ✅ | shell 选择 · 多盘符 DirPicker · 子进程清理 |
 | Electron 桌面版 | ✅ | DMG / EXE 打包 · userData 路径迁移 |
 | 全局 API Key 设置面板 | ✅ | app_settings 单行表 · 三层 key 优先级 |
-| 移动端伴随 App | ⏳ | 响应式 Web 已适配;Capacitor 原生壳脚手架已建;手动配对（地址 + 设备 token）可用并能跨桌面重启;快照/会话/审批/提问/产物预览/停止运行中任务已接通;事件流（`/api/mobile/events` + 一次性 stream token）已实现,App 以事件触发刷新并保留轮询兜底;QR/一次性配对码未实现 |
+| 移动端伴随 App | ⏳ | 响应式 Web 已适配;Capacitor 原生壳脚手架已建;手动配对（地址 + 设备 token）可用并能跨桌面重启;快照/会话/审批/提问/产物预览与导出/停止运行中任务已接通;事件流（`/api/mobile/events` + 一次性 stream token）已实现,App 以事件触发刷新并保留轮询兜底;QR/一次性配对码未实现 |
 | 斜杠命令菜单 | ✅ | 输入 `/` 弹命令浮层（打开设置 / Agents 库等 UI 命令） |
 | 测试覆盖 | 🟡 | Vitest 纯函数（security / workspace-utils / dispatch-plan / artifact-content / ppt-export / ppt-theme / mock-adapter 编排契约）；Playwright **E2E 基建 + 核心 IM 流 + 产物预览/导出 + 群聊编排**（mock agent，见附录） |
 

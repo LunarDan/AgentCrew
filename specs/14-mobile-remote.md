@@ -300,7 +300,7 @@ GET  /api/mobile/artifacts/:id/export
 
 这些 API 可以复用现有 service，但 response DTO 要做移动端安全裁剪。
 
-**实现状态（2026-10-20）**：`GET /api/mobile/snapshot`、会话详情 / 消息发送 / 撤回 / 编辑 / 重新生成、`POST /api/mobile/pending-writes|pending-questions/:id`、`GET /api/mobile/artifacts/:id`、`POST /api/mobile/runs/:id/abort`、事件流（§6.3）均已实现（abort 在移动端状态页对运行中的 run 提供「停止」）。
+**实现状态（2026-10-20）**：`GET /api/mobile/snapshot`、会话详情 / 消息发送 / 撤回 / 编辑 / 重新生成、`POST /api/mobile/pending-writes|pending-questions/:id`、`GET /api/mobile/artifacts/:id`、`GET /api/mobile/artifacts/:id/export`、`POST /api/mobile/runs/:id/abort`、事件流（§6.3）均已实现（abort 在移动端状态页对运行中的 run 提供「停止」；导出与桌面共用 `src/server/artifact-export.ts`）。
 
 ---
 
