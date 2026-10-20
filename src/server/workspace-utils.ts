@@ -152,13 +152,20 @@ function getSensitiveSegments(): string[] {
  * 「随手填错」的坑挡掉。
  */
 export function isPathSafe(absPath: string): boolean {
-  const home = path.resolve(homedir())
-  const normalized = path.resolve(absPath)
+  const lexical = path.resolve(absPath)
 
-  // UNC 设备路径直接拒
-  if (IS_WIN && /^\\\\[?.]\\/.test(normalized)) return false
+  // UNC 设备路径直接拒（realpath 之前先按原始写法拦）
+  if (IS_WIN && /^\\\\[?.]\\/.test(lexical)) return false
   // 普通 UNC 网络路径（\\server\share）也暂拒
-  if (IS_WIN && normalized.startsWith('\\\\')) return false
+  if (IS_WIN && lexical.startsWith('\\\\')) return false
+
+  // 解析符号链接 / junction 后再判：词法路径可能只是敏感目录的别名（如 D:\docs → ~/.ssh）。
+  // 目标还不存在时沿祖先逐级 realpath，再接回剩余段 —— 否则「junction 下的新目录」会漏判。
+  const real = resolveRealish(lexical)
+  if (!real) return false
+
+  const home = canonicalizeOrSelf(homedir())
+  const normalized = real
 
   // 用户 home 自身不允许（agent 可以在 home 子目录里工作；纯等价比较，不含子路径）
   const homeKey = IS_WIN ? home.toLowerCase() : home
@@ -177,4 +184,29 @@ export function isPathSafe(absPath: string): boolean {
   }
 
   return true
+}
+
+function canonicalizeOrSelf(target: string): string {
+  try {
+    return realpathSync.native(path.resolve(target))
+  } catch {
+    return path.resolve(target)
+  }
+}
+
+/** 沿祖先链找第一个可 realpath 的目录，再把剩余段接回去；根都解析不了返回 null。 */
+function resolveRealish(target: string): string | null {
+  let current = path.resolve(target)
+  const rest: string[] = []
+  while (true) {
+    try {
+      const real = realpathSync.native(current)
+      return rest.length === 0 ? real : path.join(real, ...rest)
+    } catch {
+      const parent = path.dirname(current)
+      if (parent === current) return null
+      rest.unshift(path.basename(current))
+      current = parent
+    }
+  }
 }

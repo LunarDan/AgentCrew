@@ -171,7 +171,32 @@ describe('isPathSafe', () => {
   })
 
   it('allows ordinary project directories', () => {
-    expect(isPathSafe(path.join(homedir(), 'agenthub-project'))).toBe(true)
+    // 不依赖某个固定目录是否真实存在：存在的用 tmp 树，不存在的走祖先 realpath 分支。
+    const root = mkdtempSync(path.join(tmpdir(), 'agenthub-pathsafe-'))
+    try {
+      const project = path.join(root, 'agenthub-project')
+      mkdirSync(project)
+      expect(isPathSafe(project)).toBe(true)
+      expect(isPathSafe(path.join(project, 'not-created-yet'))).toBe(true)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a link or junction that resolves into a sensitive directory', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'agenthub-pathsafe-link-'))
+    try {
+      const link = path.join(root, 'docs')
+      const target = path.join(homedir(), '.ssh')
+      try {
+        symlinkSync(target, link, 'junction')
+      } catch {
+        return // 无权限建链接的环境跳过
+      }
+      expect(isPathSafe(link)).toBe(false)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it.runIf(process.platform === 'win32')('rejects Windows system and UNC paths', () => {
