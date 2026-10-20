@@ -61,8 +61,15 @@ export async function GET(_req: Request, ctx: RouteContext) {
 
 const PostBody = z.object({
   content: z.unknown(),
-  title: z.string().optional(),
+  title: z.string().max(200).optional(),
 })
+
+/**
+ * 产物内容没有字段级上限（PPT 合法字符串可到 100 000 字符），但整包不能无界：
+ * `req.json()` 会把整个 body 读进内存，超大包在 zod 之前就已经占满堆。
+ * 20 MB 足够放下任何合法的 web_app / PPT，同时挡住误传的二进制或压缩炸弹式文本。
+ */
+const MAX_ARTIFACT_BODY_BYTES = 20 * 1024 * 1024
 
 /**
  * POST /api/artifacts/:id/versions
@@ -73,6 +80,10 @@ const PostBody = z.object({
 export async function POST(req: NextRequest, ctx: RouteContext) {
   const rejected = rejectCrossOriginWrite(req)
   if (rejected) return rejected
+  const contentLength = Number(req.headers.get('content-length') ?? '0')
+  if (Number.isFinite(contentLength) && contentLength > MAX_ARTIFACT_BODY_BYTES) {
+    return NextResponse.json({ error: 'Request body too large' }, { status: 413 })
+  }
   const { id } = await ctx.params
   const parsed = PostBody.safeParse(await req.json().catch(() => null))
   if (!parsed.success) {
