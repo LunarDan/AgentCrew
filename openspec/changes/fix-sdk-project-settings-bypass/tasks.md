@@ -56,6 +56,7 @@
   - Both decoys absent: the parent-directory `CLAUDE.md` (`SENTINEL-PARENT-DECOY-4412`) and `.claude/rules/decoy.md` (`SENTINEL-RULES-DECOY-9903`).
 - [ ] 4.5 Approval semantics unchanged (same conversation silent after approval, new conversation prompts).
   - **Not covered by this run.** 4.1–4.4 exercised the *reject* path only (register → card → reject → deny → the model reads the rejection and stops; it did not retry). The "approve ⇒ silent for the rest of the conversation, and a fresh conversation prompts again" half needs an approve path plus a third conversation, which is outside the two-cell scope this run was narrowed to. The approval path is visibly intact; this item guards its memory semantics.
+  - **Update (2026-10-20)**: the memory semantics are now covered by `src/server/mcp-approvals.test.ts` — same conversation + same tool is silent after `rememberApproval`, a different conversation prompts again, and a different tool in the same conversation prompts again. Still not re-run live with a real SDK, so the item stays open.
 - [x] 4.6 Record the results here in the format of `add-external-mcp/tasks.md §9`.
 
 ### Findings from the §4 live verification (2026-10-13)

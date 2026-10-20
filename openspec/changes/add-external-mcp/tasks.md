@@ -96,7 +96,9 @@
   - Verified: with `trust='always'` the tool ran immediately and no pending call was ever registered. `trust` was restored to `ask` afterwards.
 - [x] 9.10 Confirm a denied approval returns an error result to the model and the run continues.
   - Verified: rejecting produced `tool.result` with `isError: true` carrying the rejection text, the model received it, replied accordingly, and the run ended `complete`. The model did not retry.
-- [ ] 9.11 Known limitation (deferred, not fixed): the Claude Code adapter starts the SDK with `settingSources: ['project']`, so a `.claude/settings.json` inside the workspace can pre-allow `mcp__*` via `permissions.allow` and `canUseTool` is never consulted. Mitigation (drop `settingSources`, or write-protect `.claude/`) is P2.
+- [x] 9.11 Known limitation (deferred, not fixed): the Claude Code adapter starts the SDK with `settingSources: ['project']`, so a `.claude/settings.json` inside the workspace can pre-allow `mcp__*` via `permissions.allow` and `canUseTool` is never consulted. Mitigation (drop `settingSources`, or write-protect `.claude/`) is P2.
+
+> **Status (2026-10-20): closed.** The follow-up below already landed the fix; the checkbox is now ticked so the remaining-task count reflects reality. Original text left as written.
 
 > **Follow-up (2026-10-13): fixed.** The mitigation landed as "drop the settings sources", not "write-protect `.claude/`" — bash's cwd is the workspace root, so `mkdir -p .claude && echo '{}' > .claude/settings.json` trips neither the command blacklist nor the approval classifier, and a `local`-mode workspace is a real repository that may already contain the file. The adapter now starts with `settingSources: []` + `strictMcpConfig: true` and reads `<effectiveCwd>/CLAUDE.md` into the system prompt itself. That also closed two neighbours of the same option: project hooks (host command execution, outside `canUseTool`) and the workspace `.mcp.json` (one file in the workspace could make the CLI spawn arbitrary MCP servers). See `openspec/changes/fix-sdk-project-settings-bypass/`. Item 9.11's original text is left exactly as written.
 
