@@ -44,6 +44,8 @@ export function App() {
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null)
 
   const selectedConversationRef = useRef<string | null>(null)
+  // 异步回调（配对 / 操作）里要读「当前」连接，而不是发起请求那一刻的闭包
+  const connectionRef = useRef(connection)
   const snapshotSeq = useRef(0)
   const artifactSeq = useRef(0)
   const detailSeq = useRef(0)
@@ -82,9 +84,15 @@ export function App() {
   /** 所有快照刷新都走这里：只接受最后发出的那次响应，避免旧响应覆盖新状态。 */
   const loadSnapshot = useCallback(async () => {
     const seq = ++snapshotSeq.current
-    const next = await api.getSnapshot()
-    if (seq === snapshotSeq.current) applySnapshot(next)
-    return next
+    try {
+      const next = await api.getSnapshot()
+      if (seq === snapshotSeq.current) applySnapshot(next)
+      return next
+    } catch (err) {
+      // 旧 host 的失败不能覆盖新 host 的连接状态：换 host 时 seq 已变，静默丢弃
+      if (seq !== snapshotSeq.current) return null
+      throw err
+    }
   }, [api, applySnapshot])
 
   /** 轮询 / SSE / 手动刷新 / 操作后刷新共用同一个在途请求。 */
@@ -118,6 +126,7 @@ export function App() {
   }, [])
 
   useEffect(() => {
+    connectionRef.current = connection
     saveConnection(connection)
   }, [connection])
 
@@ -257,9 +266,13 @@ export function App() {
 
   /** 操作后的详情刷新是可选的：失败不能把「已经成功」说成失败。 */
   async function refreshDetailBestEffort(conversationId: string): Promise<void> {
+    const seq = detailSeq.current
     try {
       const detail = await api.getConversation(conversationId)
-      if (selectedConversationRef.current === conversationId) setConversationDetail(detail)
+      // 期间可能已有更新的轮询 / 导航响应落地：旧响应不能把新内容盖回去
+      if (selectedConversationRef.current === conversationId && seq === detailSeq.current) {
+        setConversationDetail(detail)
+      }
     } catch {
       // 周期轮询 / 事件流会补上
     }
@@ -435,9 +448,15 @@ export function App() {
 
   /** 一次性配对码换设备 token；返回 null 表示成功，否则是给用户看的错误文案。 */
   async function pairDeviceFromMobile(code: string): Promise<string | null> {
+    const targetBaseUrl = connection.baseUrl
     try {
-      const result = await pairMobileDevice(connection.baseUrl, code, defaultMobileDeviceName())
-      updateConnection({ ...connection, deviceToken: result.deviceToken })
+      const result = await pairMobileDevice(targetBaseUrl, code, defaultMobileDeviceName())
+      // 配对期间用户可能改了地址：这份 token 属于旧 host，不能写进新配置（updateConnection
+      // 也会因 host 变化清空 token），更不能谎报「已填入」
+      if (normalizeBaseUrl(connectionRef.current.baseUrl) !== normalizeBaseUrl(targetBaseUrl)) {
+        return '配对成功，但地址在配对期间被修改，token 未填入。请确认地址后重新配对。'
+      }
+      updateConnection({ ...connectionRef.current, deviceToken: result.deviceToken })
       return null
     } catch (err) {
       return err instanceof Error ? err.message : String(err)
