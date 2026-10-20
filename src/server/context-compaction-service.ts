@@ -156,11 +156,11 @@ export async function compactConversation(
     if ((currentLatest?.id ?? null) !== (latest?.id ?? null)) {
       throw new Error('Compaction is already in progress for this conversation')
     }
-    // 摘要生成期间历史被清空 / 撤回：不能再把已删除的内容写回上下文。
+    // 摘要生成期间历史被清空 / 撤回 / 编辑重发：不能再把已删除的内容写回上下文。
+    // 只比总条数不够 —— 删一条再加一条时总数不变，但被总结的那条已经没了。
     if (
-      !sqlite
-        .prepare('SELECT 1 FROM messages WHERE id = ? AND conversation_id = ?')
-        .get(coveredUntil.id, conversationId) ||
+      countExistingMessages(conversationId, rendered.includedMessages.map((m) => m.id)) !==
+        rendered.includedMessages.length ||
       countConversationMessages(conversationId) < messageCountAtSnapshot
     ) {
       throw new Error('History changed during compaction; please retry')
@@ -195,6 +195,24 @@ function countConversationMessages(conversationId: string): number {
     .prepare('SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ?')
     .get(conversationId) as { n: number }
   return row.n
+}
+
+/** 分块统计仍存在的消息 id，避开 SQLite 的绑定参数上限。 */
+function countExistingMessages(conversationId: string, ids: string[]): number {
+  const CHUNK = 500
+  let found = 0
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK)
+    const row = sqlite
+      .prepare(
+        `SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND id IN (${chunk
+          .map(() => '?')
+          .join(',')})`,
+      )
+      .get(conversationId, ...chunk) as { n: number }
+    found += row.n
+  }
+  return found
 }
 
 /**
