@@ -27,6 +27,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     return NextResponse.json(result)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    return NextResponse.json({ error: message }, { status: 400 })
+    const status = message.includes('not found') ? 404 : 400
+    return NextResponse.json({ error: message }, { status })
   }
 }

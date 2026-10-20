@@ -62,7 +62,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     return NextResponse.json({ server: toMcpServerView(server) })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    return NextResponse.json({ error: message }, { status: 400 })
+    const status = message.includes('not found') ? 404 : 400
+    return NextResponse.json({ error: message }, { status })
   }
 }
 
@@ -75,6 +76,7 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
     return NextResponse.json({ ok: true })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    return NextResponse.json({ error: message }, { status: 400 })
+    const status = message.includes('not found') ? 404 : 400
+    return NextResponse.json({ error: message }, { status })
   }
 }

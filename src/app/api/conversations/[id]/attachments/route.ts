@@ -41,6 +41,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     return NextResponse.json({ attachment }, { status: 201 })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    // 落盘 / 入库失败是服务端问题，不能伪装成 400 把内部错误串回给调用方
+    if (message === 'Failed to store attachment') {
+      return NextResponse.json({ error: message }, { status: 500 })
+    }
     return NextResponse.json({ error: message }, { status: 400 })
   }
 }

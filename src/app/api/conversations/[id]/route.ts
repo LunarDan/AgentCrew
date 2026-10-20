@@ -92,6 +92,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     return NextResponse.json({ conversation })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    return NextResponse.json({ error: message }, { status: 400 })
+    const status = message.startsWith('Conversation not found') ? 404 : 400
+    return NextResponse.json({ error: message }, { status })
   }
 }
