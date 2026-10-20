@@ -52,8 +52,10 @@ function getHighlighter(): Promise<Highlighter> {
 function resolveLang(raw: string | null | undefined): BundledLanguage | null {
   if (!raw) return null
   const k = raw.toLowerCase().trim()
-  if (k in LANG_ALIAS) return LANG_ALIAS[k]
-  if (k in bundledLanguages) return k as BundledLanguage
+  // 用 own-property 判断：LLM 写的围栏语言可能是 __proto__ / constructor，
+  // `in` 会把原型链上的对象/函数当成语言名返回。
+  if (Object.prototype.hasOwnProperty.call(LANG_ALIAS, k)) return LANG_ALIAS[k]
+  if (Object.prototype.hasOwnProperty.call(bundledLanguages, k)) return k as BundledLanguage
   return null
 }
 

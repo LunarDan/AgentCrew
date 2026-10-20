@@ -23,4 +23,11 @@ describe('tool display helpers', () => {
     expect(isBashToolName('mcp__agenthub__bash')).toBe(true)
     expect(isBashToolName('read_attachment')).toBe(false)
   })
+
+  it('does not resolve prototype-chain keys to non-string labels', () => {
+    // 外部 MCP server 可以用 __proto__ / constructor 当工具名（LLM 输出不可信）
+    expect(getToolDisplayName('__proto__')).toBe('__proto__')
+    expect(getToolDisplayName('constructor')).toBe('constructor')
+    expect(typeof getToolDisplayName('mcp__x__toString')).toBe('string')
+  })
 })

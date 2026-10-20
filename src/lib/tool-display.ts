@@ -36,7 +36,11 @@ export function getToolDisplayName(toolName: string): string {
   const agentHubName = findAgentHubToolName(lower)
 
   if (agentHubName) return AGENTHUB_TOOL_LABELS[agentHubName]
-  return EXTERNAL_TOOL_LABELS[lower] ?? normalized
+  // 外部 MCP 工具名可以是 __proto__ / constructor；直接下标会拿到原型上的对象 / 函数
+  if (Object.prototype.hasOwnProperty.call(EXTERNAL_TOOL_LABELS, lower)) {
+    return EXTERNAL_TOOL_LABELS[lower]
+  }
+  return normalized
 }
 
 export function isBashToolName(toolName: string): boolean {
@@ -45,7 +49,7 @@ export function isBashToolName(toolName: string): boolean {
 }
 
 function findAgentHubToolName(toolName: string): keyof typeof AGENTHUB_TOOL_LABELS | null {
-  if (toolName in AGENTHUB_TOOL_LABELS) {
+  if (Object.prototype.hasOwnProperty.call(AGENTHUB_TOOL_LABELS, toolName)) {
     return toolName as keyof typeof AGENTHUB_TOOL_LABELS
   }
 
