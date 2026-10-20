@@ -55,12 +55,15 @@ export interface AppSettingsPatch {
 }
 
 // 单行表的「读-合并-整行 upsert」必须串行：设置面板与 token 轮换并发保存时，
-// 后写者会用自己读到的旧快照覆盖对方的字段。
-let settingsWriteQueue: Promise<unknown> = Promise.resolve()
-
+// 后写者会用自己读到的旧快照覆盖对方的字段。dev 下模块会热重载，队列必须挂在
+// globalThis 上，否则新模块实例带着空队列并发写同一行。
+const globalForSettings = globalThis as unknown as {
+  __agenthubSettingsWriteQueue?: Promise<unknown>
+}
 function withSettingsWriteLock<T>(fn: () => Promise<T>): Promise<T> {
-  const run = settingsWriteQueue.then(fn, fn)
-  settingsWriteQueue = run.catch(() => {})
+  const previous = globalForSettings.__agenthubSettingsWriteQueue ?? Promise.resolve()
+  const run = previous.then(fn, fn)
+  globalForSettings.__agenthubSettingsWriteQueue = run.catch(() => {})
   return run
 }
 
@@ -105,16 +108,18 @@ async function updateAppSettingsLocked(patch: AppSettingsPatch): Promise<AppSett
       },
     })
 
-  syncCompanionRuntime(next)
+  try {
+    syncCompanionRuntime(next)
+  } catch (err) {
+    // 行已提交：配置文件写失败不能让调用方以为保存没发生（重试会再写一次库）。
+    console.error('[settings] failed to sync companion runtime', err)
+  }
   return next
 }
 
+/** 只换 token：companionMode 必须由锁内的当前行决定，不能在这里读旧快照再写回。 */
 export async function regenerateMobileDeviceToken(): Promise<AppSettingsRow> {
-  const settings = await updateAppSettings({
-    mobileDeviceToken: newMobileDeviceToken(),
-    companionMode: (await getAppSettings()).companionMode,
-  })
-  return settings
+  return updateAppSettings({ mobileDeviceToken: newMobileDeviceToken() })
 }
 
 export function syncCompanionRuntime(settings: AppSettingsRow): void {
