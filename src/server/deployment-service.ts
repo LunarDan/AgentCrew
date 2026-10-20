@@ -128,7 +128,7 @@ export function createLocalStaticDeployment(
       entry: sourceEntry,
     })
     writeTextFileWithin(deploymentDir, RUNTIME_ENTRY, runtimeHtml)
-    writeTextFileWithin(deploymentDir, MANIFEST_PATH, JSON.stringify(manifest, null, 2))
+    writeManifestWithin(deploymentDir, manifest)
   } catch (error) {
     cleanupPartialDeployment(deploymentDir, deploymentsRoot)
     throw error
@@ -200,7 +200,7 @@ export function createWorkspaceStaticDeployment(
       const runtimeHtml = readFileSync(path.join(args.sourceDir, ...sourceEntry.split('/')))
       writeBinaryFileWithin(deploymentDir, RUNTIME_ENTRY, runtimeHtml)
     }
-    writeTextFileWithin(deploymentDir, MANIFEST_PATH, JSON.stringify(manifest, null, 2))
+    writeManifestWithin(deploymentDir, manifest)
   } catch (error) {
     cleanupPartialDeployment(deploymentDir, deploymentsRoot)
     throw error
@@ -296,18 +296,33 @@ export function publishDeploymentToStaticDirectory(
       }
       throw err
     }
-    if (movedAside) rmSync(backupDir, { recursive: true, force: true })
+
+    // 记下外部发布位置：删产物 / 会话时要把公开目录一起删，否则旧站点会一直可访问。
+    // 必须在删备份之前写；写不进去就撤回这次替换，否则「报失败但站点已上线且无人记录」。
+    try {
+      writeManifestWithin(
+        deploymentDir,
+        { ...manifest, publishPath: publishDir, publishRoot },
+      )
+    } catch (err) {
+      try {
+        renameSync(publishDir, tempDir)
+        if (movedAside) renameSync(backupDir, publishDir)
+      } catch (rollbackErr) {
+        console.error('[deployment] failed to roll back publish after manifest error', rollbackErr)
+      }
+      throw err
+    }
+    if (movedAside) {
+      // 站点已经上线、manifest 也已记录：备份删不掉只是留下一个隐藏目录，不能报发布失败。
+      if (!rmDirBestEffort(backupDir)) {
+        console.warn(`[deployment] failed to remove publish backup ${backupDir}`)
+      }
+    }
   } catch (err) {
     rmSync(tempDir, { recursive: true, force: true })
     throw err
   }
-
-  // 记下外部发布位置：删产物 / 会话时要把公开目录一起删，否则旧站点会一直可访问。
-  writeTextFileWithin(
-    deploymentDir,
-    MANIFEST_PATH,
-    JSON.stringify({ ...manifest, publishPath: publishDir, publishRoot }, null, 2),
-  )
 
   return {
     publicUrl: publicDeploymentUrl(target.publicBaseUrl, deploymentId),
@@ -483,10 +498,8 @@ function deleteMatchingDeployments(
     const manifest = readDeploymentManifest(entry.name, options)
     if (!manifest || !matches(manifest)) continue
     removePublishedCopy(manifest, entry.name)
-    try {
-      rmSync(getDeploymentDir(entry.name, options), { recursive: true, force: true })
-    } catch (err) {
-      console.warn(`[deployment] failed to remove deployment dir ${entry.name}`, err)
+    if (!rmDirBestEffort(getDeploymentDir(entry.name, options))) {
+      console.warn(`[deployment] failed to remove deployment dir ${entry.name}`)
     }
   }
 }
@@ -498,10 +511,8 @@ function removePublishedCopy(manifest: DeploymentManifest, deploymentId: string)
   if (!publishedPath || !publishRoot) return
   if (path.basename(publishedPath) !== deploymentId) return
   if (!isPathWithin(publishedPath, publishRoot)) return
-  try {
-    rmSync(publishedPath, { recursive: true, force: true })
-  } catch (err) {
-    console.warn(`[deployment] failed to remove published copy ${publishedPath}`, err)
+  if (!rmDirBestEffort(publishedPath)) {
+    console.warn(`[deployment] failed to remove published copy ${publishedPath}`)
   }
 }
 
@@ -560,6 +571,40 @@ function writeTextFileWithin(root: string, relativePath: string, body: string): 
   const absPath = safeJoinDeploymentPath(root, relativePath)
   mkdirSync(path.dirname(absPath), { recursive: true })
   writeFileSync(absPath, body, 'utf8')
+}
+
+/**
+ * manifest 是清理 deployments 的唯一线索：直接覆写时崩溃 / 磁盘满会留下半截 JSON，
+ * 之后这个目录既匹配不到删除条件、也读不出外部发布路径。temp + rename 保证原子性。
+ */
+function writeManifestWithin(root: string, manifest: object): void {
+  const absPath = safeJoinDeploymentPath(root, MANIFEST_PATH)
+  mkdirSync(path.dirname(absPath), { recursive: true })
+  const tempPath = `${absPath}.tmp-${process.pid}-${Date.now()}`
+  writeFileSync(tempPath, JSON.stringify(manifest, null, 2), 'utf8')
+  try {
+    renameSync(tempPath, absPath)
+  } catch (err) {
+    rmSync(tempPath, { force: true })
+    throw err
+  }
+}
+
+const RETRYABLE_RM_CODES = new Set(['EBUSY', 'EPERM', 'ENOTEMPTY'])
+
+/** Windows 上 AV / 索引器会短暂占用目录：重试 3 次（100/300ms）再放弃。 */
+function rmDirBestEffort(target: string): boolean {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      rmSync(target, { recursive: true, force: true })
+      return true
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code ?? ''
+      if (!RETRYABLE_RM_CODES.has(code) || attempt === 3) return false
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100 * Math.pow(3, attempt - 1))
+    }
+  }
+  return false
 }
 
 function writeBinaryFileWithin(root: string, relativePath: string, body: Buffer): void {
