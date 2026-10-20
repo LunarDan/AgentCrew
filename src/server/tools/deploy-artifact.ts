@@ -5,6 +5,7 @@ import { db, schema } from '@/db/client'
 import { artifactPreviewPath } from '@/lib/artifact-preview'
 import {
   createLocalStaticDeployment,
+  describeDeploymentError,
   publishDeploymentToStaticDirectory,
 } from '@/server/deployment-service'
 import { newDeploymentId } from '@/server/ids'
@@ -81,10 +82,11 @@ export async function deployArtifactForConversation(
     })
     return maybePublishExternally(local)
   } catch (error) {
+    console.error('[deploy] artifact deployment failed', error)
     return failedDeployment(
       artifact.id,
       artifact.title,
-      error instanceof Error ? error.message : 'Failed to create deployment',
+      describeDeploymentError(error, 'Failed to create deployment'),
       artifact.version,
     )
   }

@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm'
 import { z } from 'zod'
 
 import { db, schema } from '@/db/client'
-import { createWorkspaceStaticDeployment } from '@/server/deployment-service'
+import { createWorkspaceStaticDeployment, describeDeploymentError } from '@/server/deployment-service'
 import { newDeploymentId } from '@/server/ids'
 import { assertPathWithinWorkspace, getEffectiveCwd } from '@/server/workspace-utils'
 import type { DeployStatusRecord } from '@/shared/types'
@@ -90,9 +90,10 @@ export async function deployWorkspaceForConversation(
     })
     return maybePublishExternally(local)
   } catch (error) {
+    console.error('[deploy] workspace deployment failed', error)
     return failedWorkspaceDeployment(
       workspacePath,
-      error instanceof Error ? error.message : 'Failed to create workspace deployment',
+      describeDeploymentError(error, 'Failed to create workspace deployment'),
       title,
     )
   }
