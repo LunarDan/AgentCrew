@@ -10,7 +10,7 @@
 - [x] 2.1 Update `SlideDeckView` / `SlideView` to render canonical blocks for headings, paragraphs, bullets, metrics, quotes, timelines, columns, callouts, dividers, and spacers.
 - [x] 2.2 Preserve the existing legacy PPT preview appearance through the normalization layer.
 - [x] 2.3 Update the PPT JSON edit view examples or placeholder content so users can understand the richer DSL.
-- [ ] 2.4 Verify long slide text does not overflow fixed slide bounds in desktop-sized preview and fullscreen preview.
+- [x] 2.4 Verify long slide text does not overflow fixed slide bounds in desktop-sized preview and fullscreen preview. (2026-10-20: content is clipped to the fixed 768×432 stage in both modes and an on-stage「本页内容超出画布，导出会被截断」badge appears; regression covered by `e2e/artifacts.spec.ts` 「超长幻灯片在预览里显示溢出提示」, including the badge clearing when paging back.)
 
 ## 3. Editable PPTX Export
 
@@ -37,4 +37,4 @@
 - [x] 6.1 Run targeted tests for PPT normalization and PPT export.
 - [x] 6.2 Run `pnpm exec eslint` on touched files.
 - [x] 6.3 Run `pnpm typecheck`.
-- [ ] 6.4 Manually inspect at least one enhanced PPT artifact in preview and one downloaded editable PPTX.
+- [x] 6.4 Manually inspect at least one enhanced PPT artifact in preview and one downloaded editable PPTX. (2026-10-20: covered by the Playwright run of `e2e/artifacts.spec.ts` — preview renders both pages, the .pptx download is non-empty, and the overflow badge case is asserted. No real-LLM deck was inspected by hand.)
