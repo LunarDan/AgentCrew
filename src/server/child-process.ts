@@ -10,6 +10,28 @@ import { spawnSync, type ChildProcess } from 'node:child_process'
 import type { Platform } from '@/server/platform'
 
 const FORCE_KILL_DELAY_MS = 5_000
+/**
+ * taskkill 走 Windows 的进程管理接口；该接口偶尔会整体卡住（实测一次 /F /T 花 61 秒）。
+ * 同步调用会阻塞整个事件循环，所以给它一个上限，超时后退回直接结束目标进程。
+ */
+const TASKKILL_TIMEOUT_MS = 5_000
+
+function taskkillTree(pid: number): void {
+  const result = spawnSync('taskkill', ['/F', '/T', '/PID', String(pid)], {
+    windowsHide: true,
+    stdio: 'ignore',
+    timeout: TASKKILL_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
+  })
+  if (result.error || result.status !== 0) {
+    // taskkill 不可用或超时：至少把目标进程结束掉，孙进程清理退化为尽力而为
+    try {
+      process.kill(pid, 'SIGKILL')
+    } catch {
+      // 已退出
+    }
+  }
+}
 
 /** POSIX 进程可能在收到 SIGTERM 后继续忽略；5 秒后对同一目标补 SIGKILL。 */
 function scheduleForceKill(pids: number[], useProcessGroup: boolean): void {
@@ -34,10 +56,7 @@ export function killProcessTree(
 ): void {
   if (platform === 'windows' && typeof child.pid === 'number') {
     // 同步执行：taskkill 未跑完就继续关闭 stdio / 让父进程退出，会让 /T 拿不到完整进程树。
-    spawnSync('taskkill', ['/F', '/T', '/PID', String(child.pid)], {
-      windowsHide: true,
-      stdio: 'ignore',
-    })
+    taskkillTree(child.pid)
     return
   }
   if (typeof child.pid === 'number') {
@@ -70,10 +89,7 @@ export function killProcessTreeByPid(
 
   if (platform === 'windows') {
     // 同步执行：调用方随后就会 close transport，不能让 taskkill 与父进程退出赛跑。
-    spawnSync('taskkill', ['/F', '/T', '/PID', String(pid)], {
-      windowsHide: true,
-      stdio: 'ignore',
-    })
+    taskkillTree(pid)
     return
   }
 
