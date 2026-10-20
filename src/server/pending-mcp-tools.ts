@@ -77,6 +77,13 @@ class PendingMcpToolsStore {
     this.finalize(id, false)
   }
 
+  /** 运行结束时的兜底清理：任何收尾路径都不该把审批条目永久留在内存里。 */
+  cancelByRun(runId: string): void {
+    for (const [id, entry] of [...this.map]) {
+      if (entry.call.runId === runId) this.cancel(id)
+    }
+  }
+
   private finalize(id: string, approved: boolean): void {
     const entry = this.map.get(id)
     if (!entry) return

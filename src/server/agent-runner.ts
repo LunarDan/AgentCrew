@@ -65,6 +65,7 @@ import { resolveMcpServersForAgent } from './mcp-server-service'
 import { translatePartIndex, type PartSlotsByMessage } from './part-slots'
 import { pendingBashCommands } from './pending-bash-commands'
 import { pendingDispatchPlans, type PlanReviewOutcome } from './pending-dispatch-plans'
+import { pendingMcpTools } from './pending-mcp-tools'
 import { pendingQuestions } from './pending-questions'
 import { pendingWrites } from './pending-writes'
 import { buildProjectFiles } from './project-artifact'
@@ -879,6 +880,14 @@ async function executeDag(
         }
         // 整个 run 被中止才算致命；子任务本身抛错降级成 failed，交给依赖跳过与重规划处理
         if (ctx.signal.aborted) {
+          // 已成功的兄弟任务不会进入 results，finally 找不到它们 —— 这里立即释放证据。
+          for (const sibling of settled) {
+            if (sibling.status !== 'fulfilled') continue
+            for (const childRunId of getDispatchResultRunIds(sibling.value)) {
+              clearFileWrites(childRunId)
+              clearRunToolEvidence(childRunId)
+            }
+          }
           throw outcome.reason instanceof Error ? outcome.reason : new Error(String(outcome.reason))
         }
         const failed: DispatchTaskResult = {
@@ -1987,6 +1996,7 @@ async function finalize(
   pendingQuestions.cancelByRun(runId)
   pendingBashCommands.cancelByRun(runId)
   pendingDispatchPlans.cancelByRun(runId)
+  pendingMcpTools.cancelByRun(runId)
 
   if (status === 'failed' || status === 'aborted') {
     await persistUnresolvedToolFailures(runId, args.conversationId, status, error, finishedAt)
