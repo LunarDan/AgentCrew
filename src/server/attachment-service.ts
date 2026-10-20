@@ -34,7 +34,13 @@ export async function uploadAttachment(args: UploadFileArgs): Promise<Attachment
   if (!workspace) throw new Error(`Workspace not found for conversation: ${args.conversationId}`)
 
   const uploadDir = path.join(workspace.rootPath, 'uploads')
-  mkdirSync(uploadDir, { recursive: true })
+  try {
+    mkdirSync(uploadDir, { recursive: true })
+  } catch (err) {
+    // 真实 errno 带宿主绝对路径；调用方只拿得到通用文案
+    console.error('[attachments] create upload dir failed', err)
+    throw new Error('Failed to store attachment')
+  }
 
   const id = newAttachmentId()
   const ext = sanitizeExt(args.file.name)
@@ -48,7 +54,12 @@ export async function uploadAttachment(args: UploadFileArgs): Promise<Attachment
   }
 
   const buffer = Buffer.from(await args.file.arrayBuffer())
-  writeFileSync(absPath, buffer)
+  try {
+    writeFileSync(absPath, buffer)
+  } catch (err) {
+    console.error('[attachments] write failed', err)
+    throw new Error('Failed to store attachment')
+  }
 
   const mimeType = args.file.type || guessMime(ext)
   const kind = mimeType.startsWith('image/') ? 'image' : 'file'
