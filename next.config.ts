@@ -1,6 +1,12 @@
 import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
+  // 用户 home 下若有一个无关的 pnpm-lock.yaml，Next 会把它当 workspace root，
+  // 于是每次启动都告警、模块解析也跑到仓库外。仓库自己有 pnpm-workspace.yaml，钉死 root。
+  turbopack: {
+    root: __dirname,
+  },
+
   // Electron 打包用：生成 .next/standalone 自包含 server（详见 Spec 12 §2 / §6）
   output: 'standalone',
 
