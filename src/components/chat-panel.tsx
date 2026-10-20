@@ -83,10 +83,14 @@ export function ChatPanel() {
     const pruneCandidates = Object.values(useAppStore.getState().dispatchesByRunId)
       .map((d) => d.pendingPlanId)
       .filter((id): id is string => !!id)
+    // 请求发出之后本地审批的卡片不能被这份快照复活的判定依据
+    const snapshotStartedAt = Date.now()
     let cancelled = false
     fetchPendingDispatchPlans(convId)
       .then((list) => {
-        if (!cancelled) setPendingDispatchPlansForConversation(convId, list, pruneCandidates)
+        if (!cancelled) {
+          setPendingDispatchPlansForConversation(convId, list, pruneCandidates, snapshotStartedAt)
+        }
       })
       .catch((err) => {
         console.warn('[ChatPanel] fetch pending dispatch plans failed', err)

@@ -117,6 +117,51 @@ describe('app-store dispatch plan binding', () => {
     expect(state.dispatchesByRunId.run_orch?.messageId).toBe('msg_plan')
     expect(selectDispatchForMessage(state, 'msg_plan')?.pendingPlanId).toBe('pdp_1')
   })
+
+  it('does not resurrect a plan that was resolved while the snapshot was in flight', () => {
+    useAppStore.getState().applyEvent({
+      type: 'dispatch.plan.pending',
+      conversationId: 'conv_1',
+      timestamp: 1,
+      pendingPlan: {
+        id: 'pdp_1',
+        conversationId: 'conv_1',
+        agentId: 'ag_orchestrator',
+        runId: 'run_orch',
+        plan: PLAN,
+        createdAt: 1,
+      },
+    })
+    useAppStore.getState().applyEvent({
+      type: 'dispatch.plan.resolved',
+      conversationId: 'conv_1',
+      timestamp: 50,
+      runId: 'run_orch',
+      pendingId: 'pdp_1',
+      approved: true,
+    })
+
+    // 快照在审批之前读出，响应在审批之后才到
+    useAppStore.getState().setPendingDispatchPlansForConversation(
+      'conv_1',
+      [
+        {
+          id: 'pdp_1',
+          conversationId: 'conv_1',
+          agentId: 'ag_orchestrator',
+          runId: 'run_orch',
+          plan: PLAN,
+          createdAt: 1,
+        },
+      ],
+      ['pdp_1'],
+      40,
+    )
+
+    const dispatch = useAppStore.getState().dispatchesByRunId.run_orch
+    expect(dispatch?.reviewStatus).toBe('approved')
+    expect(dispatch?.pendingPlanId).toBeUndefined()
+  })
 })
 
 describe('app-store run failure cleanup', () => {
@@ -272,6 +317,76 @@ describe('app-store message snapshot reconciliation', () => {
       'temp_1',
       'msg_streaming',
     ])
+  })
+
+  it('prunes an SSE-created run whose run.end was lost', () => {
+    useAppStore.getState().applyEvent({
+      type: 'run.start',
+      conversationId: 'conv_1',
+      timestamp: 100,
+      runId: 'run_lost_end',
+      agentId: 'ag_orchestrator',
+      triggerMessageId: 'msg_trigger',
+    })
+    // 快照在请求发出后才返回，里面已经没有这个 run 的流式消息
+    useAppStore.getState().setMessagesForConversation('conv_1', [], 200)
+    expect(useAppStore.getState().runsByConv.conv_1?.run_lost_end).toBeUndefined()
+  })
+
+  it('keeps a run that started after the snapshot request was issued', () => {
+    useAppStore.getState().applyEvent({
+      type: 'run.start',
+      conversationId: 'conv_1',
+      timestamp: 300,
+      runId: 'run_in_flight',
+      agentId: 'ag_orchestrator',
+      triggerMessageId: 'msg_trigger',
+    })
+    useAppStore.getState().setMessagesForConversation('conv_1', [], 200)
+    expect(useAppStore.getState().runsByConv.conv_1?.run_in_flight?.status).toBe('running')
+  })
+
+  it('drops a streaming message the server no longer has', () => {
+    useAppStore.getState().upsertMessage({
+      ...agentMessage('msg_deleted_elsewhere', 'run_old', 10),
+      status: 'streaming',
+    })
+    useAppStore.getState().setMessagesForConversation('conv_1', [], 20)
+    expect(useAppStore.getState().messages.msg_deleted_elsewhere).toBeUndefined()
+  })
+
+  it('keeps a streaming message that arrived while the snapshot was in flight', () => {
+    useAppStore.getState().upsertMessage({
+      ...agentMessage('msg_arriving', 'run_new', 30),
+      status: 'streaming',
+    })
+    useAppStore.getState().setMessagesForConversation('conv_1', [], 20)
+    expect(useAppStore.getState().messages.msg_arriving).toBeDefined()
+  })
+
+  it('prunes run and dispatch state when their messages are deleted', () => {
+    useAppStore.getState().applyEvent({
+      type: 'run.start',
+      conversationId: 'conv_1',
+      timestamp: 1,
+      runId: 'run_gone',
+      agentId: 'ag_orchestrator',
+      triggerMessageId: 'msg_trigger',
+    })
+    useAppStore.getState().upsertMessage(agentMessage('msg_gone', 'run_gone', 2))
+    useAppStore.getState().applyEvent({
+      type: 'dispatch.plan',
+      conversationId: 'conv_1',
+      timestamp: 3,
+      runId: 'run_gone',
+      plan: PLAN,
+    })
+
+    useAppStore.getState().removeMessages('conv_1', ['msg_gone'])
+
+    const state = useAppStore.getState()
+    expect(state.runsByConv.conv_1?.run_gone).toBeUndefined()
+    expect(state.dispatchesByRunId.run_gone).toBeUndefined()
   })
 
   it('keeps live streaming parts when an older snapshot arrives', () => {

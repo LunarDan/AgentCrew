@@ -106,10 +106,12 @@ export function MessageList({ conversationId }: { conversationId: string }) {
     let cancelled = false
     setLoadError(null)
     setLoaded(false)
+    // 快照只能判死「请求发出前」就存在的消息 / run；请求期间才到的不算
+    const snapshotStartedAt = Date.now()
     fetchMessages(conversationId)
       .then((list) => {
         if (cancelled) return
-        setMessagesForConversation(conversationId, list)
+        setMessagesForConversation(conversationId, list, snapshotStartedAt)
         fetchedConversationsRef.current.add(conversationId)
         setLoaded(true)
       })

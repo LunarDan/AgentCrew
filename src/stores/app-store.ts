@@ -28,6 +28,8 @@ export interface DispatchState {
   childRunIds: Record<string, string>              // taskId → childRunId
   reviewStatus?: 'pending' | 'approved' | 'rejected'
   pendingPlanId?: string
+  /** 最近一次审批 / 修订的时间；用来拒收「请求发出前读到的」旧快照（见 setPendingDispatchPlansForConversation）。 */
+  resolvedPlanAt?: number
 }
 
 interface AppState {
@@ -115,7 +117,15 @@ interface AppState {
   upsertAgent(agent: AgentRow): void
   removeAgent(agentId: string): void
 
-  setMessagesForConversation(conversationId: string, list: MessageRow[]): void
+  /**
+   * 应用一次消息快照。`snapshotStartedAt` 是请求发出时的本地时间：只有这之后才出现的
+   * 流式消息 / run 才可能是「快照读不到的在途数据」，之前的必须按快照判死。
+   */
+  setMessagesForConversation(
+    conversationId: string,
+    list: MessageRow[],
+    snapshotStartedAt?: number,
+  ): void
   /** 单条 message upsert（编辑后重发场景：服务端写完 user message，前端要自己塞进 store）。 */
   upsertMessage(message: MessageRow): void
   setActiveConversation(id: string | null): void
@@ -171,6 +181,8 @@ interface AppState {
     list: PendingDispatchPlan[],
     /** 请求发出时本地已有的 pendingPlanId；只有它们能被这份快照判死 */
     pruneCandidateIds?: string[],
+    /** 请求发出时的本地时间：之后才被本地审批的卡片不能被这份旧快照复活 */
+    snapshotStartedAt?: number,
   ): void
 
   /** SSE 的 resolved 事件丢失时，审批成功的卡片仍要能自行退场 */
@@ -297,11 +309,12 @@ export const useAppStore = create<AppState>()(
         delete s.agents[agentId]
       }),
 
-    setMessagesForConversation: (conversationId, list) =>
+    setMessagesForConversation: (conversationId, list, snapshotStartedAt) =>
       set((s) => {
         const snapshotIds = list.map((m) => m.id)
         const snapshotSet = new Set(snapshotIds)
         const latestSnapshotAt = list.reduce((max, m) => Math.max(max, m.createdAt), 0)
+        const snapshotAt = snapshotStartedAt ?? 0
         // GET 快照可能早于本次请求期间到达的 SSE 消息：并集合并，不能整桶覆盖。
         // 反向也要处理：断线期间被撤回 / 删除的消息不在快照里，本地不能永远留着。
         const existingIds = s.messageIdsByConv[conversationId] ?? []
@@ -309,10 +322,13 @@ export const useAppStore = create<AppState>()(
           if (snapshotSet.has(id)) return false
           const m = s.messages[id]
           if (!m) return false
-          // 本地乐观消息 / 正在流式的消息不能被快照判死；空快照不能靠 createdAt 兜底
+          // streaming 也不是免死金牌：请求发出前就在流式的消息若不在快照里，说明服务端已删除它
+          // （例如手机上撤回），保留会留下永远转圈的空气泡。只有请求期间新到的才算在途。
+          const arrivedDuringRequest = snapshotAt > 0 ? m.createdAt >= snapshotAt : true
+          // 本地乐观消息不能被快照判死；空快照不能靠 createdAt 兜底
           return (
             id.startsWith('temp_') ||
-            m.status === 'streaming' ||
+            (m.status === 'streaming' && arrivedDuringRequest) ||
             (latestSnapshotAt > 0 && m.createdAt > latestSnapshotAt)
           )
         })
@@ -367,11 +383,22 @@ export const useAppStore = create<AppState>()(
             s.restoredRunIds[m.runId] = true
           }
         }
-        // 快照里已经没有 streaming 消息 → 之前重建的 run 已经结束（run.end 在断线期间漏掉了）
-        for (const runId of Object.keys(runBucket)) {
-          if (!s.restoredRunIds[runId] || streamingRunIds.has(runId)) continue
-          delete runBucket[runId]
-          delete s.restoredRunIds[runId]
+        // 快照里已经没有 streaming 消息 → 之前重建的 run 已经结束（run.end 在断线期间漏掉了）。
+        // 通过 SSE run.start 建立的 run 不在 restoredRunIds 里，同样会漏掉 run.end：
+        // 只要它在快照请求发出前就已开始、又没有任何流式消息，就按结束处理，否则输入框会永久锁死
+        // （Stop 按钮 POST 一个已经结束的 runId，永远 404）。
+        for (const [runId, run] of Object.entries(runBucket)) {
+          if (streamingRunIds.has(runId)) continue
+          if (s.restoredRunIds[runId]) {
+            delete runBucket[runId]
+            delete s.restoredRunIds[runId]
+            delete s.dispatchesByRunId[runId]
+            continue
+          }
+          if (snapshotAt > 0 && run.startedAt <= snapshotAt) {
+            delete runBucket[runId]
+            delete s.dispatchesByRunId[runId]
+          }
         }
       }),
 
@@ -473,6 +500,7 @@ export const useAppStore = create<AppState>()(
     removeMessages: (conversationId, messageIds) =>
       set((s) => {
         const toRemove = new Set(messageIds)
+        pruneRunStateForRemovedMessages(s, conversationId, toRemove)
         for (const id of toRemove) delete s.messages[id]
 
         const bucket = s.messageIdsByConv[conversationId]
@@ -595,16 +623,27 @@ export const useAppStore = create<AppState>()(
         else s.pendingQuestionsByConv[conversationId] = list
       }),
 
-    setPendingDispatchPlansForConversation: (conversationId, list, pruneCandidateIds) =>
+    setPendingDispatchPlansForConversation: (
+      conversationId,
+      list,
+      pruneCandidateIds,
+      snapshotStartedAt,
+    ) =>
       set((s) => {
         const validPendingIds = new Set(list.map((p) => p.id))
         // 请求在途时 SSE 可能刚送来一个新计划：它不在快照里不代表已被处理，不能清掉
         const pruneCandidates = pruneCandidateIds ? new Set(pruneCandidateIds) : null
+        const snapshotAt = snapshotStartedAt ?? 0
         for (const pending of list) {
           if (pending.conversationId !== conversationId) continue
           const status: DispatchState['taskStatus'] = {}
           for (const task of pending.plan) status[task.id] = 'pending'
           const existing = s.dispatchesByRunId[pending.runId]
+          // 这份快照是请求发出前读的；期间本地（或其它端经 SSE）已经审批 / 修订过，
+          // 再按快照写回 pending 会让已退场的审批卡复活，点批准只会得到 not_found。
+          if (existing?.resolvedPlanAt && snapshotAt > 0 && existing.resolvedPlanAt >= snapshotAt) {
+            continue
+          }
           s.dispatchesByRunId[pending.runId] = {
             runId: pending.runId,
             messageId:
@@ -818,6 +857,7 @@ export const useAppStore = create<AppState>()(
           case 'message.removed': {
             // 撤回 / 编辑 / 重新生成在别处删了消息（及其产物）。幂等移除：发起方已删过则无副作用。
             const toRemove = new Set(event.messageIds)
+            pruneRunStateForRemovedMessages(s, event.conversationId, toRemove)
             for (const id of toRemove) delete s.messages[id]
             const bucket = s.messageIdsByConv[event.conversationId]
             if (bucket) {
@@ -937,6 +977,7 @@ export const useAppStore = create<AppState>()(
           case 'dispatch.plan.resolved': {
             const dispatch = s.dispatchesByRunId[event.runId]
             if (!dispatch) return
+            dispatch.resolvedPlanAt = event.timestamp
             if (dispatch.pendingPlanId === event.pendingId) delete dispatch.pendingPlanId
             // revising：只清掉当前 pending（计划卡先回落到只读），等 Orchestrator 重排发来新的
             // dispatch.plan.pending 再变回审批态；不要置成 rejected。
@@ -1102,6 +1143,29 @@ function attachDispatchToMessageForRun(
   if (!runId) return
   const dispatch = dispatches[runId]
   if (dispatch && !dispatch.messageId) dispatch.messageId = messageId
+}
+
+/**
+ * 消息被服务端删除时，连带清掉它所属 run 的本地状态。服务端在撤回 / 编辑 / 重新生成里
+ * 会删掉这些 `agent_runs` 行；只删消息会让 runsByConv / dispatchesByRunId 按操作次数无界增长，
+ * usage 统计也会继续计入已经不存在的 run。
+ */
+function pruneRunStateForRemovedMessages(
+  state: AppState,
+  conversationId: string,
+  removedIds: Set<string>,
+): void {
+  const runBucket = state.runsByConv[conversationId]
+  for (const id of removedIds) {
+    const runId = state.messages[id]?.runId
+    if (!runId) continue
+    if (runBucket) delete runBucket[runId]
+    delete state.restoredRunIds[runId]
+    delete state.dispatchesByRunId[runId]
+  }
+  for (const [runId, dispatch] of Object.entries(state.dispatchesByRunId)) {
+    if (removedIds.has(dispatch.messageId)) delete state.dispatchesByRunId[runId]
+  }
 }
 
 function closeUnresolvedToolCallsForRun(
