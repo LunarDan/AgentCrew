@@ -580,6 +580,38 @@ const ARTIFACT_SCRIPT: ScriptStep[] = [
   { kind: 'text', content: '产物已生成，点上方卡片即可预览，右上角可下载 .pptx。' },
 ]
 
+/**
+ * 超长内容场景：一页塞进远超画布的要点，用于回归「本页内容超出画布」提示。
+ * 只给一个 block 也能撑爆；标题与要点都写成可识别的固定文案，e2e 直接断言。
+ */
+const LONG_SLIDE_SCRIPT: ScriptStep[] = [
+  { kind: 'text', content: '我来生成一份内容超长的 PPT，用来验证溢出提示：' },
+  {
+    kind: 'tool_exec',
+    toolName: 'write_artifact',
+    args: {
+      type: 'ppt',
+      title: '超长幻灯片演示',
+      content: {
+        title: '超长幻灯片演示',
+        slides: [
+          { title: '超长幻灯片演示', subtitle: '溢出提示回归', layout: 'title' },
+          {
+            title: '一页塞不下这么多内容',
+            blocks: [
+              {
+                type: 'bullets',
+                items: Array.from({ length: 60 }, (_, i) => `第 ${i + 1} 条：这条要点用于把画布撑满并溢出`),
+              },
+            ],
+          },
+        ],
+      },
+    },
+  },
+  { kind: 'text', content: '生成完毕，第二页应显示溢出提示。' },
+]
+
 const DEFAULT_SCRIPT: ScriptStep[] = [
   { kind: 'thinking', content: '收到了用户消息，按通用模板回应。' },
   {
@@ -590,11 +622,17 @@ const DEFAULT_SCRIPT: ScriptStep[] = [
 ]
 
 const ARTIFACT_PROMPT_PATTERN = /(产物|artifact|ppt|幻灯片)/i
+/** 长文本场景：用于回归「幻灯片内容超出画布」提示（e2e + 手工检查）。 */
+const LONG_SLIDE_PROMPT_PATTERN = /(超长|溢出|long slide|overflow)/i
 
 function pickScript(prompt: string, toolNames: readonly string[]): ScriptStep[] {
   const p = prompt.toLowerCase()
   // 产物脚本要真调 write_artifact，没有该工具的 agent 不冒充能产出产物。
-  if (ARTIFACT_PROMPT_PATTERN.test(p) && toolNames.includes(WRITE_ARTIFACT_TOOL_NAME)) {
+  const canWriteArtifact = toolNames.includes(WRITE_ARTIFACT_TOOL_NAME)
+  if (LONG_SLIDE_PROMPT_PATTERN.test(p) && canWriteArtifact) {
+    return LONG_SLIDE_SCRIPT
+  }
+  if (ARTIFACT_PROMPT_PATTERN.test(p) && canWriteArtifact) {
     return ARTIFACT_SCRIPT
   }
   if (/(你好|hello|hi|您好)/.test(p)) return GREETING_SCRIPT
