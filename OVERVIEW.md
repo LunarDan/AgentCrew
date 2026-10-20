@@ -226,7 +226,7 @@ DB 文件：`.agenthub-data/agenthub.db`;workspace：`.agenthub-data/workspaces/
 - Codex 写盘审批 hook（当前 Review 模式用 read-only sandbox）
 - sandbox 配额对 Claude Code SDK 失效（SDK 自己写盘绕过 quota）
 - 移动端伴随 App：QR 图片渲染 + 手机扫码（需引入扫码 / 相机依赖，按 §6.2 先讨论）；当前为手输地址 + 一次性配对码
-- Orchestrator plan 阶段的 Claude Code usage：SDK 只在 `result` 消息里给 usage，而 plan 在 `plan_tasks` 的 `tool.call` 处提前结束（拿不到 `result`），该阶段 token 仍可能不计入 `agent_runs.usage`；custom adapter 已改为按 turn 提前上报
+- ~~Orchestrator plan 阶段的 Claude Code usage~~（2026-10-20 已修）：计划阶段改为累加 `message_delta.usage` 上报 `run.usage`，不再因拿不到 SDK `result` 而丢失该阶段 token；custom adapter 早已按 turn 提前上报
 - E2E 可观测性：本机 Playwright 浏览器版本与 `@playwright/test` 不匹配时需 `pnpm exec playwright install chromium`
 
 ### ⚠️ 关键约定（动手前必看）

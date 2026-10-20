@@ -410,6 +410,7 @@ class ClaudeCodeAdapter implements AgentPlatformAdapter {
 |---|---|
 | `SDKSystemMessage subtype:'init'` | 读取 `session_id`（resume）、`tools`（本次 run 的工具表，供 shell 工具识别）与 `mcp_servers`（外部 server 连接状态）；仅当外部 server 报 `failed` / `needs-auth` / `disabled` 时 emit `mcp_server.unavailable`（详见 Spec 15） |
 | `SDKPartialAssistantMessage` (开 `includePartialMessages: true`) `content_block_delta + text_delta` | 第一次开 text part：`part.start({type:'text',content:''})`；后续：`part.delta({type:'text.append',text})` |
+| `SDKPartialAssistantMessage` 的 `message_delta.usage`（仅计划阶段） | emit `run.usage`：计划阶段在 `plan_tasks` 处被 consumer 提前终止，生成器跑不到 `SDKResultMessage`，而它是唯一带 usage 的消息；不补这一段，计划阶段的 token 永远不计入 `agent_runs.usage`。其它阶段仍以 result 为准（两边都报会重复计数）。字段为 null 的缓存桶按 0 处理 |
 | `SDKAssistantMessage.message.content` 里的 `text` 块 | 兜底：若 partial 没投递过，整段开一个 text part |
 | `SDKAssistantMessage.message.content` 里的 `tool_use` 块 | `tool.call({callId,toolName,args})`；本地 `Map<sdk_id, ourCallId>` 记账 |
 | `SDKUserMessage.message.content` 里的 `tool_result` 块 | 用 `Map` 查回 `callId`，`tool.result({callId,result,isError})`；`result` 先经 `clampToolResult`（50 000 字符上限，与 custom adapter 同一实现）——外部 MCP server 的返回是无界的，原样落库会撑爆消息行、SSE 与后续上下文 |
