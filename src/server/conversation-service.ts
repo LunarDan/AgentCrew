@@ -233,18 +233,24 @@ export async function listConversations(): Promise<ConversationWithMeta[]> {
 export async function togglePinConversation(
   conversationId: string,
 ): Promise<ConversationWithMeta> {
-  const conv = await db.query.conversations.findFirst({
-    where: eq(schema.conversations.id, conversationId),
+  // 读-改-写放在同一个同步事务里：两个标签页同时 toggle 时不能都读到旧值、都写成「已置顶」
+  const updated = db.transaction((tx) => {
+    const conv = tx
+      .select()
+      .from(schema.conversations)
+      .where(eq(schema.conversations.id, conversationId))
+      .get()
+    if (!conv) throw new Error(`Conversation not found: ${conversationId}`)
+
+    const nextPinnedAt = conv.pinnedAt ? null : Date.now()
+    tx.update(schema.conversations)
+      .set({ pinnedAt: nextPinnedAt })
+      .where(eq(schema.conversations.id, conversationId))
+      .run()
+    return { ...conv, pinnedAt: nextPinnedAt }
   })
-  if (!conv) throw new Error(`Conversation not found: ${conversationId}`)
 
-  const nextPinnedAt = conv.pinnedAt ? null : Date.now()
-  await db
-    .update(schema.conversations)
-    .set({ pinnedAt: nextPinnedAt })
-    .where(eq(schema.conversations.id, conversationId))
-
-  return withWorkspaceMeta({ ...conv, pinnedAt: nextPinnedAt })
+  return withWorkspaceMeta(updated)
 }
 
 // ─── 归档 / 取消归档 ──────────────────────────────────────
@@ -252,18 +258,24 @@ export async function togglePinConversation(
 export async function toggleArchiveConversation(
   conversationId: string,
 ): Promise<ConversationWithMeta> {
-  const conv = await db.query.conversations.findFirst({
-    where: eq(schema.conversations.id, conversationId),
+  // 同 togglePinConversation：并发 toggle 必须串行，否则两次操作可能都落成「已归档」
+  const updated = db.transaction((tx) => {
+    const conv = tx
+      .select()
+      .from(schema.conversations)
+      .where(eq(schema.conversations.id, conversationId))
+      .get()
+    if (!conv) throw new Error(`Conversation not found: ${conversationId}`)
+
+    const nextArchived = !conv.archived
+    tx.update(schema.conversations)
+      .set({ archived: nextArchived })
+      .where(eq(schema.conversations.id, conversationId))
+      .run()
+    return { ...conv, archived: nextArchived }
   })
-  if (!conv) throw new Error(`Conversation not found: ${conversationId}`)
 
-  const nextArchived = !conv.archived
-  await db
-    .update(schema.conversations)
-    .set({ archived: nextArchived })
-    .where(eq(schema.conversations.id, conversationId))
-
-  return withWorkspaceMeta({ ...conv, archived: nextArchived })
+  return withWorkspaceMeta(updated)
 }
 
 // ─── 列出会话消息 ────────────────────────────────────────
@@ -377,6 +389,21 @@ export async function clearConversationHistory(
 
   const now = Date.now()
   db.transaction((tx) => {
+    // 预检之后、事务之前可能刚好有 run 开始（`sendMessage` 是先插消息再起 run）。
+    // 在同一个同步事务里再查一次，避免把刚发出的那条消息删掉、run 却继续写。
+    const stillActive = tx
+      .select({ id: schema.agentRuns.id })
+      .from(schema.agentRuns)
+      .where(
+        and(
+          eq(schema.agentRuns.conversationId, conversationId),
+          inArray(schema.agentRuns.status, ['queued', 'running']),
+        ),
+      )
+      .all()
+    if (stillActive.length > 0) {
+      throw new Error('Cannot clear conversation history while agent runs are active')
+    }
     tx.delete(schema.contextSummaries)
       .where(eq(schema.contextSummaries.conversationId, conversationId))
       .run()
@@ -687,6 +714,19 @@ export async function sendMessage(args: SendMessageArgs): Promise<SendMessageRes
 
   if (parts.length === 0) {
     throw new Error('Message must contain text or at least one valid attachment')
+  }
+
+  // 引用目标必须在本会话里：parent_message_id 没有外键，跨会话 / 不存在的 id 会落成
+  // 一条永远解析不到父消息的回复（消息渲染只能显示空引用）。
+  if (args.parentMessageId) {
+    const parent = await db.query.messages.findFirst({
+      where: and(
+        eq(schema.messages.id, args.parentMessageId),
+        eq(schema.messages.conversationId, args.conversationId),
+      ),
+      columns: { id: true },
+    })
+    if (!parent) throw new Error('Reply target not found in this conversation')
   }
 
   const deployIntent =

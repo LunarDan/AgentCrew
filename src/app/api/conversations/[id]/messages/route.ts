@@ -53,7 +53,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const message = err instanceof Error ? err.message : String(err)
     const status = message.startsWith('Conversation not found')
       ? 404
-      : /Message is too long|Attachments|群聊缺少协调者|No available agent/.test(message)
+      : /Message is too long|Attachments|Reply target|群聊缺少协调者|No available agent/.test(
+            message,
+          )
         ? 400
         : 500
     if (status === 500) {

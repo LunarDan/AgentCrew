@@ -83,6 +83,13 @@ export async function handleDeployCommand(args: {
   artifactId?: string
   afterCreatedAt?: number
 }): Promise<DeployCommandResult> {
+  // 先确认会话存在：否则后面的系统消息会撞外键，把「会话不存在」报成 400 外键错误
+  const conv = await db.query.conversations.findFirst({
+    where: eq(schema.conversations.id, args.conversationId),
+    columns: { id: true },
+  })
+  if (!conv) throw new Error(`Conversation not found: ${args.conversationId}`)
+
   const candidates = args.artifactId ? [] : await listDeployCandidates(args.conversationId)
   const decision = decideDeployCommand(candidates, args.artifactId)
 
@@ -179,6 +186,16 @@ export async function deploySelectedArtifact(args: {
   artifactId: string
   afterCreatedAt?: number
 }): Promise<Extract<DeployCommandResult, { kind: 'deployed' }>> {
+  // 用户点名部署某个产物时，跨会话 / 不存在的 id 是输入错误，不该落一条「部署失败」卡片
+  const artifact = await db.query.artifacts.findFirst({
+    where: and(
+      eq(schema.artifacts.id, args.artifactId),
+      eq(schema.artifacts.conversationId, args.conversationId),
+    ),
+    columns: { id: true },
+  })
+  if (!artifact) throw new Error('Artifact not found in this conversation')
+
   const deployment = await deployArtifactForConversation(args.conversationId, args.artifactId)
   const message = await insertSystemMessage({
     conversationId: args.conversationId,
