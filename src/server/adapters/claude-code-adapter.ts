@@ -42,6 +42,7 @@ import { sdkIsolationOptions } from './sdk-isolation'
 import { adapterSessionKey, claudeCodeSessions } from './session-store'
 import { collectUnavailableServers } from './mcp-status'
 import { isShellTool } from './shell-tool'
+import { extractMessageDeltaUsage } from './stream-usage'
 import type { AdapterInput, AgentPlatformAdapter } from './types'
 
 /**
@@ -528,6 +529,24 @@ export class ClaudeCodeAdapter implements AgentPlatformAdapter {
         // partial streaming：includePartialMessages=true 时优先用这个推 delta
         if (m.type === 'stream_event') {
           const ev = m.event as { type?: string; delta?: { type?: string; text?: string } }
+          // message_delta 携带本次 API 调用的累计用量。计划阶段在 plan_tasks 处被 consumer
+          // 提前终止（生成器跑不到 result），这是唯一能拿到 token 用量的地方；其它阶段仍以
+          // result 为准，避免两边都报导致重复计数。
+          const delta = isPlanStage ? extractMessageDeltaUsage(m.event) : null
+          if (delta) {
+            yield baseEvent({
+              type: 'run.usage' as const,
+              runId: input.runId,
+              usage: {
+                inputTokens: delta.inputTokens,
+                outputTokens: delta.outputTokens,
+                cacheCreationTokens: delta.cacheCreationTokens,
+                cacheReadTokens: delta.cacheReadTokens,
+                lastInputTokens: delta.lastInputTokens,
+                model: input.modelId ?? DEFAULT_MODEL,
+              },
+            }) as StreamEvent
+          }
           if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta' && ev.delta.text) {
             sawStreamedText = true
             if (activeTextPartIndex === -1) {
