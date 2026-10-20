@@ -15,6 +15,11 @@ AgentHub MUST provide an `fs_list` tool that lists directory entries inside the 
 - **WHEN** an agent calls `fs_list` with a path that resolves outside the workspace
 - **THEN** AgentHub rejects the call.
 
+#### Scenario: A directory has more entries than the listing cap
+- **WHEN** the directory contains more than 500 entries
+- **THEN** AgentHub returns the first 500 sorted entries with `truncated: true`,
+- **AND** the result carries a note telling the agent to list a narrower subdirectory.
+
 ### Requirement: Tool execution evidence SHALL be available to task evaluation
 
 AgentHub-managed file and shell tools MUST record per-run evidence that AgentRunner can use when evaluating Orchestrator-dispatched child tasks.
