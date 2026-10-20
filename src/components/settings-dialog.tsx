@@ -18,7 +18,7 @@ import {
   Settings as SettingsIcon,
   Smartphone,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { McpServersSettings } from '@/components/mcp-servers-settings'
 import { Button } from '@/components/ui/button'
@@ -87,6 +87,23 @@ export function SettingsDialog({
   const [connectionHints, setConnectionHints] = useState<ConnectionHint[]>([])
   const [companionProxyError, setCompanionProxyError] = useState<string | null>(null)
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null)
+  // 复制反馈的定时器：连续点两次「复制」时旧定时器会把新反馈提前清掉，
+  // 关闭对话框后也不该再 setState。
+  const copiedTimerRef = useRef<number | null>(null)
+  const showCopied = (value: string) => {
+    if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current)
+    setCopiedUrl(value)
+    copiedTimerRef.current = window.setTimeout(() => {
+      copiedTimerRef.current = null
+      setCopiedUrl(null)
+    }, 1200)
+  }
+  useEffect(
+    () => () => {
+      if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current)
+    },
+    [],
+  )
   const [tab, setTab] = useState('keys')
   const [form, setForm] = useState<SettingsForm>({
     anthropicApiKey: '',
@@ -200,8 +217,7 @@ export function SettingsDialog({
   const handleCopyHint = async (hint: ConnectionHint) => {
     try {
       await navigator.clipboard.writeText(hint.url)
-      setCopiedUrl(hint.url)
-      window.setTimeout(() => setCopiedUrl(null), 1200)
+      showCopied(hint.url)
     } catch (err) {
       console.error('[SettingsDialog] copy connection hint failed', err)
     }
@@ -210,8 +226,7 @@ export function SettingsDialog({
   const handleCopyText = async (value: string) => {
     try {
       await navigator.clipboard.writeText(value)
-      setCopiedUrl(value)
-      window.setTimeout(() => setCopiedUrl(null), 1200)
+      showCopied(value)
     } catch (err) {
       console.error('[SettingsDialog] copy text failed', err)
     }
