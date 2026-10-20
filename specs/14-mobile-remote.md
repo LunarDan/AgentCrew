@@ -126,6 +126,8 @@ AgentHub 只需要：
 
 可选增强：如果用户配置了 Tailscale HTTPS / `tailscale serve`，移动 App 使用 HTTPS；否则 tailnet 内 HTTP 也可作为 P0，因为链路本身由 WireGuard 加密。
 
+**连接说明（2026-10-20）**：`README.md`「Connecting from a phone」一节面向用户写清了配对流程（设置页地址 → 生成配对码 → App 内配对 → 设备可吊销）、打包版 companion 端口默认 `60646` 且只转发 `/api/mobile/*`、配对码只在内存里（重启桌面即失效），以及「优先 Tailscale、LAN 仅限可信网络」的取舍。App 的地址输入接受 `http://` 与 `https://` 两种 scheme，因此配置了 Tailscale HTTPS / `tailscale serve` 的用户直接填 HTTPS 地址即可，无需改代码。
+
 ### 4.3 LAN fallback
 
 LAN 模式用于同 Wi-Fi 快速验证：
@@ -429,7 +431,7 @@ Tab 4: 设置
 | 阶段 | 内容 | 产出 |
 |---|---|---|
 | P0 | Capacitor App 骨架；桌面 companion mode；Tailscale/LAN base URL 配对；device token；snapshot + events；会话查看；发送消息；审批 fs_write；回答 ask_user | 手机安装 App 后能连接桌面 AgentHub，观察状态并完成关键审批/反馈 |
-| P1 | Orchestrator 状态页增强；artifact 预览/版本/导出体验优化；QR 配对体验；iOS/Android 打包脚本；Tailnet HTTPS 文档 | 接近日常可用 |
+| P1 | Orchestrator 状态页增强；artifact 预览/版本/导出体验优化；QR 配对体验；iOS/Android 打包脚本；Tailnet HTTPS 文档（2026-10-20：已写入 `README.md`「Connecting from a phone」） | 接近日常可用 |
 | P2 | 推送通知、本机通知 badge、更多文件浏览能力、Capacitor secure storage 插件 | 增强体验，按需求讨论 |
 
 ---

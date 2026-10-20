@@ -285,6 +285,16 @@ pnpm mobile:open:android
 
 The mobile app is designed to connect to a desktop AgentHub host over LAN or Tailscale. Agent execution, file writes, command execution, and workspace state remain on the desktop side.
 
+### Connecting from a phone
+
+1. On the desktop, open **Settings → Mobile companion**, set a mode (`lan` or `tailnet`), and copy one of the listed host addresses. The packaged app serves `/api/mobile/*` on the companion port (default `60646`) through a proxy that only forwards that prefix; the Next server itself stays on `127.0.0.1`.
+2. Click **Generate** under **Pairing code** to get a 6-digit, 5-minute, single-use code. Pairing codes are kept in memory only — restarting the desktop invalidates them.
+3. In the mobile app, enter the host address and the code, then tap **Pair**. The app exchanges the code for a per-device token and stores it locally. Each paired device can be revoked from the same settings section.
+
+**Prefer Tailscale over plain LAN.** Tailscale traffic is encrypted by WireGuard even when the app talks HTTP. LAN mode is plain HTTP and should only be used on a trusted network; avoid it on public Wi-Fi. If you have Tailscale HTTPS / `tailscale serve` configured, enter the `https://…` address instead — the app accepts either scheme.
+
+The desktop must be reachable from the phone at the chosen address, and companion mode must be on before pairing. If the settings page shows a proxy error banner, the companion port could not be bound (usually another process holds it) and the phone cannot connect until it is freed.
+
 ---
 
 ## Common Commands
