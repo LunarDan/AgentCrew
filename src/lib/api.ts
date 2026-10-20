@@ -34,8 +34,33 @@ export interface ArtifactListItem {
   createdAt: number
 }
 
-async function json<T>(req: Promise<Response>): Promise<T> {
-  const res = await req
+/** 本地请求的正常上限；服务端挂死时 UI 不能永远停在「处理中」。 */
+const DEFAULT_REQUEST_TIMEOUT_MS = 120_000
+/** 上传 / 部署 / 压缩这类本来就可能跑很久的操作不设上限。 */
+const NO_TIMEOUT = 0
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  if (ms <= 0) return promise
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`)),
+      ms,
+    )
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (err) => {
+        clearTimeout(timer)
+        reject(err)
+      },
+    )
+  })
+}
+
+async function json<T>(req: Promise<Response>, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): Promise<T> {
+  const res = await withTimeout(req, timeoutMs, 'Request')
   if (!res.ok) {
     const body = await res.text()
     throw new Error(`HTTP ${res.status}: ${body || res.statusText}`)
@@ -569,6 +594,7 @@ export async function deployConversationArtifact(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(artifactId ? { artifactId } : {}),
     }),
+    NO_TIMEOUT,
   )
 }
 
@@ -583,6 +609,7 @@ export async function compactConversation(
 ): Promise<CompactConversationResult> {
   return json<CompactConversationResult>(
     fetch(`/api/conversations/${conversationId}/compact`, { method: 'POST' }),
+    NO_TIMEOUT,
   )
 }
 
@@ -808,10 +835,14 @@ export async function uploadAttachment(
 ): Promise<AttachmentRow> {
   const form = new FormData()
   form.append('file', file)
-  const res = await fetch(`/api/conversations/${conversationId}/attachments`, {
-    method: 'POST',
-    body: form,
-  })
+  const res = await withTimeout(
+    fetch(`/api/conversations/${conversationId}/attachments`, {
+      method: 'POST',
+      body: form,
+    }),
+    300_000,
+    'Upload',
+  )
   if (!res.ok) {
     const body = await res.text()
     throw new Error(`HTTP ${res.status}: ${body || res.statusText}`)
