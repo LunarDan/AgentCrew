@@ -23,6 +23,21 @@ export async function exportArtifactResponse(
   id: string,
   exportMode: string | null,
 ): Promise<Response> {
+  const response = await buildArtifactExportResponse(id, exportMode)
+  // 导出内容是 LLM / 用户可控的（Markdown、Mermaid 源码、JSON）。加 nosniff + sandbox，
+  // 防止 WebView 或忽略 Content-Disposition 的客户端把它嗅探成 HTML 并在应用同源执行。
+  if (response.status !== 302) {
+    response.headers.set('X-Content-Type-Options', 'nosniff')
+    response.headers.set('Content-Security-Policy', 'sandbox')
+    response.headers.set('Cache-Control', 'no-store')
+  }
+  return response
+}
+
+async function buildArtifactExportResponse(
+  id: string,
+  exportMode: string | null,
+): Promise<Response> {
   if (exportMode !== null && exportMode !== 'editable' && exportMode !== 'visual') {
     return jsonResponse({ error: `Unsupported export mode: ${exportMode}` }, 400)
   }
