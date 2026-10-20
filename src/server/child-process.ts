@@ -5,7 +5,7 @@
  * 杀不掉孙进程，必须 taskkill /T；POSIX 上要用进程组（负 pid），依赖 spawn 时
  * `detached: true`。两处都必须用同一份实现，否则总有一处会漏杀。
  */
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { spawnSync, type ChildProcess } from 'node:child_process'
 
 import type { Platform } from '@/server/platform'
 
@@ -33,8 +33,11 @@ export function killProcessTree(
   signal: NodeJS.Signals = 'SIGTERM',
 ): void {
   if (platform === 'windows' && typeof child.pid === 'number') {
-    const killer = spawn('taskkill', ['/F', '/T', '/PID', String(child.pid)], { windowsHide: true })
-    killer.on('error', () => {})
+    // 同步执行：taskkill 未跑完就继续关闭 stdio / 让父进程退出，会让 /T 拿不到完整进程树。
+    spawnSync('taskkill', ['/F', '/T', '/PID', String(child.pid)], {
+      windowsHide: true,
+      stdio: 'ignore',
+    })
     return
   }
   if (typeof child.pid === 'number') {
@@ -66,8 +69,11 @@ export function killProcessTreeByPid(
   if (!Number.isInteger(pid) || pid <= 0) return
 
   if (platform === 'windows') {
-    const killer = spawn('taskkill', ['/F', '/T', '/PID', String(pid)], { windowsHide: true })
-    killer.on('error', () => {})
+    // 同步执行：调用方随后就会 close transport，不能让 taskkill 与父进程退出赛跑。
+    spawnSync('taskkill', ['/F', '/T', '/PID', String(pid)], {
+      windowsHide: true,
+      stdio: 'ignore',
+    })
     return
   }
 
