@@ -22,7 +22,10 @@ export default defineConfig({
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
-    command: 'pnpm dev',
+    // Playwright 先起 webServer、后跑 globalSetup：数据目录必须在 server 打开 SQLite 之前清掉，
+    // 否则 Windows 上 globalSetup 的 rmSync 会因 WAL 句柄 EPERM 而整套失败。
+    command:
+      'node -e "require(\'fs\').rmSync(\'.agenthub-data-e2e\',{recursive:true,force:true})" && pnpm dev',
     url: 'http://localhost:3000/api/platform',
     reuseExistingServer: false,
     timeout: 120_000,

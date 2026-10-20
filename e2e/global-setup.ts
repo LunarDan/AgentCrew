@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync } from 'node:fs'
+import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 
 import Database from 'better-sqlite3'
@@ -63,7 +63,8 @@ const SEED_AGENTS: SeedAgent[] = [
  * better-sqlite3 须为当前 Node ABI（e2e 脚本前置 ensure-node-sqlite 保证）。
  */
 export default function globalSetup() {
-  rmSync(E2E_DATA_DIR, { recursive: true, force: true })
+  // 数据目录已由 playwright.config 的 webServer 命令在启动 dev server 之前清掉。
+  // 这里不能再 rmSync：dev server 已经起来并持有 SQLite 句柄（Windows 上会 EPERM）。
   mkdirSync(path.join(E2E_DATA_DIR, 'workspaces'), { recursive: true })
 
   const sqlite = new Database(path.join(E2E_DATA_DIR, 'agenthub.db'))
