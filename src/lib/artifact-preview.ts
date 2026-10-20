@@ -19,7 +19,17 @@ export function buildIframeHtml(files: Record<string, string>, entry: string): s
   const scriptTag = js ? `<script>(function(){\n${js}\n})();<` + '/script>' : ''
 
   if (/<\/head>/i.test(html)) {
-    return html.replace(/<\/head>/i, `${styleTag}\n</head>`).replace(/<\/body>/i, `${scriptTag}\n</body>`)
+    const withStyle = html.replace(/<\/head>/i, `${styleTag}\n</head>`)
+    if (!scriptTag) return withStyle
+    // 片段式 HTML 常常有 </head> 却没有 </body>：此时直接 replace 会静默丢掉脚本，
+    // 产物的 JS 永远不执行（预览与部署后的运行时都受影响）。
+    if (/<\/body>/i.test(withStyle)) {
+      return withStyle.replace(/<\/body>/i, `${scriptTag}\n</body>`)
+    }
+    if (/<\/html>/i.test(withStyle)) {
+      return withStyle.replace(/<\/html>/i, `${scriptTag}\n</html>`)
+    }
+    return `${withStyle}\n${scriptTag}`
   }
 
   return [
