@@ -162,6 +162,80 @@ describe('app-store dispatch plan binding', () => {
     expect(dispatch?.reviewStatus).toBe('approved')
     expect(dispatch?.pendingPlanId).toBeUndefined()
   })
+
+  it('does not resurrect a plan approved locally while the snapshot was in flight', () => {
+    useAppStore.getState().applyEvent({
+      type: 'dispatch.plan.pending',
+      conversationId: 'conv_1',
+      timestamp: 1,
+      pendingPlan: {
+        id: 'pdp_1',
+        conversationId: 'conv_1',
+        agentId: 'ag_orchestrator',
+        runId: 'run_orch',
+        plan: PLAN,
+        createdAt: 1,
+      },
+    })
+    const snapshotStartedAt = Date.now() - 10_000
+    useAppStore.getState().resolveDispatchReviewLocally('run_orch', 'approved')
+
+    useAppStore.getState().setPendingDispatchPlansForConversation(
+      'conv_1',
+      [
+        {
+          id: 'pdp_1',
+          conversationId: 'conv_1',
+          agentId: 'ag_orchestrator',
+          runId: 'run_orch',
+          plan: PLAN,
+          createdAt: 1,
+        },
+      ],
+      ['pdp_1'],
+      snapshotStartedAt,
+    )
+
+    const dispatch = useAppStore.getState().dispatchesByRunId.run_orch
+    expect(dispatch?.reviewStatus).toBe('approved')
+    expect(dispatch?.pendingPlanId).toBeUndefined()
+  })
+
+  it('does not let an older snapshot overwrite a plan that arrived during the request', () => {
+    useAppStore.getState().applyEvent({
+      type: 'dispatch.plan.pending',
+      conversationId: 'conv_1',
+      timestamp: 500,
+      pendingPlan: {
+        id: 'pdp_new',
+        conversationId: 'conv_1',
+        agentId: 'ag_orchestrator',
+        runId: 'run_orch',
+        plan: [{ id: 'task_new', agentId: 'ag_frontend', task: '修订后的任务' }],
+        createdAt: 500,
+      },
+    })
+
+    useAppStore.getState().setPendingDispatchPlansForConversation(
+      'conv_1',
+      [
+        {
+          id: 'pdp_old',
+          conversationId: 'conv_1',
+          agentId: 'ag_orchestrator',
+          runId: 'run_orch',
+          plan: PLAN,
+          createdAt: 1,
+        },
+      ],
+      ['pdp_old'],
+      400,
+    )
+
+    const dispatch = useAppStore.getState().dispatchesByRunId.run_orch
+    expect(dispatch?.pendingPlanId).toBe('pdp_new')
+    expect(dispatch?.plan[0]?.task).toBe('修订后的任务')
+  })
 })
 
 describe('app-store run failure cleanup', () => {
@@ -362,6 +436,76 @@ describe('app-store message snapshot reconciliation', () => {
     })
     useAppStore.getState().setMessagesForConversation('conv_1', [], 20)
     expect(useAppStore.getState().messages.msg_arriving).toBeDefined()
+  })
+
+  it('drops a pre-request streaming message even when it is newer than every snapshot row', () => {
+    useAppStore.getState().upsertMessage({
+      ...agentMessage('msg_phantom', 'run_old', 200),
+      status: 'streaming',
+    })
+    // 快照请求在消息之后发出（250），返回时最新一条是 100：旧的 createdAt 兜底会把它留下（永远转圈）
+    useAppStore.getState().setMessagesForConversation(
+      'conv_1',
+      [agentMessage('msg_old', 'run_old', 100)],
+      250,
+    )
+    expect(useAppStore.getState().messages.msg_phantom).toBeUndefined()
+  })
+
+  it('keeps a run that owns a dispatch (plan review has no streaming message)', () => {
+    useAppStore.getState().applyEvent({
+      type: 'run.start',
+      conversationId: 'conv_1',
+      timestamp: 100,
+      runId: 'run_orch',
+      agentId: 'ag_orchestrator',
+      triggerMessageId: 'msg_trigger',
+    })
+    useAppStore.getState().applyEvent({
+      type: 'dispatch.plan.pending',
+      conversationId: 'conv_1',
+      timestamp: 120,
+      pendingPlan: {
+        id: 'pdp_1',
+        conversationId: 'conv_1',
+        agentId: 'ag_orchestrator',
+        runId: 'run_orch',
+        plan: PLAN,
+        createdAt: 120,
+      },
+    })
+
+    // run 正等审批：没有流式消息，但快照不能据此判它已结束
+    useAppStore.getState().setMessagesForConversation('conv_1', [], 200)
+
+    const state = useAppStore.getState()
+    expect(state.runsByConv.conv_1?.run_orch?.status).toBe('running')
+    expect(state.dispatchesByRunId.run_orch?.pendingPlanId).toBe('pdp_1')
+  })
+
+  it('clears run state when the server says the run is already gone', () => {
+    useAppStore.getState().applyEvent({
+      type: 'run.start',
+      conversationId: 'conv_1',
+      timestamp: 100,
+      runId: 'run_done',
+      agentId: 'ag_orchestrator',
+      triggerMessageId: 'msg_trigger',
+    })
+    useAppStore.getState().applyEvent({
+      type: 'dispatch.plan',
+      conversationId: 'conv_1',
+      timestamp: 110,
+      runId: 'run_done',
+      plan: PLAN,
+    })
+
+    useAppStore.getState().clearRunState('conv_1', 'run_done')
+
+    const state = useAppStore.getState()
+    expect(state.runsByConv.conv_1?.run_done).toBeUndefined()
+    // 已完成的计划卡片要留着
+    expect(state.dispatchesByRunId.run_done).toBeDefined()
   })
 
   it('prunes run and dispatch state when their messages are deleted', () => {

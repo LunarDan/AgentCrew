@@ -30,6 +30,8 @@ export interface DispatchState {
   pendingPlanId?: string
   /** 最近一次审批 / 修订的时间；用来拒收「请求发出前读到的」旧快照（见 setPendingDispatchPlansForConversation）。 */
   resolvedPlanAt?: number
+  /** 最近一次收到 pending 计划（修订重排）的时间；同样用于拒收旧快照。 */
+  planUpdatedAt?: number
 }
 
 interface AppState {
@@ -188,6 +190,9 @@ interface AppState {
   /** SSE 的 resolved 事件丢失时，审批成功的卡片仍要能自行退场 */
   resolveDispatchReviewLocally(runId: string, status: 'approved' | 'rejected'): void
 
+  /** 服务端确认 run 已结束时清掉本地运行态（停止按钮 404 的恢复路径）；调度卡片保留 */
+  clearRunState(conversationId: string, runId: string): void
+
   /** 高亮指定消息 1.5 秒（点击「引用」预览时的跳转反馈） */
   highlightedMessageId: string | null
   highlightMessage(messageId: string): void
@@ -326,11 +331,11 @@ export const useAppStore = create<AppState>()(
           // （例如手机上撤回），保留会留下永远转圈的空气泡。只有请求期间新到的才算在途。
           const arrivedDuringRequest = snapshotAt > 0 ? m.createdAt >= snapshotAt : true
           // 本地乐观消息不能被快照判死；空快照不能靠 createdAt 兜底
-          return (
-            id.startsWith('temp_') ||
-            (m.status === 'streaming' && arrivedDuringRequest) ||
-            (latestSnapshotAt > 0 && m.createdAt > latestSnapshotAt)
-          )
+          if (id.startsWith('temp_')) return true
+          // 流式消息只认「请求期间新到」：请求前就在流式却不在快照里，说明服务端已删/已结束，
+          // 不能靠 createdAt 比快照最新消息还新就留下来（会永远转圈）
+          if (m.status === 'streaming') return arrivedDuringRequest
+          return latestSnapshotAt > 0 && m.createdAt > latestSnapshotAt
         })
         const preservedSet = new Set(preservedIds)
         for (const id of existingIds) {
@@ -392,12 +397,14 @@ export const useAppStore = create<AppState>()(
           if (s.restoredRunIds[runId]) {
             delete runBucket[runId]
             delete s.restoredRunIds[runId]
-            delete s.dispatchesByRunId[runId]
             continue
           }
+          // 有 dispatch 的 run 属于 Orchestrator：它可能正等审批或正在调度子任务，此时没有
+          // 流式消息却是活的。快照判断不了活性，清掉会让计划卡消失、审批点不到；这类 run
+          // 若已结束，停止按钮收到 404 时会清掉本地运行态（见 clearRunState）。
+          if (s.dispatchesByRunId[runId]) continue
           if (snapshotAt > 0 && run.startedAt <= snapshotAt) {
             delete runBucket[runId]
-            delete s.dispatchesByRunId[runId]
           }
         }
       }),
@@ -641,7 +648,8 @@ export const useAppStore = create<AppState>()(
           const existing = s.dispatchesByRunId[pending.runId]
           // 这份快照是请求发出前读的；期间本地（或其它端经 SSE）已经审批 / 修订过，
           // 再按快照写回 pending 会让已退场的审批卡复活，点批准只会得到 not_found。
-          if (existing?.resolvedPlanAt && snapshotAt > 0 && existing.resolvedPlanAt >= snapshotAt) {
+          const planAdvancedAt = Math.max(existing?.resolvedPlanAt ?? 0, existing?.planUpdatedAt ?? 0)
+          if (planAdvancedAt > 0 && snapshotAt > 0 && planAdvancedAt >= snapshotAt) {
             continue
           }
           s.dispatchesByRunId[pending.runId] = {
@@ -673,6 +681,15 @@ export const useAppStore = create<AppState>()(
         if (!dispatch || dispatch.reviewStatus !== 'pending') return
         delete dispatch.pendingPlanId
         dispatch.reviewStatus = status
+        // 本地审批也打了时间戳：在途的旧计划快照不能把这张卡改回 pending
+        dispatch.resolvedPlanAt = Date.now()
+      }),
+
+    clearRunState: (conversationId, runId) =>
+      set((s) => {
+        const bucket = s.runsByConv[conversationId]
+        if (bucket) delete bucket[runId]
+        delete s.restoredRunIds[runId]
       }),
 
     highlightMessage: (messageId) => {
@@ -970,6 +987,7 @@ export const useAppStore = create<AppState>()(
               childRunIds: existing?.childRunIds ?? {},
               reviewStatus: 'pending',
               pendingPlanId: pending.id,
+              planUpdatedAt: event.timestamp,
             }
             return
           }
