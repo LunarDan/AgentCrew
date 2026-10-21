@@ -48,6 +48,19 @@ describe('listDirInWorkspace', () => {
     })
   })
 
+  it('caps entries when a limit is given and reports the pre-truncation total', () => {
+    const workspace = makeWorkspace()
+    for (const name of ['a.txt', 'b.txt', 'c.txt']) {
+      writeFileSync(path.join(workspace.rootPath, name), name)
+    }
+
+    const listing = listDirInWorkspace(workspace, '', { limit: 2 })
+
+    expect(listing.entries.map((e) => e.name)).toEqual(['a.txt', 'b.txt'])
+    expect(listing.entries[0]?.size).toBe(5)
+    expect(listing.totalEntries).toBe(3)
+  })
+
   it('rejects directory escapes', () => {
     const workspace = makeWorkspace()
 

@@ -155,9 +155,16 @@ export interface ListResult {
   /** 父级的 relPath；根目录时为 null */
   parent: string | null
   entries: Array<{ name: string; isDirectory: boolean; size?: number }>
+  /** 传了 limit 时给出截断前的可见条目总数 */
+  totalEntries?: number
 }
 
-export function listDirInWorkspace(workspace: WorkspaceRow, target: string): ListResult {
+/** `limit` 用于先把条目裁到上限再 stat：几万个文件的目录不该为了返回 500 条而全部 stat。 */
+export function listDirInWorkspace(
+  workspace: WorkspaceRow,
+  target: string,
+  options?: { limit?: number },
+): ListResult {
   const relPath = target === '' ? '' : target
   const absPath = relPath === '' ? getEffectiveCwd(workspace) : assertPathWithinWorkspace(workspace, target)
 
@@ -166,28 +173,32 @@ export function listDirInWorkspace(workspace: WorkspaceRow, target: string): Lis
   if (!stat.isDirectory()) throw new Error(`Not a directory: ${target || '(root)'}`)
 
   const raw = readdirSync(absPath, { withFileTypes: true })
-  const entries = raw
+  const sorted = raw
     .filter((e) => !e.name.startsWith('.')) // 默认隐藏 dotfile
-    .map((e) => {
-      const entry: { name: string; isDirectory: boolean; size?: number } = {
-        name: e.name,
-        isDirectory: e.isDirectory(),
-      }
-      if (e.isFile()) {
-        try {
-          entry.size = statSync(path.join(absPath, e.name)).size
-        } catch {
-          // ignore
-        }
-      }
-      return entry
-    })
+    .map((dirent) => ({
+      dirent,
+      entry: { name: dirent.name, isDirectory: dirent.isDirectory() } as {
+        name: string
+        isDirectory: boolean
+        size?: number
+      },
+    }))
     .sort((a, b) => {
       // 目录优先 + 字母序
-      if (a.isDirectory && !b.isDirectory) return -1
-      if (!a.isDirectory && b.isDirectory) return 1
-      return a.name.localeCompare(b.name)
+      if (a.entry.isDirectory && !b.entry.isDirectory) return -1
+      if (!a.entry.isDirectory && b.entry.isDirectory) return 1
+      return a.entry.name.localeCompare(b.entry.name)
     })
+
+  const kept = options?.limit === undefined ? sorted : sorted.slice(0, Math.max(0, options.limit))
+  for (const { dirent, entry } of kept) {
+    if (!dirent.isFile()) continue
+    try {
+      entry.size = statSync(path.join(absPath, dirent.name)).size
+    } catch {
+      // ignore
+    }
+  }
 
   const parent = (() => {
     if (relPath === '') return null
@@ -195,7 +206,13 @@ export function listDirInWorkspace(workspace: WorkspaceRow, target: string): Lis
     return p === '.' || p === '' ? '' : p
   })()
 
-  return { relPath, absolutePath: absPath, parent, entries }
+  return {
+    relPath,
+    absolutePath: absPath,
+    parent,
+    entries: kept.map((k) => k.entry),
+    ...(options?.limit === undefined ? {} : { totalEntries: sorted.length }),
+  }
 }
 
 // ─── 沙箱用量扫描（fs_write 配额检查复用） ─────────────

@@ -40,15 +40,15 @@ export const fsListTool: ToolDef = {
     if (!workspace) return { ok: false, error: 'Workspace not found' }
 
     try {
-      const listing = listDirInWorkspace(workspace, parsed.data.path)
-      if (listing.entries.length <= MAX_LIST_ENTRIES) {
+      const listing = listDirInWorkspace(workspace, parsed.data.path, { limit: MAX_LIST_ENTRIES })
+      const totalEntries = listing.totalEntries ?? listing.entries.length
+      if (totalEntries <= MAX_LIST_ENTRIES) {
         return { ok: true, value: { ...listing, truncated: false } }
       }
       return {
         ok: true,
         value: {
           ...listing,
-          entries: listing.entries.slice(0, MAX_LIST_ENTRIES),
           truncated: true,
           note: `Only the first ${MAX_LIST_ENTRIES} entries are shown. List a narrower subdirectory to see the rest.`,
         },
