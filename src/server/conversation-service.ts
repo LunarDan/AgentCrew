@@ -401,6 +401,17 @@ export async function clearConversationHistory(
     if (stillActive.length > 0) {
       throw new Error('Cannot clear conversation history while agent runs are active')
     }
+    // `sendMessage` 先插消息、后在异步调用里插 run 行：预检到 run 落库之间仍有窗口。
+    // 这期间新出现的消息也不在 messagesToDelete 里（不会广播删除），所以宁可让本次清空失败重试。
+    const expectedMessageIds = new Set(messagesToDelete.map((m) => m.id))
+    const currentMessageIds = tx
+      .select({ id: schema.messages.id })
+      .from(schema.messages)
+      .where(eq(schema.messages.conversationId, conversationId))
+      .all()
+    if (currentMessageIds.some((row) => !expectedMessageIds.has(row.id))) {
+      throw new Error('Conversation history changed while clearing; retry')
+    }
     tx.delete(schema.contextSummaries)
       .where(eq(schema.contextSummaries.conversationId, conversationId))
       .run()

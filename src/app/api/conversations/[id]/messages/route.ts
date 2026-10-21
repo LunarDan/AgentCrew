@@ -77,7 +77,7 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
     const message = err instanceof Error ? err.message : String(err)
     const status = message.startsWith('Conversation not found')
       ? 404
-      : message.includes('agent runs are active')
+      : /agent runs are active|history changed/.test(message)
         ? 409
         : 400
     return NextResponse.json({ error: message }, { status })
