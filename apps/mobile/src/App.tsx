@@ -266,7 +266,8 @@ export function App() {
 
   /** 操作后的详情刷新是可选的：失败不能把「已经成功」说成失败。 */
   async function refreshDetailBestEffort(conversationId: string): Promise<void> {
-    const seq = detailSeq.current
+    // 自增而不是读取：同时要作废已经发出的上一轮轮询响应
+    const seq = ++detailSeq.current
     try {
       const detail = await api.getConversation(conversationId)
       // 期间可能已有更新的轮询 / 导航响应落地：旧响应不能把新内容盖回去
