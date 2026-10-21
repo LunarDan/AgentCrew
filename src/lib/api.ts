@@ -1,3 +1,4 @@
+import { parseDeployCommand } from '@/shared/deploy-command'
 import type {
   AgentRow,
   AppSettingsRow,
@@ -549,12 +550,19 @@ export async function sendMessage(
   conversationId: string,
   body: SendMessageBody,
 ): Promise<SendMessageResult> {
+  // 聊天里输入的「部署」会在服务端同步复制文件 / 发布，可能远超普通请求上限
+  const isDeployCommand =
+    !body.parentMessageId &&
+    !body.attachmentIds?.length &&
+    !body.mentionedAgentIds?.length &&
+    parseDeployCommand(body.content) !== null
   return json<SendMessageResult>(
     fetch(`/api/conversations/${conversationId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }),
+    isDeployCommand ? NO_TIMEOUT : DEFAULT_REQUEST_TIMEOUT_MS,
   )
 }
 
@@ -613,8 +621,19 @@ export async function compactConversation(
   )
 }
 
-export async function abortRun(runId: string): Promise<void> {
-  await json<{ ok: true }>(fetch(`/api/runs/${runId}/abort`, { method: 'POST' }))
+/** 返回 false 表示服务端已经没有这个 run（已结束），调用方据此清理本地运行态。 */
+export async function abortRun(runId: string): Promise<boolean> {
+  const res = await withTimeout(
+    fetch(`/api/runs/${runId}/abort`, { method: 'POST' }),
+    DEFAULT_REQUEST_TIMEOUT_MS,
+    'Request',
+  )
+  if (res.status === 404) return false
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`HTTP ${res.status}: ${body || res.statusText}`)
+  }
+  return true
 }
 
 // ─── Messages: withdraw / edit ──────────────────

@@ -258,6 +258,7 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
   const upsertMessage = useAppStore((s) => s.upsertMessage)
   const replaceLocalMessageId = useAppStore((s) => s.replaceLocalMessageId)
   const clearConversationHistory = useAppStore((s) => s.clearConversationHistory)
+  const clearRunState = useAppStore((s) => s.clearRunState)
   const conversation = useAppStore((s) => s.conversations[conversationId])
   const upsertConversation = useAppStore((s) => s.upsertConversation)
   const agents = useAppStore((s) => s.agents)
@@ -789,7 +790,14 @@ export function MessageInput({ conversationId }: { conversationId: string }) {
     if (aborting) return
     setAborting(true)
     try {
-      await Promise.allSettled(runningRuns.map((r) => abortRun(r.id)))
+      const results = await Promise.allSettled(
+        runningRuns.map(async (r) => ({ ...r, aborted: await abortRun(r.id) })),
+      )
+      for (const result of results) {
+        // run 已经结束（run.end 在断线期间丢了）：清掉本地运行态，否则输入框与停止按钮永久锁死
+        if (result.status !== 'fulfilled' || result.value.aborted) continue
+        clearRunState(conversationId, result.value.id)
+      }
     } finally {
       setAborting(false)
     }
