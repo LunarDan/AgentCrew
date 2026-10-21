@@ -78,13 +78,14 @@ export async function uploadAttachment(args: UploadFileArgs): Promise<Attachment
   try {
     await db.insert(schema.attachments).values(row)
   } catch (err) {
+    console.error('[attachments] insert failed', err)
     // 入库失败时删掉已落盘的文件，避免留下没有元数据引用的孤儿文件
     try {
       rmSync(absPath, { force: true })
     } catch {
       // 文件已不存在时忽略
     }
-    throw err
+    throw new Error('Failed to store attachment')
   }
   return row
 }
