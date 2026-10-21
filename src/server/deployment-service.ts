@@ -520,10 +520,7 @@ export function isDeploymentId(value: string): boolean {
   return DEPLOYMENT_ID_RE.test(value)
 }
 
-/**
- * 部署记录会进消息 part、回给手机；Node 的 fs 错误（`EACCES: ..., open 'C:\\...'`）
- * 带宿主绝对路径，不能原样写进去。校验类错误（相对路径 / 大小 / 入口）保持原样。
- */
+/** 部署记录会进消息 part、回给手机：fs 错误带宿主绝对路径，替换成通用文案；校验错误保持原样。 */
 export function describeDeploymentError(error: unknown, fallback = 'Deployment failed'): string {
   if (!(error instanceof Error)) return fallback
   if (/^[A-Z][A-Z0-9_]*: /.test(error.message)) {
