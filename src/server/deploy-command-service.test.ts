@@ -1,11 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
+import { parseDeployCommand } from '@/shared/deploy-command'
 import type { DeployCandidateRecord } from '@/shared/types'
 
-import {
-  decideDeployCommand,
-  parseDeployCommand,
-} from './deploy-command-service'
+import { decideDeployCommand } from './deploy-command-service'
 
 function candidate(id: string, createdAt: number): DeployCandidateRecord {
   return {

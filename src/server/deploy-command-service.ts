@@ -12,10 +12,6 @@ import { deployWorkspaceForConversation } from '@/server/tools/deploy-workspace'
 import { getEffectiveCwd } from '@/server/workspace-utils'
 import type { DeployCandidateRecord, DeployStatusRecord, MessagePart } from '@/shared/types'
 
-export interface DeployCommandIntent {
-  artifactId?: string
-}
-
 export type DeployCommandDecision =
   | { kind: 'no_candidates' }
   | { kind: 'deploy'; artifactId: string }
@@ -37,15 +33,6 @@ export type DeployCommandResult =
       deployment: DeployStatusRecord
       message: MessageRow
     }
-
-const DEPLOY_COMMAND_RE = /^(?:\/deploy|部署|发布|上线)(?:\s+(art_[0-9A-Za-z]+))?$/i
-
-export function parseDeployCommand(content: string): DeployCommandIntent | null {
-  const trimmed = content.trim()
-  const match = DEPLOY_COMMAND_RE.exec(trimmed)
-  if (!match) return null
-  return match[1] ? { artifactId: match[1] } : {}
-}
 
 export function decideDeployCommand(
   candidates: DeployCandidateRecord[],

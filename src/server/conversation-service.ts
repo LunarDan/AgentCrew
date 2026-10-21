@@ -7,15 +7,12 @@ import { and, desc, eq, gte, inArray, ne } from 'drizzle-orm'
 import { db, schema } from '@/db/client'
 import type { ConversationWithMeta, MessageRow } from '@/db/schema'
 import { MAX_MESSAGE_CHARS, PIN_LIMIT_PER_CONVERSATION } from '@/shared/constants'
+import { parseDeployCommand } from '@/shared/deploy-command'
 import type { MessagePart } from '@/shared/types'
 
 import { clearClaudeCodeSession, clearCodexSession } from './adapters/session-store'
 import { forgetConversation } from './mcp-approvals'
-import {
-  handleDeployCommand,
-  parseDeployCommand,
-  type DeployCommandResult,
-} from './deploy-command-service'
+import { handleDeployCommand, type DeployCommandResult } from './deploy-command-service'
 import { deleteDeploymentsForArtifact, deleteDeploymentsForConversation } from './deployment-service'
 import { eventBus } from './event-bus'
 import {
